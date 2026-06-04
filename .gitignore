@@ -1,0 +1,19 @@
+# dependencies
+node_modules
+
+# build output
+dist
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# compiled config artifacts (source of truth is vite.config.ts)
+vite.config.js
+vite.config.d.ts
+
+# local env / editor / OS
+*.local
+.env*
+.DS_Store
+.vscode
+.idea
