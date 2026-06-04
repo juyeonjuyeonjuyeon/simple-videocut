@@ -1,4 +1,4 @@
-# SimpleCut — 간단한 영상 편집기
+# 🐶 간단컷 — 간단한 영상 편집기
 
 캡컷 스타일의 가볍고 직관적인 웹 기반 영상 편집기입니다. 브라우저 안에서 모든
 처리가 이루어지며(서버 업로드 없음), 어떤 화면 크기에서도 쓸 수 있는 반응형
@@ -24,9 +24,23 @@ React 18 · TypeScript · Vite · Zustand(상태 관리) · ffmpeg.wasm(내보�
 ```bash
 npm install
 npm run dev     # 개발 서버 (http://localhost:5173)
-npm run build   # 프로덕션 빌드
+npm run build   # 프로덕션 빌드 (결과물: dist/)
 npm run preview # 빌드 결과 미리보기
 ```
+
+## 배포 (Cloudflare Pages)
+
+순수 정적 SPA라 어떤 정적 호스팅에도 올릴 수 있습니다. 권장 흐름(Cloudflare Pages):
+
+1. GitHub에 저장소를 푸시합니다.
+2. Cloudflare 대시보드 → **Workers & Pages → Create → Pages → Connect to Git**에서 저장소 선택.
+3. 빌드 설정:
+   - **Framework preset**: Vite (없으면 None)
+   - **Build command**: `npm run build`
+   - **Build output directory**: `dist`
+4. **Save and Deploy** → `https://<프로젝트>.pages.dev` 로 게시됩니다. 이후 `main`에 push하면 자동 재배포됩니다.
+
+> COOP/COEP 헤더가 필요 없으므로 별도 `_headers` 설정 없이 그대로 동작합니다.
 
 ## 단축키
 
@@ -52,7 +66,8 @@ src/
 
 - **내보내기**는 최초 1회 ffmpeg 코어(약 30MB)를 CDN(unpkg)에서 받습니다. 이후
   렌더링은 브라우저 안에서 진행되며, 길이·해상도에 따라 시간이 걸릴 수 있습니다.
-  (개발 서버는 `SharedArrayBuffer` 사용을 위해 COOP/COEP 헤더를 설정합니다.)
+  단일 스레드 코어를 쓰므로 `SharedArrayBuffer`(COOP/COEP 헤더)가 필요 없어,
+  헤더 설정이 불가능한 정적 호스팅(예: GitHub Pages)에서도 그대로 동작합니다.
 - **텍스트 자막**은 출력 해상도 크기의 투명 PNG로 캔버스에서 직접 렌더링한 뒤
   영상 위에 오버레이합니다. 덕분에 wasm 폰트 설정 없이도 한글이 정확히 표시됩니다.
 - 미리보기 프레임 크기는 JS로 계산해 선택한 비율에 정확히 맞추므로, 미리보기의

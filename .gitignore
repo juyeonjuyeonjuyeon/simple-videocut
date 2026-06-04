@@ -17,3 +17,7 @@ vite.config.d.ts
 .DS_Store
 .vscode
 .idea
+.claude
+
+# local test scripts
+test-*.mjs

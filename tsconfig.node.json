@@ -7,7 +7,9 @@
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "composite": true,
-    "strict": true
+    "strict": true,
+    "emitDeclarationOnly": true,
+    "outDir": "./node_modules/.tmp/vite-config"
   },
   "include": ["vite.config.ts"]
 }
