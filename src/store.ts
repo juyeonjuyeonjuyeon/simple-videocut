@@ -2,16 +2,13 @@ import { create } from 'zustand'
 import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop } from './types'
 import { NO_CROP, FONT_OPTIONS } from './types'
 import type { ProjectState } from './utils/project'
-import { probeVideo, probeImage, probeAudio, nextClipColor } from './utils/media'
+import { probeVideo, probeImage, probeAudio, nextClipColor, isVideoFile, isImageFile, isAudioFile } from './utils/media'
 import { clipTimelineDuration, clipStartOffsets, projectDuration, overlayLength, audioLength } from './utils/time'
 
 const uid = () => Math.random().toString(36).slice(2, 10)
 
 const IMAGE_NOMINAL_MAX = 3600 // images can be stretched up to this length (s)
 const DEFAULT_IMAGE_DUR = 5
-const isImage = (f: File) => f.type.startsWith('image/')
-const isVideo = (f: File) => f.type.startsWith('video/')
-const isAudio = (f: File) => f.type.startsWith('audio/')
 
 interface EditorState {
   clips: Clip[]
@@ -113,11 +110,11 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   // ---------- main track ----------
   addFiles: async (files) => {
-    const list = Array.from(files).filter((f) => isVideo(f) || isImage(f))
+    const list = Array.from(files).filter((f) => isVideoFile(f) || isImageFile(f))
     for (const file of list) {
       try {
         let clip: Clip
-        if (isImage(file)) {
+        if (isImageFile(file)) {
           const { src } = await probeImage(file)
           clip = {
             id: uid(), kind: 'image', name: file.name, src, file,
@@ -293,7 +290,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   // ---------- overlays ----------
   addOverlayFiles: async (files) => {
-    const list = Array.from(files).filter((f) => isVideo(f) || isImage(f))
+    const list = Array.from(files).filter((f) => isVideoFile(f) || isImageFile(f))
     for (const file of list) {
       try {
         const start = get().playhead
@@ -303,7 +300,7 @@ export const useEditor = create<EditorState>((set, get) => ({
           start, x: 0.5, y: 0.5, scale: 0.4, angle: 0, speed: 1, volume: 1, muted: false,
           ...TRANSFORM_DEFAULTS, repeat: 1,
         }
-        if (isImage(file)) {
+        if (isImageFile(file)) {
           const { src } = await probeImage(file)
           ov = { ...base, kind: 'image', src, duration: IMAGE_NOMINAL_MAX, trimStart: 0, trimEnd: DEFAULT_IMAGE_DUR, hasAudio: false }
         } else {
@@ -369,7 +366,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   // ---------- audio ----------
   addAudioFiles: async (files) => {
-    const list = Array.from(files).filter((f) => isAudio(f))
+    const list = Array.from(files).filter((f) => isAudioFile(f))
     for (const file of list) {
       try {
         const { duration, src } = await probeAudio(file)

@@ -11,7 +11,7 @@ import {
   formatTimeFine,
 } from '../utils/time'
 import { contrastText } from '../utils/color'
-import type { Clip } from '../types'
+import type { Clip, Selection } from '../types'
 
 const clipBg = (c: Clip) => (c.kind === 'color' ? c.bgColor ?? '#000000' : c.color)
 
@@ -25,6 +25,7 @@ const DRAG_THRESHOLD = 4
 const OV_LANE_H = 34
 const AUD_LANE_H = 30
 const TXT_LANE_H = 26
+const LONG_PRESS_MS = 520
 
 type FreeKind = 'overlay' | 'audio' | 'text' | 'background'
 
@@ -65,6 +66,12 @@ export default function Timeline() {
   const moveClipToBackground = useEditor((s) => s.moveClipToBackground)
   const moveOverlayToMain = useEditor((s) => s.moveOverlayToMain)
   const moveBackgroundToMain = useEditor((s) => s.moveBackgroundToMain)
+  const moveClip = useEditor((s) => s.moveClip)
+  const raiseOverlay = useEditor((s) => s.raiseOverlay)
+  const raiseBackground = useEditor((s) => s.raiseBackground)
+  const raiseText = useEditor((s) => s.raiseText)
+  const deleteSelected = useEditor((s) => s.deleteSelected)
+  const duplicateSelected = useEditor((s) => s.duplicateSelected)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [trackW, setTrackW] = useState(0)
@@ -75,6 +82,43 @@ export default function Timeline() {
   // Inline rename (double-click a clip/chip).
   const [editing, setEditing] = useState<{ type: 'clip' | FreeKind; id: string } | null>(null)
   const [editVal, setEditVal] = useState('')
+  const [menu, setMenu] = useState<{ target: NonNullable<Selection>; x: number; y: number } | null>(null)
+
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+    window.addEventListener('pointerdown', close)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', close)
+    }
+  }, [menu])
+
+  const openMenu = (target: NonNullable<Selection>, x: number, y: number) => {
+    setPlaying(false)
+    select(target)
+    setMenu({
+      target,
+      x: Math.max(12, Math.min(x, window.innerWidth - 242)),
+      y: Math.max(12, Math.min(y, window.innerHeight - 452)),
+    })
+  }
+
+  const onItemContextMenu = (e: React.MouseEvent, target: NonNullable<Selection>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    openMenu(target, e.clientX, e.clientY)
+  }
+
+  const withTarget = (target: NonNullable<Selection>, action: () => void) => {
+    useEditor.getState().select(target)
+    action()
+    setMenu(null)
+  }
 
   const startEdit = (type: 'clip' | FreeKind, id: string) => {
     const st = useEditor.getState()
@@ -257,10 +301,15 @@ export default function Timeline() {
     const onName = (e.target as HTMLElement).classList?.contains('clip__label') ?? false
     const wasSelected = selection?.type === 'clip' && selection.id === id
     let moved = false
+    let menuOpened = false
+    const longPress = e.pointerType === 'touch'
+      ? window.setTimeout(() => { menuOpened = true; openMenu({ type: 'clip', id }, startX, startY); navigator.vibrate?.(10) }, LONG_PRESS_MS)
+      : 0
     setPlaying(false)
     startDrag(
       (ev) => {
         if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) > DRAG_THRESHOLD) {
+          window.clearTimeout(longPress)
           moved = true
           setDragId(id)
         }
@@ -283,7 +332,9 @@ export default function Timeline() {
         reorderClip(id, target)
       },
       (ev) => {
+        window.clearTimeout(longPress)
         setDragId(null)
+        if (menuOpened) return
         if (!moved) {
           if (onName && wasSelected) startEdit('clip', id)
           else select({ type: 'clip', id })
@@ -353,9 +404,16 @@ export default function Timeline() {
     const onName = (e.target as HTMLElement).classList?.contains('tlclip__body') ?? false
     const wasSelected = selection?.type === kind && selection.id === id
     let moved = false
+    let menuOpened = false
+    const longPress = e.pointerType === 'touch'
+      ? window.setTimeout(() => { menuOpened = true; openMenu({ type: kind, id }, startX, startY); navigator.vibrate?.(10) }, LONG_PRESS_MS)
+      : 0
     startDrag(
       (ev) => {
-        if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) > DRAG_THRESHOLD) moved = true
+        if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) > DRAG_THRESHOLD) {
+          window.clearTimeout(longPress)
+          moved = true
+        }
         if (!moved) return
         // Move freely from 0; the project just grows if dragged past the end.
         const ns = Math.max(0, snap(s0 + (ev.clientX - startX) / pxPerSec, id))
@@ -365,6 +423,8 @@ export default function Timeline() {
         else updateText(id, { start: ns, end: ns + len })
       },
       (ev) => {
+        window.clearTimeout(longPress)
+        if (menuOpened) return
         if (!moved) {
           if (onName && wasSelected) startEdit(kind, id)
           else select({ type: kind, id })
@@ -489,6 +549,7 @@ export default function Timeline() {
         color: contrastText(color),
       }}
       onPointerDown={(e) => onFreeDown(e, kind, id)}
+      onContextMenu={(e) => onItemContextMenu(e, { type: kind, id })}
       onDoubleClick={() => startEdit(kind, id)}
       title={`${label} · 끌어서 이동${selected ? ', 끝을 끌어서 길이 조절' : ''} · 선택 후 이름 클릭으로 이름변경`}
     >
@@ -555,6 +616,7 @@ export default function Timeline() {
                     color: contrastText(clipBg(c)),
                   }}
                   onPointerDown={(e) => onClipDown(e, c.id)}
+                  onContextMenu={(e) => onItemContextMenu(e, { type: 'clip', id: c.id })}
                   onDoubleClick={() => startEdit('clip', c.id)}
                   title={`${c.name} · 끌어서 순서 변경, 오른쪽 끝을 끌어서 트림 · 선택 후 이름 클릭으로 이름변경`}
                 >
@@ -623,6 +685,52 @@ export default function Timeline() {
           </div>
         </div>
       </div>
+      {menu && (() => {
+        const target = menu.target
+        const st = useEditor.getState()
+        const item = target.type === 'overlay' ? st.overlays.find((x) => x.id === target.id)
+          : target.type === 'audio' ? st.audios.find((x) => x.id === target.id)
+          : target.type === 'background' ? st.backgrounds.find((x) => x.id === target.id)
+          : null
+        const canMute = target.type === 'audio'
+          || (target.type === 'overlay' && st.overlays.find((x) => x.id === target.id)?.kind === 'video')
+          || (target.type === 'background' && st.backgrounds.find((x) => x.id === target.id)?.kind === 'video')
+        const moveToPlayhead = () => {
+          const p = useEditor.getState().playhead
+          if (target.type === 'overlay') updateOverlay(target.id, { start: p })
+          else if (target.type === 'audio') updateAudio(target.id, { start: p })
+          else if (target.type === 'background') updateBackground(target.id, { start: p })
+          else if (target.type === 'text') {
+            const t = useEditor.getState().texts.find((x) => x.id === target.id)
+            if (t) updateText(target.id, { start: p, end: p + (t.end - t.start) })
+          }
+        }
+        return (
+          <div className="timeline-menu" role="menu" style={{ left: menu.x, top: menu.y }}
+            onPointerDown={(e) => e.stopPropagation()}>
+            {target.type === 'clip' && <>
+              <button role="menuitem" onClick={() => withTarget(target, () => moveClip(target.id, -1))}>← 왼쪽으로 이동</button>
+              <button role="menuitem" onClick={() => withTarget(target, () => moveClip(target.id, 1))}>오른쪽으로 이동 →</button>
+            </>}
+            {target.type !== 'clip' && <button role="menuitem" onClick={() => withTarget(target, moveToPlayhead)}>재생 헤드 위치로 이동</button>}
+            {(target.type === 'overlay' || target.type === 'background' || target.type === 'text') && <>
+              <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, 1) : target.type === 'background' ? raiseBackground(target.id, 1) : raiseText(target.id, 1))}>앞으로 가져오기</button>
+              <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, -1) : target.type === 'background' ? raiseBackground(target.id, -1) : raiseText(target.id, -1))}>뒤로 보내기</button>
+            </>}
+            {target.type === 'clip' && <>
+              <button role="menuitem" onClick={() => withTarget(target, () => moveClipToOverlay(target.id))}>오버레이로 이동</button>
+              <button role="menuitem" onClick={() => withTarget(target, () => moveClipToBackground(target.id))}>배경으로 이동</button>
+            </>}
+            {target.type === 'overlay' && <button role="menuitem" onClick={() => withTarget(target, () => moveOverlayToMain(target.id))}>메인 트랙으로 이동</button>}
+            {target.type === 'background' && <button role="menuitem" onClick={() => withTarget(target, () => moveBackgroundToMain(target.id))}>메인 트랙으로 이동</button>}
+            {canMute &&
+              <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'audio' ? updateAudio(target.id, { muted: !item?.muted }) : target.type === 'overlay' ? updateOverlay(target.id, { muted: !item?.muted }) : updateBackground(target.id, { muted: !item?.muted }))}>{item?.muted ? '음소거 해제' : '음소거'}</button>}
+            <button role="menuitem" onClick={() => withTarget(target, duplicateSelected)}>⧉ 복제</button>
+            <div className="timeline-menu__separator" />
+            <button role="menuitem" className="timeline-menu__danger" onClick={() => withTarget(target, deleteSelected)}>삭제</button>
+          </div>
+        )
+      })()}
     </div>
   )
 }
