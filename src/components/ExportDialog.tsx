@@ -4,6 +4,7 @@ import { exportVideo } from '../ffmpeg/exporter'
 import { projectDuration, formatTime } from '../utils/time'
 import { saveBlob, keepAwake } from '../utils/io'
 import type { ExportHeight } from '../types'
+import Icon from './Icon'
 
 const RESOLUTIONS: { h: ExportHeight; label: string }[] = [
   { h: 480, label: '480p' },
@@ -96,15 +97,15 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
           setProgress(r)
           setStatus(`렌더링 중… ${Math.round(r * 100)}%`)
         },
-        onLog: (line) => {
-          if (line.includes('frame=')) setStatus(line.trim().slice(0, 60))
-        },
+        onLog: (line) => { if (/error|failed/i.test(line)) console.warn(line) },
       })
+      setProgress(0.98)
       setStatus('파일 재생 가능 여부 확인 중…')
       await validateVideoBlob(out)
       setBlob(out)
       setUrl(URL.createObjectURL(out))
       setPhase('done')
+      setProgress(1)
       setStatus(`완료! 크기 ${(out.size / 1024 / 1024).toFixed(1)} MB`)
     } catch (e) {
       console.error(e)
@@ -130,7 +131,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
       <div className="modal__panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
           <h2>영상 내보내기</h2>
-          {phase !== 'running' && <button className="iconbtn" onClick={onClose} aria-label="닫기">✕</button>}
+          {phase !== 'running' && <button className="iconbtn" onClick={onClose} aria-label="닫기"><Icon name="close" /></button>}
         </div>
 
         <div className="modal__row"><span>화면 비율</span><b>{aspectRatio}</b></div>
@@ -164,7 +165,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
             ))}
           </div>
           {exportSettings.height >= 1440 && (
-            <div className="modal__hint">⚠️ 고해상도는 브라우저에서 렌더링이 오래 걸릴 수 있어요.</div>
+            <div className="modal__hint"><Icon name="warning" />고해상도는 브라우저에서 렌더링이 오래 걸릴 수 있어요.</div>
           )}
         </div>
 
@@ -172,13 +173,13 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
 
         {phase === 'running' && (
           <div className="progress">
-            <div className="progress__bar"><div className="progress__fill" style={{ width: `${Math.round(progress * 100)}%` }} /></div>
+            <div className={`progress__bar${progress === 0 ? ' progress__bar--indeterminate' : ''}`}><div className="progress__fill" style={{ width: `${Math.round(progress * 100)}%` }} /></div>
             <div className="progress__status">{status}</div>
-            <div className="modal__hint">📵 변환 중 화면이 꺼지지 않도록 유지합니다(지원 기기). 탭을 닫지 마세요.</div>
+            <div className="modal__hint"><Icon name="screen" />변환 중 화면이 꺼지지 않도록 유지합니다(지원 기기). 탭을 닫지 마세요.</div>
           </div>
         )}
 
-        {phase === 'error' && <div className="modal__error">⚠️ {error}</div>}
+        {phase === 'error' && <div className="modal__error"><Icon name="warning" />{error}</div>}
 
         {phase === 'done' && url && (
           <div className="modal__done">
@@ -194,7 +195,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
           {phase === 'running' && <button className="btn btn--lg" disabled>처리 중…</button>}
           {phase === 'error' && <button className="btn btn--primary btn--lg" onClick={run}>다시 시도</button>}
           {phase === 'done' && (
-            <button className="btn btn--primary btn--lg" onClick={save}>⬇ 저장하기</button>
+            <button className="btn btn--primary btn--lg" onClick={save}><Icon name="download" />저장하기</button>
           )}
         </div>
       </div>
