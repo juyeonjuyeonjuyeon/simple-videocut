@@ -4,10 +4,9 @@ import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, Cr
 import { aspectToWH, projectDuration, overlayLength, audioLength, clipTimelineDuration } from '../utils/time'
 import { hexToRgba } from '../utils/color'
 
-// Use the ESM core: @ffmpeg/ffmpeg 0.12 runs its worker as a module worker,
-// where `importScripts` is unavailable, so it falls back to `import()` — which
-// requires an ES module, not the UMD build.
-const CORE_BASE = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm'
+// Keep the encoding engine on the same origin. Exports must not depend on a
+// third-party CDN being reachable after the editor itself has loaded.
+const coreAsset = (name: string) => new URL(`${import.meta.env.BASE_URL}ffmpeg/${name}`, window.location.origin).href
 
 let ffmpeg: FFmpeg | null = null
 let logBuffer: string[] = []
@@ -22,8 +21,8 @@ async function getFFmpeg(onLog?: (line: string) => void): Promise<FFmpeg> {
     externalLog?.(message)
   })
   await instance.load({
-    coreURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, 'text/javascript'),
-    wasmURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, 'application/wasm'),
+    coreURL: await toBlobURL(coreAsset('ffmpeg-core.js'), 'text/javascript'),
+    wasmURL: await toBlobURL(coreAsset('ffmpeg-core.wasm'), 'application/wasm'),
   })
   ffmpeg = instance
   return instance
@@ -189,13 +188,18 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
   }
   fp.on('progress', onProg)
   const outName = `out.${format}`
+  let resetEngine = false
 
   try {
+    // A tab suspension can leave an old virtual output behind. Always remove
+    // it and also pass -y so FFmpeg never waits for an overwrite prompt.
+    await fp.deleteFile(outName).catch(() => {})
     // 1. Write each unique clip file once and probe it for an audio track.
     //    (Color clips have no file — they become a lavfi color source.)
     const audioFlags: boolean[] = []
     for (let i = 0; i < clips.length; i++) {
       if (clips[i].kind === 'color') { audioFlags.push(false); continue }
+      if (!clips[i].file.size) throw new Error(`원본 영상 파일이 비어 있습니다: ${clips[i].name}`)
       await fp.writeFile(`in${i}`, await fetchFile(clips[i].file))
       audioFlags.push(await hasAudioStream(fp, `in${i}`))
     }
@@ -215,6 +219,7 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
     // 2b. Write free-track media once and remember which video layers carry audio.
     const overlayAudioFlags: boolean[] = []
     for (let k = 0; k < overlays.length; k++) {
+      if (!overlays[k].file.size) throw new Error(`원본 오버레이 파일이 비어 있습니다: ${overlays[k].name}`)
       await fp.writeFile(`ov${k}`, await fetchFile(overlays[k].file))
       overlayAudioFlags.push(overlays[k].kind === 'video' && await hasAudioStream(fp, `ov${k}`))
     }
@@ -222,15 +227,17 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
     for (let k = 0; k < backgrounds.length; k++) {
       const b = backgrounds[k]
       if (b.kind === 'color') { backgroundAudioFlags.push(false); continue }
+      if (!b.file.size) throw new Error(`원본 배경 파일이 비어 있습니다: ${b.name}`)
       await fp.writeFile(`bg${k}`, await fetchFile(b.file))
       backgroundAudioFlags.push(b.kind === 'video' && await hasAudioStream(fp, `bg${k}`))
     }
     for (let k = 0; k < audios.length; k++) {
+      if (!audios[k].file.size) throw new Error(`원본 음성 파일이 비어 있습니다: ${audios[k].name}`)
       await fp.writeFile(`audio${k}`, await fetchFile(audios[k].file))
     }
 
     // 3. Assemble inputs. Color segments add no -i; track each segment's input index.
-    const args: string[] = []
+    const args: string[] = ['-y']
     const inputIdxOf: number[] = []
     let inputCount = 0
     expanded.forEach((e) => {
@@ -422,7 +429,10 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
 
     const exitCode = await fp.exec(args)
     if (exitCode !== 0) {
-      throw new Error(`영상 변환에 실패했습니다. (FFmpeg 종료 코드 ${exitCode})`)
+      resetEngine = true
+      const useful = logBuffer.filter((line) => /error|invalid|failed|unable|not found|no such|unsupported|cannot/i.test(line))
+      const detail = (useful.length ? useful : logBuffer).slice(-8).join('\n')
+      throw new Error(`영상 변환에 실패했습니다. (FFmpeg 종료 코드 ${exitCode})${detail ? `\n${detail}` : ''}`)
     }
     const data = await fp.readFile(outName)
     // Copy into a fresh ArrayBuffer-backed array (readFile may be SharedArrayBuffer-backed).
@@ -437,6 +447,10 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
     return new Blob([bytes], { type: format === 'webm' ? 'video/webm' : 'video/mp4' })
   } catch (error) {
     await cleanup(fp, outName, clips.length, texts.length, overlays.length, backgrounds.length, audios.length)
+    if (resetEngine) {
+      fp.terminate()
+      ffmpeg = null
+    }
     throw error
   } finally {
     fp.off('progress', onProg)
