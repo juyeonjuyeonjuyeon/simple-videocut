@@ -14,6 +14,11 @@
 - **속도 조절** — 0.25× ~ 4× 배속/슬로우 (오디오 피치 보정 포함)
 - **화면 비율** — 16:9 / 9:16 / 1:1
 - **내보내기** — `ffmpeg.wasm`으로 실제 MP4(H.264/AAC) 렌더링, 해상도 480p/720p/1080p 선택
+- **완전한 트랙 합성** — 배경·오버레이 화면과 소리·음악까지 결과물에 포함
+- **실행 취소 / 다시 실행** — 버튼 또는 `⌘/Ctrl+Z`, `⌘/Ctrl+Shift+Z`
+- **자동 저장과 복원** — 저장 상태 표시 및 작업 복구
+- **기기 간 이동** — `.scut` 프로젝트 파일 저장·불러오기·모바일 공유
+- **설치형 웹앱(PWA)** — 홈 화면에 설치하고 앱처럼 실행
 
 ## 기술 스택
 
@@ -26,21 +31,17 @@ npm install
 npm run dev     # 개발 서버 (http://localhost:5173)
 npm run build   # 프로덕션 빌드 (결과물: dist/)
 npm run preview # 빌드 결과 미리보기
+npm run check   # 코드 검사 + 단위 테스트 + 프로덕션 빌드
+npm run test:e2e # 모바일·태블릿·노트북 반응형 브라우저 테스트
 ```
 
-## 배포 (Cloudflare Pages)
+## 배포 (GitHub Pages)
 
-순수 정적 SPA라 어떤 정적 호스팅에도 올릴 수 있습니다. 권장 흐름(Cloudflare Pages):
+이 저장소는 `main` 브랜치가 갱신될 때 GitHub Actions로 자동 빌드·배포됩니다.
 
-1. GitHub에 저장소를 푸시합니다.
-2. Cloudflare 대시보드 → **Workers & Pages → Create → Pages → Connect to Git**에서 저장소 선택.
-3. 빌드 설정:
-   - **Framework preset**: Vite (없으면 None)
-   - **Build command**: `npm run build`
-   - **Build output directory**: `dist`
-4. **Save and Deploy** → `https://<프로젝트>.pages.dev` 로 게시됩니다. 이후 `main`에 push하면 자동 재배포됩니다.
+공개 주소: `https://juyeonjuyeonjuyeon.github.io/simple-videocut/`
 
-> COOP/COEP 헤더가 필요 없으므로 별도 `_headers` 설정 없이 그대로 동작합니다.
+GitHub 저장소의 **Settings → Pages → Build and deployment → Source**는 `GitHub Actions`로 설정합니다.
 
 ## 단축키
 
@@ -49,6 +50,8 @@ npm run preview # 빌드 결과 미리보기
 | `Space` | 재생 / 일시정지 |
 | `S` | 플레이헤드에서 분할 |
 | `Delete` / `Backspace` | 선택 항목 삭제 |
+| `⌘/Ctrl+Z` | 실행 취소 |
+| `⌘/Ctrl+Shift+Z` | 다시 실행 |
 | `←` / `→` | 플레이헤드 0.1초 이동 |
 
 ## 구조

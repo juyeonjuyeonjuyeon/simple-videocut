@@ -71,7 +71,14 @@ interface EditorState {
   deleteSelected: () => void
   duplicateSelected: () => void
   replaceProject: (p: ProjectState) => void
+  canUndo: boolean
+  canRedo: boolean
+  undo: () => void
+  redo: () => void
 }
+
+type MediaState = Pick<EditorState, 'clips' | 'overlays' | 'audios' | 'backgrounds'>
+const mediaItems = (s: MediaState) => [...s.clips, ...s.overlays, ...s.audios, ...s.backgrounds]
 
 const clampTrim = (c: { trimStart: number; trimEnd: number; duration: number }) => {
   c.trimStart = Math.max(0, Math.min(c.trimStart, c.duration - 0.1))
@@ -99,6 +106,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   isPlaying: false,
   loop: false,
   exportSettings: { height: 720, format: 'mp4', filename: 'simplecut' },
+  canUndo: false,
+  canRedo: false,
+  undo: () => undoEditor(),
+  redo: () => redoEditor(),
 
   // ---------- main track ----------
   addFiles: async (files) => {
@@ -134,11 +145,12 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
   },
 
-  removeClip: (id) =>
+  removeClip: (id) => {
     set((s) => ({
       clips: s.clips.filter((c) => c.id !== id),
       selection: s.selection?.type === 'clip' && s.selection.id === id ? null : s.selection,
-    })),
+    }))
+  },
 
   updateClip: (id, patch) =>
     set((s) => ({
@@ -249,11 +261,12 @@ export const useEditor = create<EditorState>((set, get) => ({
       }),
     })),
 
-  removeBackground: (id) =>
+  removeBackground: (id) => {
     set((s) => ({
       backgrounds: s.backgrounds.filter((b) => b.id !== id),
       selection: s.selection?.type === 'background' && s.selection.id === id ? null : s.selection,
-    })),
+    }))
+  },
 
   raiseBackground: (id, dir) =>
     set((s) => {
@@ -323,11 +336,12 @@ export const useEditor = create<EditorState>((set, get) => ({
       }),
     })),
 
-  removeOverlay: (id) =>
+  removeOverlay: (id) => {
     set((s) => ({
       overlays: s.overlays.filter((o) => o.id !== id),
       selection: s.selection?.type === 'overlay' && s.selection.id === id ? null : s.selection,
-    })),
+    }))
+  },
 
   raiseOverlay: (id, dir) =>
     set((s) => {
@@ -385,11 +399,12 @@ export const useEditor = create<EditorState>((set, get) => ({
       }),
     })),
 
-  removeAudio: (id) =>
+  removeAudio: (id) => {
     set((s) => ({
       audios: s.audios.filter((a) => a.id !== id),
       selection: s.selection?.type === 'audio' && s.selection.id === id ? null : s.selection,
-    })),
+    }))
+  },
 
   // ---------- text ----------
   addText: () => {
@@ -488,7 +503,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
   },
 
-  replaceProject: (p) =>
+  replaceProject: (p) => {
     set({
       clips: p.clips,
       // Backfill fields added in newer versions so older saves stay valid.
@@ -497,5 +512,74 @@ export const useEditor = create<EditorState>((set, get) => ({
       texts: p.texts.map((t) => ({ ...t, angle: t.angle ?? 0 })),
       aspectRatio: p.aspectRatio, exportSettings: p.exportSettings,
       selection: null, playhead: 0, isPlaying: false,
-    }),
+    })
+  },
 }))
+
+type EditorSnapshot = Pick<EditorState,
+  'clips' | 'overlays' | 'audios' | 'texts' | 'backgrounds' | 'aspectRatio' | 'exportSettings'>
+
+const takeSnapshot = (s: EditorState): EditorSnapshot => ({
+  clips: s.clips, overlays: s.overlays, audios: s.audios, texts: s.texts,
+  backgrounds: s.backgrounds, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
+})
+
+const past: EditorSnapshot[] = []
+let future: EditorSnapshot[] = []
+let applyingHistory = false
+let lastHistoryKey = ''
+let lastHistoryAt = 0
+
+const historyKey = (a: EditorState, b: EditorState) => {
+  if (a.clips !== b.clips) return 'clips'
+  if (a.overlays !== b.overlays) return 'overlays'
+  if (a.audios !== b.audios) return 'audios'
+  if (a.texts !== b.texts) return 'texts'
+  if (a.backgrounds !== b.backgrounds) return 'backgrounds'
+  if (a.aspectRatio !== b.aspectRatio) return 'aspectRatio'
+  if (a.exportSettings !== b.exportSettings) return 'exportSettings'
+  return ''
+}
+
+const releaseSnapshotMedia = (candidate: EditorSnapshot) => {
+  const live = new Set<string>()
+  const collect = (s: MediaState) => mediaItems(s).forEach((x) => { if (x.src) live.add(x.src) })
+  collect(useEditor.getState())
+  past.forEach(collect)
+  future.forEach(collect)
+  for (const item of mediaItems(candidate)) if (item.src && !live.has(item.src)) URL.revokeObjectURL(item.src)
+}
+
+function undoEditor() {
+  const target = past.pop()
+  if (!target) return
+  future.push(takeSnapshot(useEditor.getState()))
+  applyingHistory = true
+  useEditor.setState({ ...target, selection: null, isPlaying: false, canUndo: past.length > 0, canRedo: true })
+  applyingHistory = false
+}
+
+function redoEditor() {
+  const target = future.pop()
+  if (!target) return
+  past.push(takeSnapshot(useEditor.getState()))
+  applyingHistory = true
+  useEditor.setState({ ...target, selection: null, isPlaying: false, canUndo: true, canRedo: future.length > 0 })
+  applyingHistory = false
+}
+
+useEditor.subscribe((state, previous) => {
+  if (applyingHistory) return
+  const key = historyKey(state, previous)
+  if (!key) return
+  const now = Date.now()
+  if (key !== lastHistoryKey || now - lastHistoryAt > 450) past.push(takeSnapshot(previous))
+  lastHistoryKey = key
+  lastHistoryAt = now
+  future = []
+  if (past.length > 50) {
+    const dropped = past.shift()
+    if (dropped) releaseSnapshotMedia(dropped)
+  }
+  if (!state.canUndo || state.canRedo) useEditor.setState({ canUndo: true, canRedo: false })
+})

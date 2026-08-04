@@ -64,7 +64,8 @@ export default function Preview() {
   const selOverlayId = selection?.type === 'overlay' ? selection.id : null
 
   // Leave crop mode when the selection changes.
-  useEffect(() => { setCropMode(false) }, [selection?.type, selection && 'id' in selection ? selection.id : null])
+  const selectionKey = selection ? `${selection.type}:${selection.id}` : ''
+  useEffect(() => { setCropMode(false) }, [selectionKey])
 
   // ---- interactive crop / pan (works for the main clip and PiP overlays) ----
   type CropKind = 'clip' | 'overlay'

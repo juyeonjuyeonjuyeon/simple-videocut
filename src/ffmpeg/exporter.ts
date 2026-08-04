@@ -1,7 +1,7 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
-import type { Clip, Overlay, TextOverlay, AspectRatio, Crop, Rotation } from '../types'
-import { aspectToWH } from '../utils/time'
+import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, Crop, Rotation } from '../types'
+import { aspectToWH, projectDuration, overlayLength, audioLength, clipTimelineDuration } from '../utils/time'
 import { hexToRgba } from '../utils/color'
 
 // Use the ESM core: @ffmpeg/ffmpeg 0.12 runs its worker as a module worker,
@@ -158,6 +158,8 @@ export interface ExportOptions {
   clips: Clip[]
   texts: TextOverlay[]
   overlays?: Overlay[]
+  audios?: AudioClip[]
+  backgrounds?: Background[]
   aspect: AspectRatio
   height: number
   format?: 'mp4' | 'webm'
@@ -165,26 +167,28 @@ export interface ExportOptions {
   onLog?: (line: string) => void
 }
 
-/** Export timeline length of an overlay (image repeats statically; video plays once). */
+/** Export timeline length of an overlay. */
 function ovLen(o: Overlay): number {
-  return o.kind === 'image'
-    ? (o.trimEnd - o.trimStart) * Math.max(1, o.repeat)
-    : (o.trimEnd - o.trimStart) / o.speed
+  return overlayLength(o)
 }
 
 export async function exportVideo(opts: ExportOptions): Promise<Blob> {
   const { clips, texts, aspect, height, onProgress, onLog } = opts
   const overlays = (opts.overlays ?? []).filter((o) => o.kind === 'video' || o.kind === 'image')
+  const audios = opts.audios ?? []
+  const backgrounds = opts.backgrounds ?? []
   const format = opts.format ?? 'mp4'
   if (clips.length === 0) throw new Error('내보낼 클립이 없습니다.')
 
   const fp = await getFFmpeg(onLog)
   const { w: W, h: H } = aspectToWH(aspect, height)
+  const duration = projectDuration(clips, overlays, audios, texts, backgrounds)
 
   const onProg = ({ progress }: { progress: number }) => {
     if (onProgress && isFinite(progress)) onProgress(Math.max(0, Math.min(progress, 1)))
   }
   fp.on('progress', onProg)
+  const outName = `out.${format}`
 
   try {
     // 1. Write each unique clip file once and probe it for an audio track.
@@ -208,9 +212,21 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
       await fp.writeFile(`text${k}.png`, await renderTextPng(texts[k], W, H))
     }
 
-    // 2b. Write overlay (PiP) files (visual compositing only; audio is a follow-up).
+    // 2b. Write free-track media once and remember which video layers carry audio.
+    const overlayAudioFlags: boolean[] = []
     for (let k = 0; k < overlays.length; k++) {
       await fp.writeFile(`ov${k}`, await fetchFile(overlays[k].file))
+      overlayAudioFlags.push(overlays[k].kind === 'video' && await hasAudioStream(fp, `ov${k}`))
+    }
+    const backgroundAudioFlags: boolean[] = []
+    for (let k = 0; k < backgrounds.length; k++) {
+      const b = backgrounds[k]
+      if (b.kind === 'color') { backgroundAudioFlags.push(false); continue }
+      await fp.writeFile(`bg${k}`, await fetchFile(b.file))
+      backgroundAudioFlags.push(b.kind === 'video' && await hasAudioStream(fp, `bg${k}`))
+    }
+    for (let k = 0; k < audios.length; k++) {
+      await fp.writeFile(`audio${k}`, await fetchFile(audios[k].file))
     }
 
     // 3. Assemble inputs. Color segments add no -i; track each segment's input index.
@@ -229,9 +245,24 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
       args.push('-loop', '1', '-i', `text${k}.png`)
     })
     const ovBase = inputCount + texts.length
-    overlays.forEach((o) => {
-      if (o.kind === 'image') args.push('-loop', '1', '-t', String(ovLen(o)), '-i', `ov${overlays.indexOf(o)}`)
-      else args.push('-ss', String(o.trimStart), '-t', String(o.trimEnd - o.trimStart), '-i', `ov${overlays.indexOf(o)}`)
+    overlays.forEach((o, k) => {
+      if (o.kind === 'image') args.push('-loop', '1', '-t', String(ovLen(o)), '-i', `ov${k}`)
+      else args.push('-stream_loop', String(Math.max(0, o.repeat - 1)), '-ss', String(o.trimStart), '-t', String((o.trimEnd - o.trimStart) * Math.max(1, o.repeat)), '-i', `ov${k}`)
+    })
+    const bgBase = ovBase + overlays.length
+    const bgInputIdx: number[] = []
+    let freeInputCount = bgBase
+    backgrounds.forEach((b, k) => {
+      if (b.kind === 'color') { bgInputIdx.push(-1); return }
+      const sourceDuration = (b.trimEnd - b.trimStart) * Math.max(1, b.repeat)
+      if (b.kind === 'image') args.push('-loop', '1', '-t', String(clipTimelineDuration(b)), '-i', `bg${k}`)
+      else args.push('-stream_loop', String(Math.max(0, b.repeat - 1)), '-ss', String(b.trimStart), '-t', String(sourceDuration), '-i', `bg${k}`)
+      bgInputIdx.push(freeInputCount++)
+    })
+    const audioBase = freeInputCount
+    audios.forEach((a, k) => {
+      args.push('-stream_loop', String(Math.max(0, a.repeat - 1)), '-ss', String(a.trimStart), '-t', String(audioLength(a)), '-i', `audio${k}`)
+      freeInputCount++
     })
 
     // 4. Build the filter graph (one v/a pair per expanded segment).
@@ -242,7 +273,7 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
       const segDur = (c.trimEnd - c.trimStart) / sp
       if (c.kind === 'color') {
         const hex = (c.bgColor || '#000000').replace('#', '0x')
-        filters.push(`color=c=${hex}:s=${W}x${H}:r=30:d=${segDur.toFixed(3)},setsar=1,format=yuv420p[v${p}]`)
+        filters.push(`color=c=${hex}:s=${W}x${H}:r=30:d=${segDur.toFixed(3)},setsar=1,format=rgba[v${p}]`)
       } else {
         // Cropped clips fill the frame (cover) like the preview; uncropped clips
         // keep their aspect with letterbox padding so no content is lost.
@@ -250,9 +281,9 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
         const cropped = cr.top || cr.right || cr.bottom || cr.left
         const fit = cropped
           ? `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}`
-          : `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2`
+          : `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
         filters.push(
-          `[${inputIdxOf[p]}:v]setpts=PTS/${sp},${spatialFilters(c)}${fit},setsar=1,fps=30,format=yuv420p[v${p}]`,
+          `[${inputIdxOf[p]}:v]setpts=PTS/${sp},${spatialFilters(c)}${fit},setsar=1,fps=30,format=rgba[v${p}]`,
         )
       }
 
@@ -274,9 +305,33 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
     const concatInputs = expanded.map((_, p) => `[v${p}][a${p}]`).join('')
     filters.push(`${concatInputs}concat=n=${expanded.length}:v=1:a=1[cv][ca]`)
 
+    // Build a true background canvas, then place the main track on top. Main
+    // letterboxing is transparent so the background remains visible.
+    filters.push(`color=c=black:s=${W}x${H}:r=30:d=${duration.toFixed(3)},format=rgba[bgbase]`)
+    let lastBg = '[bgbase]'
+    backgrounds.forEach((b, k) => {
+      const len = clipTimelineDuration(b)
+      const shift = b.start
+      const out = `[bgo${k}]`
+      if (b.kind === 'color') {
+        const color = (b.bgColor || '#000000').replace('#', '0x')
+        filters.push(`color=c=${color}:s=${W}x${H}:r=30:d=${len.toFixed(3)},format=rgba,setpts=PTS+${shift.toFixed(3)}/TB[bgv${k}]`)
+      } else {
+        const speedF = b.kind === 'video' ? `setpts=PTS/${b.speed},` : ''
+        filters.push(
+          `[${bgInputIdx[k]}:v]${speedF}${spatialFilters(b)}` +
+          `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},format=rgba,` +
+          `tpad=start_duration=${shift.toFixed(3)}:start_mode=add:color=0x00000000[bgv${k}]`,
+        )
+      }
+      filters.push(`${lastBg}[bgv${k}]overlay=0:0:eof_action=pass:enable='between(t,${shift.toFixed(3)},${(shift + len).toFixed(3)})'${out}`)
+      lastBg = out
+    })
+    filters.push(`${lastBg}[cv]overlay=0:0:eof_action=pass[mainv]`)
+
     // Composite PiP overlays (video/image) onto the running video, shifting
     // each to its timeline start and scaling/positioning per x/y/scale.
-    let lastV = '[cv]'
+    let lastV = '[mainv]'
     overlays.forEach((o, k) => {
       const ovIdx = ovBase + k
       const len = ovLen(o)
@@ -314,9 +369,45 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
       lastV = out
     })
 
+    // Mix the main-track audio with timed overlay, background and music tracks.
+    const mixInputs: string[] = []
+    filters.push(`[ca]apad=whole_dur=${duration.toFixed(3)},atrim=0:${duration.toFixed(3)}[amain]`)
+    mixInputs.push('[amain]')
+    overlays.forEach((o, k) => {
+      if (!overlayAudioFlags[k] || o.muted || o.volume <= 0 || o.kind !== 'video') return
+      const label = `aov${k}`
+      filters.push(
+        `[${ovBase + k}:a]${buildAtempo(o.speed)}volume=${o.volume},aresample=44100,` +
+        `aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${Math.round(o.start * 1000)}:all=1,` +
+        `apad=whole_dur=${duration.toFixed(3)},atrim=0:${duration.toFixed(3)}[${label}]`,
+      )
+      mixInputs.push(`[${label}]`)
+    })
+    backgrounds.forEach((b, k) => {
+      if (!backgroundAudioFlags[k] || b.muted || b.volume <= 0 || b.kind !== 'video') return
+      const label = `abg${k}`
+      filters.push(
+        `[${bgInputIdx[k]}:a]${buildAtempo(b.speed)}volume=${b.volume},aresample=44100,` +
+        `aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${Math.round(b.start * 1000)}:all=1,` +
+        `apad=whole_dur=${duration.toFixed(3)},atrim=0:${duration.toFixed(3)}[${label}]`,
+      )
+      mixInputs.push(`[${label}]`)
+    })
+    audios.forEach((a, k) => {
+      if (a.muted || a.volume <= 0) return
+      const label = `amusic${k}`
+      filters.push(
+        `[${audioBase + k}:a]volume=${a.volume},aresample=44100,` +
+        `aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${Math.round(a.start * 1000)}:all=1,` +
+        `apad=whole_dur=${duration.toFixed(3)},atrim=0:${duration.toFixed(3)}[${label}]`,
+      )
+      mixInputs.push(`[${label}]`)
+    })
+    if (mixInputs.length === 1) filters.push(`${mixInputs[0]}anull[finala]`)
+    else filters.push(`${mixInputs.join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=0,atrim=0:${duration.toFixed(3)}[finala]`)
+
     args.push('-filter_complex', filters.join(';'))
-    args.push('-map', lastV, '-map', '[ca]')
-    const outName = `out.${format}`
+    args.push('-map', lastV, '-map', '[finala]', '-t', duration.toFixed(3))
     if (format === 'webm') {
       args.push(
         '-c:v', 'libvpx', '-b:v', '1.5M', '-crf', '12', '-pix_fmt', 'yuv420p',
@@ -335,18 +426,23 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
     const bytes = new Uint8Array(data as Uint8Array)
 
     // 5. Clean up the virtual filesystem for the next run.
-    await cleanup(fp, outName, clips.length, texts.length, overlays.length)
+    await cleanup(fp, outName, clips.length, texts.length, overlays.length, backgrounds.length, audios.length)
 
     return new Blob([bytes], { type: format === 'webm' ? 'video/webm' : 'video/mp4' })
+  } catch (error) {
+    await cleanup(fp, outName, clips.length, texts.length, overlays.length, backgrounds.length, audios.length)
+    throw error
   } finally {
     fp.off('progress', onProg)
   }
 }
 
-async function cleanup(fp: FFmpeg, outName: string, nClips: number, nTexts: number, nOv: number) {
+async function cleanup(fp: FFmpeg, outName: string, nClips: number, nTexts: number, nOv: number, nBg: number, nAudio: number) {
   const names = [outName]
   for (let i = 0; i < nClips; i++) names.push(`in${i}`)
   for (let k = 0; k < nTexts; k++) names.push(`text${k}.png`)
   for (let k = 0; k < nOv; k++) names.push(`ov${k}`)
+  for (let k = 0; k < nBg; k++) names.push(`bg${k}`)
+  for (let k = 0; k < nAudio; k++) names.push(`audio${k}`)
   for (const n of names) await fp.deleteFile(n).catch(() => {})
 }
