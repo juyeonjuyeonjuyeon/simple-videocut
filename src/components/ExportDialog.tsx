@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useEditor } from '../store'
 import { exportVideo } from '../ffmpeg/exporter'
-import { totalDuration, formatTime } from '../utils/time'
+import { projectDuration, formatTime } from '../utils/time'
 import { saveBlob, keepAwake } from '../utils/io'
 import type { ExportHeight } from '../types'
 
@@ -34,10 +34,13 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
   const [blob, setBlob] = useState<Blob | null>(null)
   const [error, setError] = useState('')
 
-  const duration = totalDuration(clips)
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
+
+  const duration = projectDuration(clips, overlays, audios, texts, backgrounds)
   const fullName = `${exportSettings.filename || 'simplecut'}.${exportSettings.format}`
 
   const run = async () => {
+    if (url) { URL.revokeObjectURL(url); setUrl(null) }
     setPhase('running')
     setProgress(0)
     setStatus('엔진 로딩 중… (최초 1회는 시간이 걸립니다)')
@@ -48,6 +51,8 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
         clips,
         texts,
         overlays,
+        audios,
+        backgrounds,
         aspect: aspectRatio,
         height: exportSettings.height,
         format: exportSettings.format,
@@ -125,12 +130,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        {(overlays.length > 0 || audios.length > 0 || backgrounds.length > 0) && (
-          <div className="modal__note">
-            ℹ️ 메인 영상·사진, 텍스트 자막, <b>오버레이(PiP) 화면</b>이 합성됩니다.
-            {overlays.length > 0 ? ' 오버레이의 소리,' : ''} 배경 레이어{audios.length > 0 ? '·음악' : ''}은 아직 결과물에 포함되지 않습니다(미리보기 전용).
-          </div>
-        )}
+        <div className="modal__note">메인 트랙과 자막, 오버레이, 배경, 음악이 모두 결과물에 합성됩니다.</div>
 
         {phase === 'running' && (
           <div className="progress">

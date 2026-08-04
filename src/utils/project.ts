@@ -163,9 +163,32 @@ export async function projectToFileBlob(name: string, s: ProjectState): Promise<
   return new Blob([JSON.stringify({ ...p, media })], { type: 'application/json' })
 }
 export async function fileBlobToProject(file: File): Promise<ProjectState> {
-  const json = JSON.parse(await file.text())
+  if (file.size > 1024 * 1024 * 1024) throw new Error('프로젝트 파일은 1GB 이하만 열 수 있습니다.')
+  const json: unknown = JSON.parse(await file.text())
+  assertPortableProject(json)
   const media: MediaBlob[] = (json.media || []).map((m: { id: string; name: string; type: string; data: string }) => ({
     id: m.id, name: m.name, type: m.type, blob: base64ToBlob(m.data, m.type),
   }))
   return deserialize({ ...json, media })
+}
+
+type PortableProject = Omit<SerializedProject, 'media'> & {
+  media: { id: string; name: string; type: string; data: string }[]
+}
+
+function assertPortableProject(value: unknown): asserts value is PortableProject {
+  if (!value || typeof value !== 'object') throw new Error('올바른 간단컷 프로젝트가 아닙니다.')
+  const p = value as Record<string, unknown>
+  if (p.version !== 1) throw new Error('지원하지 않는 프로젝트 버전입니다.')
+  if (!['16:9', '9:16', '1:1'].includes(String(p.aspectRatio))) throw new Error('화면 비율 정보가 잘못되었습니다.')
+  for (const key of ['clips', 'overlays', 'audios', 'backgrounds', 'texts', 'media']) {
+    if (!Array.isArray(p[key])) throw new Error(`프로젝트의 ${key} 항목이 잘못되었습니다.`)
+  }
+  for (const media of p.media as unknown[]) {
+    if (!media || typeof media !== 'object') throw new Error('미디어 정보가 잘못되었습니다.')
+    const m = media as Record<string, unknown>
+    if (typeof m.id !== 'string' || typeof m.name !== 'string' || typeof m.type !== 'string' || typeof m.data !== 'string') {
+      throw new Error('미디어 정보가 불완전합니다.')
+    }
+  }
 }

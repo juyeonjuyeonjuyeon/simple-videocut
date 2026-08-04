@@ -58,6 +58,8 @@ button, input, textarea { font-family: inherit; }
 .topbar__logo { font-size: 18px; }
 .topbar__name { letter-spacing: 0.2px; }
 .topbar__actions { display: flex; gap: 8px; }
+.save-status { align-self: center; min-width: 52px; font-size: 12px; color: var(--text-dim); text-align: right; }
+.save-status--error { color: var(--danger); font-weight: 700; }
 
 /* ---------- Stage (preview + inspector) ---------- */
 .stage {
@@ -1032,16 +1034,37 @@ input[type='range']:disabled { opacity: 0.4; }
     max-height: 42dvh;
   }
   .preview__frame { max-width: min(100%, 42vh * 16 / 9); }
+  .transport {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    padding: 2px 2px 6px;
+    margin: 0 -2px;
+  }
+  .transport::-webkit-scrollbar { display: none; }
+  .transport__spacer { display: none; }
+  .transport > button { flex: 0 0 auto; min-height: 44px; }
+  .transport__time { flex: 0 0 auto; }
+  .timeline__bar button, .timeline__bar .iconbtn { min-width: 40px; min-height: 40px; }
+  .step { width: 44px; height: 40px; }
+  .num--step, .num--time { height: 40px; }
+  .inspector { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
 }
 
 @media (max-width: 520px) {
   :root { --topbar-h: 52px; --timeline-h: 178px; }
   .topbar { padding: 0 10px; }
   .topbar__name { display: none; }
+  .topbar__add-label, .save-status--idle { display: none; }
+  .save-status { min-width: auto; max-width: 54px; overflow: hidden; white-space: nowrap; }
+  .topbar__actions { gap: 6px; }
   .stage__preview { padding: 10px; gap: 10px; }
   .btn { padding: 8px 11px; font-size: 13px; }
   .transport__time { font-size: 13px; }
   .iconbtn--play { width: 40px; height: 40px; }
+  .topbar .btn, .topbar .iconbtn { min-width: 42px; min-height: 42px; padding: 8px 10px; }
+  .modal__panel { width: min(100vw - 16px, 520px); max-height: calc(100dvh - 16px); }
 }
 
 @media (hover: none) {

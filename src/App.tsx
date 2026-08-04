@@ -29,6 +29,10 @@ export default function App() {
   const setPlaying = useEditor((s) => s.setPlaying)
   const setPlayhead = useEditor((s) => s.setPlayhead)
   const setLoop = useEditor((s) => s.setLoop)
+  const canUndo = useEditor((s) => s.canUndo)
+  const canRedo = useEditor((s) => s.canRedo)
+  const undo = useEditor((s) => s.undo)
+  const redo = useEditor((s) => s.redo)
 
   const replaceProject = useEditor((s) => s.replaceProject)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -39,6 +43,7 @@ export default function App() {
   const [showProject, setShowProject] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [restorable, setRestorable] = useState<ProjectMeta | null>(null)
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   // Resizable panels (desktop).
   const [inspectorW, setInspectorW] = useState(320)
   const [timelineH, setTimelineH] = useState<number | null>(null)
@@ -72,7 +77,7 @@ export default function App() {
   // changed (avoid re-writing media blobs every tick).
   const lastSig = useRef('')
   useEffect(() => {
-    const iv = setInterval(() => {
+    const saveNow = async () => {
       const s = useEditor.getState()
       if (!(s.clips.length || s.overlays.length || s.audios.length || s.backgrounds.length || s.texts.length)) return
       const strip = (arr: { file?: File; src?: string }[]) => arr.map(({ file: _f, src: _s, ...r }) => { void _f; void _s; return r })
@@ -81,13 +86,23 @@ export default function App() {
         t: s.texts, ar: s.aspectRatio, es: s.exportSettings,
       })
       if (sig === lastSig.current) return
-      lastSig.current = sig
-      saveProject(AUTOSAVE_KEY, {
-        clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
-        aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
-      }).catch(() => {})
-    }, 8000)
-    return () => clearInterval(iv)
+      setSaveStatus('saving')
+      try {
+        await saveProject(AUTOSAVE_KEY, {
+          clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
+          aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
+        })
+        lastSig.current = sig
+        setSaveStatus('saved')
+      } catch (error) {
+        console.error('자동 저장 실패', error)
+        setSaveStatus('error')
+      }
+    }
+    const iv = setInterval(saveNow, 5000)
+    const onVisibility = () => { if (document.visibilityState === 'hidden') void saveNow() }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVisibility) }
   }, [])
 
   const restore = async () => {
@@ -106,7 +121,10 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'd' || e.key === 'D')) {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault()
+        if (e.shiftKey) redo(); else undo()
+      } else if ((e.metaKey || e.ctrlKey) && (e.key === 'd' || e.key === 'D')) {
         e.preventDefault()
         duplicateSelected()
       } else if (e.code === 'Space') {
@@ -161,7 +179,10 @@ export default function App() {
           <span className="topbar__name">간단컷</span>
         </div>
         <div className="topbar__actions">
-          <button className="btn" onClick={() => fileRef.current?.click()}>＋ 동영상·사진</button>
+          <span className={`save-status save-status--${saveStatus}`} role="status">
+            {saveStatus === 'saving' ? '저장 중…' : saveStatus === 'saved' ? '저장됨' : saveStatus === 'error' ? '저장 실패' : ''}
+          </span>
+          <button className="btn topbar__add" onClick={() => fileRef.current?.click()}><span>＋</span><span className="topbar__add-label"> 동영상·사진</span></button>
           <button className="iconbtn iconbtn--sm" onClick={() => setShowProject(true)} title="프로젝트 저장·불러오기" aria-label="프로젝트">📁</button>
           <button className="btn btn--primary" onClick={() => setShowExport(true)} disabled={!hasClips}>
             내보내기
@@ -204,6 +225,8 @@ export default function App() {
             <button className="btn btn--sm" onClick={() => audioRef.current?.click()}>♪ 음악</button>
             <button className="btn btn--sm" onClick={addBackground}>🎨 배경</button>
             <button className="btn btn--sm" onClick={addText}>T 텍스트</button>
+            <button className="iconbtn" onClick={undo} disabled={!canUndo} title="실행 취소" aria-label="실행 취소">↶</button>
+            <button className="iconbtn" onClick={redo} disabled={!canRedo} title="다시 실행" aria-label="다시 실행">↷</button>
             <button className="btn btn--sm" onClick={duplicateSelected} disabled={!selection} title="단축키: ⌘D">⧉ 복제</button>
             <button className="btn btn--sm btn--danger" onClick={deleteSelected} disabled={!selection} title="단축키: Delete">삭제</button>
           </div>

@@ -47,6 +47,18 @@ export default function ProjectDialog({ onClose }: { onClose: () => void }) {
       await saveBlob(blob, `${name.trim() || '무제'}.scut.json`)
     } catch { /* cancelled */ } finally { setBusy('') }
   }
+  const doShareFile = async () => {
+    setBusy('공유 파일 만드는 중…')
+    try {
+      const projectName = name.trim() || '무제'
+      const blob = await projectToFileBlob(projectName, snapshot())
+      const file = new File([blob], `${projectName}.scut`, { type: 'application/json' })
+      if (!navigator.share || !navigator.canShare?.({ files: [file] })) throw new Error('이 기기에서는 파일 공유를 지원하지 않습니다.')
+      await navigator.share({ title: `${projectName} — 간단컷 프로젝트`, files: [file] })
+    } catch (error) {
+      if ((error as Error).name !== 'AbortError') alert((error as Error).message)
+    } finally { setBusy('') }
+  }
   const doImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     e.target.value = ''
@@ -97,10 +109,11 @@ export default function ProjectDialog({ onClose }: { onClose: () => void }) {
           <span>파일로 백업 (아이클라우드 드라이브 등)</span>
           <div className="inspector__row">
             <button className="btn btn--sm" onClick={doExportFile} disabled={!!busy}>⬆ 파일로 내보내기</button>
+            <button className="btn btn--sm" onClick={doShareFile} disabled={!!busy}>공유하기</button>
             <button className="btn btn--sm" onClick={() => fileRef.current?.click()} disabled={!!busy}>⬇ 파일에서 가져오기</button>
           </div>
           <div className="modal__hint">저장 위치 선택을 지원하면 아이클라우드 드라이브 폴더에 바로 저장할 수 있어요.</div>
-          <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={doImportFile} />
+          <input ref={fileRef} type="file" accept=".scut,.json,application/json" hidden onChange={doImportFile} />
         </div>
 
         {busy && (

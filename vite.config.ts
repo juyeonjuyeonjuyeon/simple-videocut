@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react'
 // keeps third-party resources (e.g. Google Fonts) from being blocked by COEP and
 // makes local dev behave exactly like the header-less static deployment.
 export default defineConfig({
+  base: '/simple-videocut/',
   plugins: [react()],
   optimizeDeps: {
     exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],

@@ -31,6 +31,7 @@ export function probeVideo(file: File): Promise<{ duration: number; hasAudio: bo
     }
     video.onerror = () => {
       cleanup()
+      URL.revokeObjectURL(src)
       reject(new Error(`동영상을 읽을 수 없습니다: ${file.name}`))
     }
   })
@@ -42,7 +43,7 @@ export function probeImage(file: File): Promise<{ width: number; height: number;
     const src = URL.createObjectURL(file)
     const img = new Image()
     img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight, src })
-    img.onerror = () => reject(new Error(`이미지를 읽을 수 없습니다: ${file.name}`))
+    img.onerror = () => { URL.revokeObjectURL(src); reject(new Error(`이미지를 읽을 수 없습니다: ${file.name}`)) }
     img.src = src
   })
 }
@@ -55,7 +56,7 @@ export function probeAudio(file: File): Promise<{ duration: number; src: string 
     audio.preload = 'metadata'
     audio.src = src
     audio.onloadedmetadata = () => resolve({ duration: audio.duration || 0, src })
-    audio.onerror = () => reject(new Error(`오디오를 읽을 수 없습니다: ${file.name}`))
+    audio.onerror = () => { URL.revokeObjectURL(src); reject(new Error(`오디오를 읽을 수 없습니다: ${file.name}`)) }
   })
 }
 

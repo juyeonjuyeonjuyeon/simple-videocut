@@ -23,3 +23,9 @@ requestAnimationFrame(() => {
     setTimeout(() => splash.remove(), 400)
   }
 })
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch((error) => console.error('오프라인 준비 실패', error))
+  })
+}
