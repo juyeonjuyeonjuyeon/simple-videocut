@@ -590,7 +590,7 @@ export default function Timeline() {
             >
               {overlays.map((o, i) =>
                 freeChip('overlay', o.id, o.start, overlayLength(o), overlayLanes[i], OV_LANE_H, o.color,
-                  `${o.kind === 'image' ? '🖼' : '⊞'} ${o.name}${o.repeat > 1 ? ` ⟳${o.repeat}` : ''}${o.kind === 'video' && o.muted ? ' 🔇' : ''}`,
+                  `${o.kind === 'image' ? '이미지' : '오버레이'} · ${o.name}${o.repeat > 1 ? ` · 반복 ${o.repeat}회` : ''}${o.kind === 'video' && o.muted ? ' · 음소거' : ''}`,
                   selection?.type === 'overlay' && selection.id === o.id),
               )}
             </div>
@@ -622,11 +622,11 @@ export default function Timeline() {
                 >
                   {editing?.id === c.id
                     ? renameInput
-                    : <span className="clip__label">{c.kind === 'image' ? '🖼 ' : c.kind === 'color' ? '🎨 ' : '🎬 '}{c.name}</span>}
+                    : <span className="clip__label">{c.kind === 'image' ? '이미지 · ' : c.kind === 'color' ? '색상 · ' : '영상 · '}{c.name}</span>}
                   <span className="clip__meta">
                     {c.speed !== 1 && `${c.speed}× `}
                     {c.repeat > 1 && `⟳${c.repeat} `}
-                    {c.muted && '🔇'}
+                    {c.muted && <span className="clip__muted">음소거</span>}
                   </span>
                   {isSel && c.kind !== 'color' && <span className="clip__handle clip__handle--l" onPointerDown={(e) => onClipTrimStart(e, c.id)} />}
                   {isSel && <span className="clip__handle clip__handle--r" onPointerDown={(e) => onClipTrim(e, c.id)} />}
@@ -644,7 +644,7 @@ export default function Timeline() {
             >
               {audios.map((a, i) =>
                 freeChip('audio', a.id, a.start, audioLength(a), audioLanes[i], AUD_LANE_H, a.color,
-                  `♪ ${a.name}${a.repeat > 1 ? ` ⟳${a.repeat}` : ''}${a.muted ? ' 🔇' : ''}`,
+                  `음악 · ${a.name}${a.repeat > 1 ? ` · 반복 ${a.repeat}회` : ''}${a.muted ? ' · 음소거' : ''}`,
                   selection?.type === 'audio' && selection.id === a.id),
               )}
             </div>
@@ -674,7 +674,7 @@ export default function Timeline() {
             >
               {backgrounds.map((b, i) =>
                 freeChip('background', b.id, b.start, clipTimelineDuration(b), bgLanes[i], AUD_LANE_H, clipBg(b),
-                  `🎨 ${b.name}${b.kind === 'video' && b.muted ? ' 🔇' : ''}`,
+                  `배경 · ${b.name}${b.kind === 'video' && b.muted ? ' · 음소거' : ''}`,
                   selection?.type === 'background' && selection.id === b.id),
               )}
             </div>
@@ -725,7 +725,7 @@ export default function Timeline() {
             {target.type === 'background' && <button role="menuitem" onClick={() => withTarget(target, () => moveBackgroundToMain(target.id))}>메인 트랙으로 이동</button>}
             {canMute &&
               <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'audio' ? updateAudio(target.id, { muted: !item?.muted }) : target.type === 'overlay' ? updateOverlay(target.id, { muted: !item?.muted }) : updateBackground(target.id, { muted: !item?.muted }))}>{item?.muted ? '음소거 해제' : '음소거'}</button>}
-            <button role="menuitem" onClick={() => withTarget(target, duplicateSelected)}>⧉ 복제</button>
+            <button role="menuitem" onClick={() => withTarget(target, duplicateSelected)}>복제</button>
             <div className="timeline-menu__separator" />
             <button role="menuitem" className="timeline-menu__danger" onClick={() => withTarget(target, deleteSelected)}>삭제</button>
           </div>

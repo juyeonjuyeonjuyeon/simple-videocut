@@ -11,6 +11,7 @@ import {
 } from '../utils/time'
 import { cssTransform, cssCropFill } from '../utils/transform'
 import { hexToRgba } from '../utils/color'
+import Icon from './Icon'
 
 const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
 const DRIFT = 0.35 // seconds before we hard-seek a media element back in sync
@@ -695,7 +696,7 @@ export default function Preview() {
 
         {!hasContent && (
           <div className="preview__empty">
-            <span>🎬</span>
+            <span><Icon name="video" /></span>
             <p>동영상·사진을 추가해 편집을 시작하세요</p>
           </div>
         )}

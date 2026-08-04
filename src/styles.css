@@ -55,7 +55,7 @@ button, input, textarea { font-family: inherit; }
   padding-top: env(safe-area-inset-top);
 }
 .topbar__brand { display: flex; align-items: center; gap: 8px; font-weight: 700; }
-.topbar__logo { font-size: 18px; }
+.topbar__logo { display: inline-flex; color: var(--accent); }
 .topbar__name { letter-spacing: 0.2px; }
 .topbar__actions { display: flex; gap: 8px; }
 .save-status { align-self: center; min-width: 52px; font-size: 12px; color: var(--text-dim); text-align: right; }
@@ -361,7 +361,13 @@ button, input, textarea { font-family: inherit; }
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, opacity 0.15s;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
+.ui-icon { width: 1.15em; height: 1.15em; flex: 0 0 auto; }
+.topbar__logo .ui-icon { width: 24px; height: 24px; stroke-width: 1.8; }
 .btn:hover:not(:disabled) { background: var(--bg-3); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -1035,7 +1041,7 @@ input[type='range']:disabled { opacity: 0.4; }
 .modal__row { display: flex; justify-content: space-between; font-size: 14px; color: var(--text-dim); }
 .modal__row b { color: var(--text); }
 .modal__field { display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: var(--text-dim); }
-.modal__hint { font-size: 12px; color: var(--text-dim); }
+.modal__hint { font-size: 12px; color: var(--text-dim); display: flex; align-items: flex-start; gap: 6px; }
 .filename { display: flex; align-items: center; gap: 4px; }
 .filename__input {
   flex: 1 1 auto;
@@ -1049,7 +1055,7 @@ input[type='range']:disabled { opacity: 0.4; }
 }
 .filename__input:focus { outline: none; border-color: var(--accent); }
 .filename__ext { color: var(--text-dim); font-size: 14px; flex: 0 0 auto; }
-.modal__error { color: var(--danger); font-size: 14px; line-height: 1.5; }
+.modal__error { color: var(--danger); font-size: 14px; line-height: 1.5; display: flex; align-items: flex-start; gap: 7px; white-space: pre-wrap; }
 .modal__note {
   font-size: 12.5px;
   line-height: 1.6;
@@ -1071,6 +1077,14 @@ input[type='range']:disabled { opacity: 0.4; }
   height: 100%;
   background: linear-gradient(90deg, var(--accent), #7aa2ff);
   transition: width 0.2s;
+}
+.progress__bar--indeterminate .progress__fill {
+  width: 38% !important;
+  animation: progress-indeterminate 1.15s ease-in-out infinite;
+}
+@keyframes progress-indeterminate {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(285%); }
 }
 .progress__status { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 

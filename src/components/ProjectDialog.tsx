@@ -6,6 +6,7 @@ import {
 } from '../utils/project'
 import type { ProjectMeta, ProjectState } from '../utils/project'
 import { saveBlob } from '../utils/io'
+import Icon from './Icon'
 
 function snapshot(): ProjectState {
   const s = useEditor.getState()
@@ -109,9 +110,9 @@ export default function ProjectDialog({ onClose }: { onClose: () => void }) {
         <div className="modal__field">
           <span>파일로 백업 (아이클라우드 드라이브 등)</span>
           <div className="inspector__row">
-            <button className="btn btn--sm" onClick={doExportFile} disabled={!!busy}>⬆ 파일로 내보내기</button>
-            <button className="btn btn--sm" onClick={doShareFile} disabled={!!busy}>공유하기</button>
-            <button className="btn btn--sm" onClick={() => fileRef.current?.click()} disabled={!!busy}>⬇ 파일에서 가져오기</button>
+            <button className="btn btn--sm" onClick={doExportFile} disabled={!!busy}><Icon name="upload" />파일로 내보내기</button>
+            <button className="btn btn--sm" onClick={doShareFile} disabled={!!busy}><Icon name="share" />공유하기</button>
+            <button className="btn btn--sm" onClick={() => fileRef.current?.click()} disabled={!!busy}><Icon name="download" />파일에서 가져오기</button>
           </div>
           <div className="modal__hint">저장 위치 선택을 지원하면 아이클라우드 드라이브 폴더에 바로 저장할 수 있어요.</div>
           <input ref={fileRef} type="file" accept=".scut,.json,application/json" hidden onChange={doImportFile} />

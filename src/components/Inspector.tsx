@@ -4,6 +4,7 @@ import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop } from '..
 import { NO_CROP, FONT_OPTIONS } from '../types'
 import { formatTime, formatClock, parseClock, clipTimelineDuration, overlayLength, audioLength, totalDuration } from '../utils/time'
 import { rotateBy } from '../utils/transform'
+import Icon from './Icon'
 
 type Patch = Partial<Pick<Clip & Overlay, 'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat'>>
 
@@ -129,7 +130,7 @@ function RepeatRow({ repeat, onPatch, fitTo }: { repeat: number; onPatch: (p: { 
   )
 }
 
-function NameField({ icon, name, onChange }: { icon: string; name: string; onChange: (v: string) => void }) {
+function NameField({ icon, name, onChange }: { icon: ReactNode; name: string; onChange: (v: string) => void }) {
   return (
     <div className="namefield">
       <span className="namefield__icon">{icon}</span>
@@ -145,9 +146,9 @@ function TransformRow({ rotate, flipH, flipV, onPatch }: { rotate: 0 | 90 | 180 
     <div className="inspector__group">
       <div className="field__label"><span>회전 · 반전</span><b>{rotate}°</b></div>
       <div className="btnrow">
-        <button className="btn btn--sm" onClick={() => onPatch({ rotate: rotateBy(rotate, 90) })}>↻ 90°</button>
-        <button className={`btn btn--sm${flipH ? ' btn--on' : ''}`} onClick={() => onPatch({ flipH: !flipH })}>⇄ 좌우</button>
-        <button className={`btn btn--sm${flipV ? ' btn--on' : ''}`} onClick={() => onPatch({ flipV: !flipV })}>⇅ 상하</button>
+        <button className="btn btn--sm" onClick={() => onPatch({ rotate: rotateBy(rotate, 90) })}><Icon name="rotate" />90°</button>
+        <button className={`btn btn--sm${flipH ? ' btn--on' : ''}`} onClick={() => onPatch({ flipH: !flipH })}><Icon name="flipH" />좌우</button>
+        <button className={`btn btn--sm${flipV ? ' btn--on' : ''}`} onClick={() => onPatch({ flipV: !flipV })}><Icon name="flipV" />상하</button>
       </div>
     </div>
   )
@@ -204,7 +205,7 @@ function ClipInspector({ clip }: { clip: Clip }) {
   const clips = useEditor((s) => s.clips)
   const idx = clips.findIndex((c) => c.id === clip.id)
   const patch = (p: Patch) => update(clip.id, p)
-  const icon = clip.kind === 'color' ? '🎨' : clip.kind === 'image' ? '🖼' : '🎬'
+  const icon = <Icon name={clip.kind === 'color' ? 'palette' : clip.kind === 'image' ? 'image' : 'video'} />
 
   if (clip.kind === 'color') {
     return (
@@ -262,8 +263,8 @@ function ClipInspector({ clip }: { clip: Clip }) {
         <button className="btn" disabled={idx <= 0} onClick={() => move(clip.id, -1)}>← 앞으로</button>
         <button className="btn" disabled={idx >= clips.length - 1} onClick={() => move(clip.id, 1)}>뒤로 →</button>
       </div>
-      <button className="btn" onClick={() => toOverlay(clip.id)}>⊞ 오버레이 레이어로 이동</button>
-      <button className="btn" onClick={() => toBackground(clip.id)}>🎨 배경 레이어로 이동</button>
+      <button className="btn" onClick={() => toOverlay(clip.id)}><Icon name="layers" />오버레이 레이어로 이동</button>
+      <button className="btn" onClick={() => toBackground(clip.id)}><Icon name="palette" />배경 레이어로 이동</button>
       <button className="btn btn--danger" onClick={() => remove(clip.id)}>클립 삭제</button>
     </div>
   )
@@ -282,7 +283,7 @@ function OverlayInspector({ ov }: { ov: Overlay }) {
   return (
     <div className="inspector__body">
       <div className="inspector__group">
-        <NameField icon={ov.kind === 'image' ? '🖼' : '⊞'} name={ov.name} onChange={(v) => update(ov.id, { name: v })} />
+        <NameField icon={<Icon name={ov.kind === 'image' ? 'image' : 'layers'} />} name={ov.name} onChange={(v) => update(ov.id, { name: v })} />
         <div className="inspector__hint">오버레이 · 길이 {formatTime(overlayLength(ov))} · 미리보기에서 끌어 이동/크기조절</div>
       </div>
 
@@ -319,7 +320,7 @@ function OverlayInspector({ ov }: { ov: Overlay }) {
         <button className="btn" disabled={idx <= 0} onClick={() => raise(ov.id, -1)}>▼ 아래로</button>
         <button className="btn" disabled={idx >= overlays.length - 1} onClick={() => raise(ov.id, 1)}>위로 ▲</button>
       </div>
-      <button className="btn" onClick={() => toMain(ov.id)}>🎬 메인 트랙으로 이동</button>
+      <button className="btn" onClick={() => toMain(ov.id)}><Icon name="video" />메인 트랙으로 이동</button>
       <button className="btn btn--danger" onClick={() => remove(ov.id)}>오버레이 삭제</button>
     </div>
   )
@@ -336,7 +337,7 @@ function AudioInspector({ audio }: { audio: AudioClip }) {
   return (
     <div className="inspector__body">
       <div className="inspector__group">
-        <NameField icon="♪" name={audio.name} onChange={(v) => update(audio.id, { name: v })} />
+        <NameField icon={<Icon name="music" />} name={audio.name} onChange={(v) => update(audio.id, { name: v })} />
         <div className="inspector__hint">음악 · 길이 {formatTime(audioLength(audio))} · 원본 {formatTime(audio.duration)}</div>
       </div>
 
@@ -397,7 +398,7 @@ function TextInspector({ text }: { text: TextOverlay }) {
         <Range label="세로 위치" value={Math.round(text.y * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => set({ y: v / 100 })} />
         <Range label="글자 크기" value={Math.round(text.size * 1000)} min={20} max={400} step={5} onChange={(v) => set({ size: v / 1000 })} />
         <Range label="회전" value={text.angle || 0} min={-180} max={180} step={1} unit="°" onChange={(v) => set({ angle: v })} />
-        <div className="inspector__hint">미리보기에서 글자를 끌어 이동, 모서리를 끌어 크기 조절, ↻ 손잡이로 회전</div>
+        <div className="inspector__hint">미리보기에서 글자를 끌어 이동하고 모서리와 회전 손잡이로 조절합니다.</div>
       </div>
 
       <div className="inspector__group">
@@ -470,7 +471,7 @@ function BackgroundInspector({ bg }: { bg: Background }) {
   return (
     <div className="inspector__body">
       <div className="inspector__group">
-        <NameField icon="🎨" name={bg.name} onChange={(v) => update(bg.id, { name: v })} />
+        <NameField icon={<Icon name="palette" />} name={bg.name} onChange={(v) => update(bg.id, { name: v })} />
         <div className="inspector__hint">배경 레이어(맨 뒤) · 길이 {formatTime(clipTimelineDuration(bg))}</div>
       </div>
 
@@ -502,7 +503,7 @@ function BackgroundInspector({ bg }: { bg: Background }) {
         <button className="btn" disabled={idx <= 0} onClick={() => raise(bg.id, -1)}>▼ 아래로</button>
         <button className="btn" disabled={idx >= backgrounds.length - 1} onClick={() => raise(bg.id, 1)}>위로 ▲</button>
       </div>
-      <button className="btn" onClick={() => toMain(bg.id)}>🎬 메인 트랙으로 이동</button>
+      <button className="btn" onClick={() => toMain(bg.id)}><Icon name="video" />메인 트랙으로 이동</button>
       <button className="btn btn--danger" onClick={() => remove(bg.id)}>배경 삭제</button>
     </div>
   )

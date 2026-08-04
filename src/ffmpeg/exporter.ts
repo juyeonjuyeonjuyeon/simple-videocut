@@ -51,6 +51,25 @@ export function shouldNormalizeInput(info: VideoStreamInfo, outputWidth: number,
   return info.codec === 'hevc' || info.codec === 'h265' || info.width > outputWidth || info.height > outputHeight
 }
 
+export function createProgressReporter(onProgress?: (ratio: number) => void) {
+  let start = 0
+  let share = 1
+  let last = 0
+  return {
+    setStage(nextStart: number, nextShare: number) {
+      start = nextStart
+      share = nextShare
+    },
+    report(value: number) {
+      if (!onProgress || !Number.isFinite(value)) return
+      const next = Math.max(last, Math.min(1, Math.max(0, start + value * share)))
+      if (next === last) return
+      last = next
+      onProgress(Number(next.toFixed(4)))
+    },
+  }
+}
+
 async function probeInput(fp: FFmpeg, name: string): Promise<VideoStreamInfo> {
   logBuffer = []
   // No output file => ffmpeg exits with an error but still prints stream info.
@@ -205,9 +224,9 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
   const { w: W, h: H } = aspectToWH(aspect, height)
   const duration = projectDuration(clips, overlays, audios, texts, backgrounds)
 
-  const onProg = ({ progress }: { progress: number }) => {
-    if (onProgress && isFinite(progress)) onProgress(Math.max(0, Math.min(progress, 1)))
-  }
+  const progressReporter = createProgressReporter(onProgress)
+  progressReporter.report(0.02)
+  const onProg = ({ progress }: { progress: number }) => progressReporter.report(progress)
   fp.on('progress', onProg)
   const outName = `out.${format}`
   let resetEngine = false
@@ -232,6 +251,7 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
       if (!clip.file.size) throw new Error(`원본 영상 파일이 비어 있습니다: ${clip.name}`)
       const sourceName = `in${i}`
       await fp.writeFile(sourceName, await fetchFile(clip.file))
+      progressReporter.setStage(0, 0)
       const info = await probeInput(fp, sourceName)
       audioFlags.push(info.hasAudio)
 
@@ -250,6 +270,7 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
         else normalizeArgs.push('-an')
         normalizeArgs.push(normalizedName)
 
+        progressReporter.setStage(0.05 + (0.2 * i) / clips.length, 0.2 / clips.length)
         logBuffer = []
         const normalizeExitCode = await fp.exec(normalizeArgs)
         if (normalizeExitCode !== 0) {
@@ -265,6 +286,8 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
         inputFiles.push(sourceName)
         inputTrimStarts.push(clip.trimStart)
       }
+      progressReporter.setStage(0.05 + (0.2 * (i + 1)) / clips.length, 0)
+      progressReporter.report(0)
     }
 
     // "repeat" expands a clip into N back-to-back concat segments that all
@@ -490,6 +513,7 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
       )
     }
 
+    progressReporter.setStage(0.25, 0.7)
     const exitCode = await fp.exec(args)
     if (exitCode !== 0) {
       resetEngine = true
@@ -498,6 +522,8 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
       throw new Error(`영상 변환에 실패했습니다. (FFmpeg 종료 코드 ${exitCode})${detail ? `\n${detail}` : ''}`)
     }
     const data = await fp.readFile(outName)
+    progressReporter.setStage(0.95, 0.03)
+    progressReporter.report(1)
     // Copy into a fresh ArrayBuffer-backed array (readFile may be SharedArrayBuffer-backed).
     const bytes = new Uint8Array(data as Uint8Array)
     if (bytes.byteLength === 0) {

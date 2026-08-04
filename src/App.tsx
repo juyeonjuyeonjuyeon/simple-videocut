@@ -9,6 +9,7 @@ import { projectDuration, formatTime } from './utils/time'
 import { saveProject, loadProject, autosaveMeta, AUTOSAVE_KEY } from './utils/project'
 import type { ProjectMeta } from './utils/project'
 import { AUDIO_ACCEPT, isAudioFile, isImageFile, isVideoFile } from './utils/media'
+import Icon from './components/Icon'
 
 export default function App() {
   const clips = useEditor((s) => s.clips)
@@ -216,26 +217,33 @@ export default function App() {
     if (main.length) addFiles(main)
     if (audio.length) addAudioFiles(audio)
   }
+  const addMixedFiles = (list: FileList) => {
+    const files = Array.from(list)
+    const main = files.filter((file) => isVideoFile(file) || isImageFile(file))
+    const audio = files.filter(isAudioFile)
+    if (main.length) void addFiles(main)
+    if (audio.length) void addAudioFiles(audio)
+  }
 
   return (
     <div className="app" style={appStyle} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <header className="topbar">
         <div className="topbar__brand">
-          <span className="topbar__logo">🐶</span>
+          <span className="topbar__logo"><Icon name="brand" /></span>
           <span className="topbar__name">간단컷</span>
         </div>
         <div className="topbar__actions">
           <span className={`save-status save-status--${saveStatus}`} role="status">
             {saveStatus === 'saving' ? '저장 중…' : saveStatus === 'saved' ? '저장됨' : saveStatus === 'error' ? '저장 실패' : ''}
           </span>
-          <button className="btn topbar__add" onClick={() => fileRef.current?.click()}><span>＋</span><span className="topbar__add-label"> 동영상·사진</span></button>
-          <button className="iconbtn iconbtn--sm" onClick={() => setShowProject(true)} title="프로젝트 저장·불러오기" aria-label="프로젝트">📁</button>
+          <button className="btn topbar__add" onClick={() => fileRef.current?.click()}><Icon name="plus" /><span className="topbar__add-label"> 파일 추가</span></button>
+          <button className="iconbtn iconbtn--sm" onClick={() => setShowProject(true)} title="프로젝트 저장·불러오기" aria-label="프로젝트"><Icon name="folder" /></button>
           <button className="btn btn--primary" onClick={() => setShowExport(true)} disabled={!hasClips}>
             내보내기
           </button>
         </div>
-        <input ref={fileRef} type="file" accept="video/*,image/*" multiple hidden
-          onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }} />
+        <input ref={fileRef} type="file" accept={`video/*,image/*,${AUDIO_ACCEPT}`} multiple hidden
+          onChange={(e) => { if (e.target.files) addMixedFiles(e.target.files); e.target.value = '' }} />
         <input ref={overlayRef} type="file" accept="video/*,image/*" multiple hidden
           onChange={(e) => { if (e.target.files) addOverlayFiles(e.target.files); e.target.value = '' }} />
         <input ref={audioRef} type="file" accept={AUDIO_ACCEPT} multiple hidden
@@ -252,7 +260,7 @@ export default function App() {
               disabled={!hasContent}
               aria-label={isPlaying ? '일시정지' : '재생'}
             >
-              {isPlaying ? '❚❚' : '▶'}
+              <Icon name={isPlaying ? 'pause' : 'play'} />
             </button>
             <button
               className={`iconbtn${loop ? ' iconbtn--on' : ''}`}
@@ -260,21 +268,21 @@ export default function App() {
               title="반복 재생"
               aria-label="반복 재생"
             >
-              🔁
+              <Icon name="repeat" />
             </button>
             <div className="transport__time">
               {formatTime(playhead)} <span>/ {formatTime(total)}</span>
             </div>
             <div className="transport__spacer" />
-            <button className="btn btn--sm" onClick={splitAtPlayhead} disabled={!hasClips} title="단축키: S">✂ 분할</button>
-            <button className="btn btn--sm" onClick={() => overlayRef.current?.click()}>⊞ 오버레이</button>
-            <button className="btn btn--sm" onClick={() => audioRef.current?.click()}>♪ 음악</button>
-            <button className="btn btn--sm" onClick={addBackground}>🎨 배경</button>
-            <button className="btn btn--sm" onClick={addText}>T 텍스트</button>
-            <button className="iconbtn" onClick={undo} disabled={!canUndo} title="실행 취소" aria-label="실행 취소">↶</button>
-            <button className="iconbtn" onClick={redo} disabled={!canRedo} title="다시 실행" aria-label="다시 실행">↷</button>
-            <button className="btn btn--sm" onClick={duplicateSelected} disabled={!selection} title="단축키: ⌘D">⧉ 복제</button>
-            <button className="btn btn--sm btn--danger" onClick={deleteSelected} disabled={!selection} title="단축키: Delete">삭제</button>
+            <button className="btn btn--sm" onClick={splitAtPlayhead} disabled={!hasClips} title="단축키: S"><Icon name="split" />분할</button>
+            <button className="btn btn--sm" onClick={() => overlayRef.current?.click()}><Icon name="layers" />오버레이</button>
+            <button className="btn btn--sm" onClick={() => audioRef.current?.click()}><Icon name="music" />음악</button>
+            <button className="btn btn--sm" onClick={addBackground}><Icon name="palette" />배경</button>
+            <button className="btn btn--sm" onClick={addText}><Icon name="text" />텍스트</button>
+            <button className="iconbtn" onClick={undo} disabled={!canUndo} title="실행 취소" aria-label="실행 취소"><Icon name="undo" /></button>
+            <button className="iconbtn" onClick={redo} disabled={!canRedo} title="다시 실행" aria-label="다시 실행"><Icon name="redo" /></button>
+            <button className="btn btn--sm" onClick={duplicateSelected} disabled={!selection} title="단축키: ⌘D"><Icon name="copy" />복제</button>
+            <button className="btn btn--sm btn--danger" onClick={deleteSelected} disabled={!selection} title="단축키: Delete"><Icon name="trash" />삭제</button>
           </div>
         </section>
         <Inspector />
@@ -298,7 +306,7 @@ export default function App() {
       {dragging && (
         <div className="dropzone">
           <div className="dropzone__inner">
-            <span>⬇</span>
+            <Icon name="download" />
             <p>파일을 놓아 추가</p>
             <small>동영상·사진은 메인 트랙, 음악은 오디오 트랙으로 추가됩니다</small>
           </div>
