@@ -28,12 +28,34 @@ async function getFFmpeg(onLog?: (line: string) => void): Promise<FFmpeg> {
   return instance
 }
 
-/** Detect whether an input file in ffmpeg's FS carries an audio stream. */
-async function hasAudioStream(fp: FFmpeg, name: string): Promise<boolean> {
+export interface VideoStreamInfo {
+  codec: string
+  width: number
+  height: number
+  hasAudio: boolean
+}
+
+export function parseVideoStreamInfo(lines: string[]): VideoStreamInfo {
+  const videoLine = lines.find((line) => /Stream #.*Video:/i.test(line)) ?? ''
+  const codec = videoLine.match(/Video:\s*([^,\s]+)/i)?.[1]?.toLowerCase() ?? ''
+  const dimensions = videoLine.match(/(\d{2,5})x(\d{2,5})/)
+  return {
+    codec,
+    width: dimensions ? Number(dimensions[1]) : 0,
+    height: dimensions ? Number(dimensions[2]) : 0,
+    hasAudio: lines.some((line) => /Stream #.*Audio:/i.test(line)),
+  }
+}
+
+export function shouldNormalizeInput(info: VideoStreamInfo, outputWidth: number, outputHeight: number): boolean {
+  return info.codec === 'hevc' || info.codec === 'h265' || info.width > outputWidth || info.height > outputHeight
+}
+
+async function probeInput(fp: FFmpeg, name: string): Promise<VideoStreamInfo> {
   logBuffer = []
   // No output file => ffmpeg exits with an error but still prints stream info.
   await fp.exec(['-hide_banner', '-i', name]).catch(() => {})
-  return logBuffer.some((l) => /Stream #.*Audio:/i.test(l))
+  return parseVideoStreamInfo(logBuffer)
 }
 
 /** Build an atempo filter chain for an arbitrary speed within 0.25–4. */
@@ -197,11 +219,52 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
     // 1. Write each unique clip file once and probe it for an audio track.
     //    (Color clips have no file — they become a lavfi color source.)
     const audioFlags: boolean[] = []
+    const inputFiles: string[] = []
+    const inputTrimStarts: number[] = []
     for (let i = 0; i < clips.length; i++) {
-      if (clips[i].kind === 'color') { audioFlags.push(false); continue }
-      if (!clips[i].file.size) throw new Error(`원본 영상 파일이 비어 있습니다: ${clips[i].name}`)
-      await fp.writeFile(`in${i}`, await fetchFile(clips[i].file))
-      audioFlags.push(await hasAudioStream(fp, `in${i}`))
+      const clip = clips[i]
+      if (clip.kind === 'color') {
+        audioFlags.push(false)
+        inputFiles.push('')
+        inputTrimStarts.push(0)
+        continue
+      }
+      if (!clip.file.size) throw new Error(`원본 영상 파일이 비어 있습니다: ${clip.name}`)
+      const sourceName = `in${i}`
+      await fp.writeFile(sourceName, await fetchFile(clip.file))
+      const info = await probeInput(fp, sourceName)
+      audioFlags.push(info.hasAudio)
+
+      if (clip.kind === 'video' && shouldNormalizeInput(info, W, H)) {
+        const normalizedName = `norm${i}.mp4`
+        const normalizeArgs = [
+          '-y', '-ss', String(clip.trimStart), '-t', String(clip.trimEnd - clip.trimStart), '-i', sourceName,
+          '-map', '0:v:0',
+        ]
+        if (info.hasAudio) normalizeArgs.push('-map', '0:a:0')
+        normalizeArgs.push(
+          '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease:force_divisible_by=2`,
+          '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p',
+        )
+        if (info.hasAudio) normalizeArgs.push('-c:a', 'aac', '-b:a', '192k')
+        else normalizeArgs.push('-an')
+        normalizeArgs.push(normalizedName)
+
+        logBuffer = []
+        const normalizeExitCode = await fp.exec(normalizeArgs)
+        if (normalizeExitCode !== 0) {
+          resetEngine = true
+          const useful = logBuffer.filter((line) => /error|invalid|failed|unable|unsupported|cannot|memory/i.test(line))
+          const detail = (useful.length ? useful : logBuffer).slice(-8).join('\n')
+          throw new Error(`원본 영상 정규화에 실패했습니다: ${clip.name} (FFmpeg 종료 코드 ${normalizeExitCode})${detail ? `\n${detail}` : ''}`)
+        }
+        inputFiles.push(normalizedName)
+        inputTrimStarts.push(0)
+        await fp.deleteFile(sourceName).catch(() => {})
+      } else {
+        inputFiles.push(sourceName)
+        inputTrimStarts.push(clip.trimStart)
+      }
     }
 
     // "repeat" expands a clip into N back-to-back concat segments that all
@@ -221,7 +284,7 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
     for (let k = 0; k < overlays.length; k++) {
       if (!overlays[k].file.size) throw new Error(`원본 오버레이 파일이 비어 있습니다: ${overlays[k].name}`)
       await fp.writeFile(`ov${k}`, await fetchFile(overlays[k].file))
-      overlayAudioFlags.push(overlays[k].kind === 'video' && await hasAudioStream(fp, `ov${k}`))
+      overlayAudioFlags.push(overlays[k].kind === 'video' && (await probeInput(fp, `ov${k}`)).hasAudio)
     }
     const backgroundAudioFlags: boolean[] = []
     for (let k = 0; k < backgrounds.length; k++) {
@@ -229,7 +292,7 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
       if (b.kind === 'color') { backgroundAudioFlags.push(false); continue }
       if (!b.file.size) throw new Error(`원본 배경 파일이 비어 있습니다: ${b.name}`)
       await fp.writeFile(`bg${k}`, await fetchFile(b.file))
-      backgroundAudioFlags.push(b.kind === 'video' && await hasAudioStream(fp, `bg${k}`))
+      backgroundAudioFlags.push(b.kind === 'video' && (await probeInput(fp, `bg${k}`)).hasAudio)
     }
     for (let k = 0; k < audios.length; k++) {
       if (!audios[k].file.size) throw new Error(`원본 음성 파일이 비어 있습니다: ${audios[k].name}`)
@@ -244,8 +307,8 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
       const c = e.clip
       if (c.kind === 'color') { inputIdxOf.push(-1); return }
       const dur = c.trimEnd - c.trimStart
-      if (c.kind === 'image') args.push('-loop', '1', '-t', String(dur), '-i', `in${e.fileIndex}`)
-      else args.push('-ss', String(c.trimStart), '-t', String(dur), '-i', `in${e.fileIndex}`)
+      if (c.kind === 'image') args.push('-loop', '1', '-t', String(dur), '-i', inputFiles[e.fileIndex])
+      else args.push('-ss', String(inputTrimStarts[e.fileIndex]), '-t', String(dur), '-i', inputFiles[e.fileIndex])
       inputIdxOf.push(inputCount++)
     })
     texts.forEach((_, k) => {
@@ -430,7 +493,7 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
     const exitCode = await fp.exec(args)
     if (exitCode !== 0) {
       resetEngine = true
-      const useful = logBuffer.filter((line) => /error|invalid|failed|unable|not found|no such|unsupported|cannot/i.test(line))
+      const useful = logBuffer.filter((line) => /error|invalid|failed|unable|not found|no such|unsupported|cannot|memory/i.test(line))
       const detail = (useful.length ? useful : logBuffer).slice(-8).join('\n')
       throw new Error(`영상 변환에 실패했습니다. (FFmpeg 종료 코드 ${exitCode})${detail ? `\n${detail}` : ''}`)
     }
@@ -459,7 +522,7 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
 
 async function cleanup(fp: FFmpeg, outName: string, nClips: number, nTexts: number, nOv: number, nBg: number, nAudio: number) {
   const names = [outName]
-  for (let i = 0; i < nClips; i++) names.push(`in${i}`)
+  for (let i = 0; i < nClips; i++) names.push(`in${i}`, `norm${i}.mp4`)
   for (let k = 0; k < nTexts; k++) names.push(`text${k}.png`)
   for (let k = 0; k < nOv; k++) names.push(`ov${k}`)
   for (let k = 0; k < nBg; k++) names.push(`bg${k}`)
