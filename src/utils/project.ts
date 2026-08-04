@@ -67,18 +67,29 @@ function serialize(name: string, s: ProjectState): SerializedProject {
 
 function deserialize(p: SerializedProject): ProjectState {
   const byId = new Map(p.media.map((m) => [m.id, m]))
+  const files = new Map<string, File>()
   const urls = new Map<string, string>()
+  const fileFor = (id: string) => {
+    if (!files.has(id)) {
+      const m = byId.get(id)
+      if (!m || !m.blob || m.blob.size === 0) throw new Error(`원본 미디어가 없거나 비어 있습니다: ${m?.name || id}`)
+      files.set(id, new File([m.blob], m.name, { type: m.type || m.blob.type }))
+    }
+    return files.get(id)!
+  }
   const urlFor = (id: string) => {
-    if (!urls.has(id)) urls.set(id, URL.createObjectURL(byId.get(id)!.blob))
+    // Create the URL from the reconstructed File. This is more reliable than
+    // using an IndexedDB-returned Blob directly in mobile Safari.
+    if (!urls.has(id)) urls.set(id, URL.createObjectURL(fileFor(id)))
     return urls.get(id)!
   }
   const restore = <T>(it: object): T => {
     const { mediaId, ...rest } = it as { mediaId: string | null } & Record<string, unknown>
     if (mediaId && byId.has(mediaId)) {
-      const m = byId.get(mediaId)!
-      return { ...rest, file: new File([m.blob], m.name, { type: m.type }), src: urlFor(mediaId) } as T
+      return { ...rest, file: fileFor(mediaId), src: urlFor(mediaId) } as T
     }
-    return { ...rest, file: new File([], 'bg'), src: '' } as T
+    if (rest.kind === 'color') return { ...rest, file: new File([], 'bg'), src: '' } as T
+    throw new Error(`원본 파일 연결 정보가 없습니다: ${String(rest.name || '이름 없는 미디어')}`)
   }
   return {
     aspectRatio: p.aspectRatio, exportSettings: p.exportSettings,
@@ -88,6 +99,59 @@ function deserialize(p: SerializedProject): ProjectState {
     backgrounds: p.backgrounds.map((b) => restore<Background>(b)),
     texts: p.texts,
   }
+}
+
+function verifyElement(file: File, kind: 'video' | 'image' | 'audio'): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const src = URL.createObjectURL(file)
+    const el = kind === 'image' ? new Image() : document.createElement(kind)
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timer)
+      URL.revokeObjectURL(src)
+      if (error) reject(error)
+      else resolve()
+    }
+    const timer = window.setTimeout(() => finish(new Error(`파일 확인 시간이 초과됐습니다: ${file.name}`)), 12000)
+    if (kind === 'image') {
+      el.onload = () => finish()
+      el.onerror = () => finish(new Error(`이미지를 복원할 수 없습니다: ${file.name}`))
+      ;(el as HTMLImageElement).src = src
+    } else {
+      const media = el as HTMLMediaElement
+      media.preload = kind === 'video' ? 'auto' : 'metadata'
+      const ready = () => {
+        if (!Number.isFinite(media.duration) || media.duration <= 0) finish(new Error(`${kind === 'video' ? '영상을' : '음성을'} 복원할 수 없습니다: ${file.name}`))
+        else if (kind === 'video' && (!(media as HTMLVideoElement).videoWidth || !(media as HTMLVideoElement).videoHeight)) finish(new Error(`영상 프레임을 복원할 수 없습니다: ${file.name}`))
+        else finish()
+      }
+      if (kind === 'video') media.onloadeddata = ready
+      else media.onloadedmetadata = ready
+      media.onerror = () => finish(new Error(`${kind === 'video' ? '영상을' : '음성을'} 이 브라우저에서 재생할 수 없습니다: ${file.name}`))
+      if (kind === 'video') {
+        ;(media as HTMLVideoElement).muted = true
+        ;(media as HTMLVideoElement).playsInline = true
+      }
+      media.src = src
+    }
+  })
+}
+
+async function verifyProjectMedia(p: ProjectState): Promise<ProjectState> {
+  const checked = new Set<File>()
+  const verify = async (file: File, kind: 'video' | 'image' | 'audio') => {
+    if (checked.has(file)) return
+    checked.add(file)
+    if (!file.size) throw new Error(`원본 파일이 비어 있습니다: ${file.name}`)
+    await verifyElement(file, kind)
+  }
+  for (const c of p.clips) if (c.kind !== 'color') await verify(c.file, c.kind === 'image' ? 'image' : 'video')
+  for (const o of p.overlays) await verify(o.file, o.kind === 'image' ? 'image' : 'video')
+  for (const b of p.backgrounds) if (b.kind !== 'color') await verify(b.file, b.kind === 'image' ? 'image' : 'video')
+  for (const a of p.audios) await verify(a.file, 'audio')
+  return p
 }
 
 // ---- IndexedDB ----
@@ -118,7 +182,7 @@ export async function saveProject(name: string, s: ProjectState): Promise<void> 
 export async function loadProject(name: string): Promise<ProjectState | null> {
   const st = await store('readonly')
   const p = await reqP<SerializedProject | undefined>(st.get(name))
-  return p ? deserialize(p) : null
+  return p ? verifyProjectMedia(deserialize(p)) : null
 }
 export async function listProjects(): Promise<ProjectMeta[]> {
   const st = await store('readonly')
@@ -169,7 +233,7 @@ export async function fileBlobToProject(file: File): Promise<ProjectState> {
   const media: MediaBlob[] = (json.media || []).map((m: { id: string; name: string; type: string; data: string }) => ({
     id: m.id, name: m.name, type: m.type, blob: base64ToBlob(m.data, m.type),
   }))
-  return deserialize({ ...json, media })
+  return verifyProjectMedia(deserialize({ ...json, media }))
 }
 
 type PortableProject = Omit<SerializedProject, 'media'> & {

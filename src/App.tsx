@@ -74,19 +74,29 @@ export default function App() {
   // Offer to restore the last auto-saved session on startup.
   useEffect(() => { autosaveMeta().then(setRestorable).catch(() => {}) }, [])
 
-  // Auto-save the current project to IndexedDB, but only when it actually
-  // changed (avoid re-writing media blobs every tick).
+  // Save shortly after each real edit. pagehide/visibilitychange are only a
+  // final safety net because mobile browsers may freeze a page immediately.
   const lastSig = useRef('')
   useEffect(() => {
-    const saveNow = async () => {
+    let timer = 0
+    let dirty = false
+    let inFlight = false
+    let queued = false
+    const signature = () => {
       const s = useEditor.getState()
-      if (!(s.clips.length || s.overlays.length || s.audios.length || s.backgrounds.length || s.texts.length)) return
       const strip = (arr: { file?: File; src?: string }[]) => arr.map(({ file: _f, src: _s, ...r }) => { void _f; void _s; return r })
-      const sig = JSON.stringify({
+      return JSON.stringify({
         c: strip(s.clips), o: strip(s.overlays), a: strip(s.audios), b: strip(s.backgrounds),
         t: s.texts, ar: s.aspectRatio, es: s.exportSettings,
       })
-      if (sig === lastSig.current) return
+    }
+    const saveNow = async () => {
+      const s = useEditor.getState()
+      if (!(s.clips.length || s.overlays.length || s.audios.length || s.backgrounds.length || s.texts.length)) return
+      const sig = signature()
+      if (sig === lastSig.current) { dirty = false; return }
+      if (inFlight) { queued = true; return }
+      inFlight = true
       setSaveStatus('saving')
       try {
         await saveProject(AUTOSAVE_KEY, {
@@ -94,22 +104,57 @@ export default function App() {
           aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
         })
         lastSig.current = sig
+        dirty = signature() !== sig
         setSaveStatus('saved')
       } catch (error) {
         console.error('자동 저장 실패', error)
         setSaveStatus('error')
+      } finally {
+        inFlight = false
+        if (queued || dirty) {
+          queued = false
+          window.clearTimeout(timer)
+          timer = window.setTimeout(() => { void saveNow() }, 250)
+        }
       }
     }
-    const iv = setInterval(saveNow, 5000)
+    const schedule = () => {
+      if (signature() === lastSig.current) return
+      dirty = true
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => { void saveNow() }, 800)
+    }
+    const unsubscribe = useEditor.subscribe(schedule)
     const onVisibility = () => { if (document.visibilityState === 'hidden') void saveNow() }
+    const onPageHide = () => { void saveNow() }
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty && !inFlight) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
     document.addEventListener('visibilitychange', onVisibility)
-    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVisibility) }
+    window.addEventListener('pagehide', onPageHide)
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      unsubscribe()
+      window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', onPageHide)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+    }
   }, [])
 
   const restore = async () => {
-    const p = await loadProject(AUTOSAVE_KEY)
-    if (p) replaceProject(p)
-    setRestorable(null)
+    setSaveStatus('saving')
+    try {
+      const p = await loadProject(AUTOSAVE_KEY)
+      if (p) replaceProject(p)
+      setRestorable(null)
+      setSaveStatus('saved')
+    } catch (error) {
+      setSaveStatus('error')
+      alert('복원 실패: ' + (error as Error).message)
+    }
   }
 
   const backgrounds = useEditor((s) => s.backgrounds)
