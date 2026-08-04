@@ -1,0 +1,120 @@
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
+import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
+import { basename, join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
+const ffmpegPath = app.isPackaged ? join(process.resourcesPath, 'ffmpeg') : require('ffmpeg-static')
+let workDir = null
+let processHandle = null
+let quitting = false
+
+async function workspace() {
+  if (!workDir) workDir = await mkdtemp(join(tmpdir(), 'simplecut-render-'))
+  return workDir
+}
+
+function safeFile(name) {
+  if (typeof name !== 'string' || basename(name) !== name || !/^[a-zA-Z0-9._-]+$/.test(name)) {
+    throw new Error('안전하지 않은 임시 파일 이름입니다.')
+  }
+  return name
+}
+
+async function clearWorkspace() {
+  if (!workDir) return
+  const target = workDir
+  workDir = null
+  await rm(target, { recursive: true, force: true })
+}
+
+ipcMain.handle('native-ffmpeg:available', () => Boolean(ffmpegPath))
+ipcMain.handle('native-ffmpeg:write-file', async (_event, name, data) => {
+  await writeFile(join(await workspace(), safeFile(name)), Buffer.from(data))
+})
+ipcMain.handle('native-ffmpeg:read-file', async (_event, name) => {
+  const data = await readFile(join(await workspace(), safeFile(name)))
+  return new Uint8Array(data)
+})
+ipcMain.handle('native-ffmpeg:delete-file', async (_event, name) => {
+  await unlink(join(await workspace(), safeFile(name))).catch(() => {})
+})
+ipcMain.handle('native-ffmpeg:exec', async (event, args) => {
+  if (processHandle) throw new Error('이미 영상 렌더링이 진행 중입니다.')
+  if (!Array.isArray(args) || args.some((arg) => typeof arg !== 'string')) throw new Error('FFmpeg 명령이 잘못되었습니다.')
+  const durationIndex = args.lastIndexOf('-t')
+  const duration = durationIndex >= 0 ? Number(args[durationIndex + 1]) : 0
+  return new Promise((resolve, reject) => {
+    const child = spawn(ffmpegPath, ['-progress', 'pipe:1', '-nostats', ...args], {
+      cwd: workDir,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    processHandle = child
+    let progressBuffer = ''
+    let logBuffer = ''
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => {
+      progressBuffer += chunk
+      const lines = progressBuffer.split(/\r?\n/)
+      progressBuffer = lines.pop() || ''
+      for (const line of lines) {
+        const match = line.match(/^out_time_us=(\d+)$/)
+        if (match && duration > 0) event.sender.send('native-ffmpeg:progress', Math.min(1, Number(match[1]) / 1e6 / duration))
+      }
+    })
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk) => {
+      logBuffer += chunk
+      const lines = logBuffer.split(/\r?\n/)
+      logBuffer = lines.pop() || ''
+      for (const line of lines) if (line) event.sender.send('native-ffmpeg:log', line)
+    })
+    child.once('error', (error) => { processHandle = null; reject(error) })
+    child.once('close', (code) => { processHandle = null; resolve(code ?? 1) })
+  })
+})
+ipcMain.handle('native-ffmpeg:terminate', async () => {
+  processHandle?.kill('SIGKILL')
+  processHandle = null
+  await clearWorkspace()
+})
+
+function createWindow() {
+  const window = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    minWidth: 900,
+    minHeight: 600,
+    backgroundColor: '#15171b',
+    title: '간단컷',
+    webPreferences: {
+      preload: join(root, 'electron', 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  })
+  if (process.env.SIMPLECUT_DEV_URL) window.loadURL(process.env.SIMPLECUT_DEV_URL)
+  else window.loadFile(join(root, 'dist', 'index.html'))
+  window.on('close', (event) => {
+    if (!processHandle || quitting) return
+    event.preventDefault()
+    void dialog.showMessageBox(window, {
+      type: 'info',
+      title: '렌더링 진행 중',
+      message: '영상 렌더링이 진행 중입니다.',
+      detail: '창을 최소화해도 렌더링은 계속됩니다. 작업을 취소하려면 내보내기 창의 취소 버튼을 사용하세요.',
+      buttons: ['확인'],
+    })
+  })
+}
+
+app.whenReady().then(createWindow)
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+app.on('before-quit', () => { quitting = true; processHandle?.kill('SIGKILL'); void clearWorkspace() })

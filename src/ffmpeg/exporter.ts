@@ -3,18 +3,41 @@ import { fetchFile, toBlobURL } from '@ffmpeg/util'
 import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, Crop, Rotation } from '../types'
 import { aspectToWH, projectDuration, overlayLength, audioLength, clipTimelineDuration } from '../utils/time'
 import { hexToRgba } from '../utils/color'
+import { hasNativeFFmpeg, NativeFFmpeg } from './native'
 
 // Keep the encoding engine on the same origin. Exports must not depend on a
 // third-party CDN being reachable after the editor itself has loaded.
 const coreAsset = (name: string) => new URL(`${import.meta.env.BASE_URL}ffmpeg/${name}`, window.location.origin).href
 
-let ffmpeg: FFmpeg | null = null
+type LogHandler = (event: { message: string }) => void
+type ProgressHandler = (event: { progress: number }) => void
+interface FFmpegEngine {
+  on(event: 'log', handler: LogHandler): void
+  on(event: 'progress', handler: ProgressHandler): void
+  off(event: 'progress', handler: ProgressHandler): void
+  exec(args: string[]): Promise<number>
+  writeFile(name: string, data: Uint8Array): Promise<unknown>
+  readFile(name: string): Promise<Uint8Array | string>
+  deleteFile(name: string): Promise<unknown>
+  terminate(): void
+}
+
+let ffmpeg: FFmpegEngine | null = null
 let logBuffer: string[] = []
 let externalLog: ((line: string) => void) | null = null
 
-async function getFFmpeg(onLog?: (line: string) => void): Promise<FFmpeg> {
+async function getFFmpeg(onLog?: (line: string) => void): Promise<FFmpegEngine> {
   externalLog = onLog ?? null
   if (ffmpeg) return ffmpeg
+  if (hasNativeFFmpeg() && window.simplecutDesktop && await window.simplecutDesktop.available()) {
+    const instance = new NativeFFmpeg(window.simplecutDesktop)
+    instance.on('log', ({ message }) => {
+      logBuffer.push(message)
+      externalLog?.(message)
+    })
+    ffmpeg = instance
+    return instance
+  }
   const instance = new FFmpeg()
   instance.on('log', ({ message }) => {
     logBuffer.push(message)
@@ -25,7 +48,7 @@ async function getFFmpeg(onLog?: (line: string) => void): Promise<FFmpeg> {
     wasmURL: await toBlobURL(coreAsset('ffmpeg-core.wasm'), 'application/wasm'),
   })
   ffmpeg = instance
-  return instance
+  return ffmpeg
 }
 
 export interface VideoStreamInfo {
@@ -70,7 +93,7 @@ export function createProgressReporter(onProgress?: (ratio: number) => void) {
   }
 }
 
-async function probeInput(fp: FFmpeg, name: string): Promise<VideoStreamInfo> {
+async function probeInput(fp: FFmpegEngine, name: string): Promise<VideoStreamInfo> {
   logBuffer = []
   // No output file => ffmpeg exits with an error but still prints stream info.
   await fp.exec(['-hide_banner', '-i', name]).catch(() => {})
@@ -205,6 +228,11 @@ export interface ExportOptions {
   format?: 'mp4' | 'webm'
   onProgress?: (ratio: number) => void
   onLog?: (line: string) => void
+}
+
+export function cancelExport(): void {
+  ffmpeg?.terminate()
+  ffmpeg = null
 }
 
 /** Export timeline length of an overlay. */
@@ -546,7 +574,7 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
   }
 }
 
-async function cleanup(fp: FFmpeg, outName: string, nClips: number, nTexts: number, nOv: number, nBg: number, nAudio: number) {
+async function cleanup(fp: FFmpegEngine, outName: string, nClips: number, nTexts: number, nOv: number, nBg: number, nAudio: number) {
   const names = [outName]
   for (let i = 0; i < nClips; i++) names.push(`in${i}`, `norm${i}.mp4`)
   for (let k = 0; k < nTexts; k++) names.push(`text${k}.png`)

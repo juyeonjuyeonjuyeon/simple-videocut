@@ -21,4 +21,9 @@ export default tseslint.config(
     files: ['public/sw.js'],
     languageOptions: { globals: globals.serviceworker },
   },
+  {
+    files: ['electron/*.{mjs,cjs}', 'scripts/*.{mjs,cjs}'],
+    languageOptions: { globals: globals.node },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
 )

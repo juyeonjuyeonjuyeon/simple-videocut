@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useEditor } from '../store'
-import { exportVideo } from '../ffmpeg/exporter'
+import { cancelExport, exportVideo } from '../ffmpeg/exporter'
 import { projectDuration, formatTime } from '../utils/time'
 import { saveBlob, keepAwake } from '../utils/io'
 import type { ExportHeight } from '../types'
@@ -55,6 +55,7 @@ function validateVideoBlob(blob: Blob): Promise<void> {
 }
 
 export default function ExportDialog({ onClose }: { onClose: () => void }) {
+  const desktop = Boolean(window.simplecutDesktop)
   const clips = useEditor((s) => s.clips)
   const texts = useEditor((s) => s.texts)
   const overlays = useEditor((s) => s.overlays)
@@ -70,6 +71,8 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
   const [url, setUrl] = useState<string | null>(null)
   const [blob, setBlob] = useState<Blob | null>(null)
   const [error, setError] = useState('')
+  const [cancelling, setCancelling] = useState(false)
+  const cancelRequested = useRef(false)
 
   useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
 
@@ -80,8 +83,10 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
     if (url) { URL.revokeObjectURL(url); setUrl(null) }
     setPhase('running')
     setProgress(0)
-    setStatus('엔진 로딩 중… (최초 1회는 시간이 걸립니다)')
+    setStatus(desktop ? '네이티브 렌더링 엔진 준비 중…' : '엔진 로딩 중… (최초 1회는 시간이 걸립니다)')
     setError('')
+    setCancelling(false)
+    cancelRequested.current = false
     const releaseWake = await keepAwake()
     try {
       const out = await exportVideo({
@@ -109,11 +114,24 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
       setStatus(`완료! 크기 ${(out.size / 1024 / 1024).toFixed(1)} MB`)
     } catch (e) {
       console.error(e)
-      setError((e as Error).message || '내보내기에 실패했습니다.')
-      setPhase('error')
+      if (cancelRequested.current) {
+        setPhase('idle')
+        setStatus('렌더링을 취소했습니다.')
+      } else {
+        setError((e as Error).message || '내보내기에 실패했습니다.')
+        setPhase('error')
+      }
     } finally {
+      setCancelling(false)
       releaseWake()
     }
+  }
+
+  const cancel = () => {
+    cancelRequested.current = true
+    setCancelling(true)
+    setStatus('렌더링 취소 중…')
+    cancelExport()
   }
 
   const save = async () => {
@@ -165,7 +183,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
             ))}
           </div>
           {exportSettings.height >= 1440 && (
-            <div className="modal__hint"><Icon name="warning" />고해상도는 브라우저에서 렌더링이 오래 걸릴 수 있어요.</div>
+            <div className="modal__hint"><Icon name="warning" />{desktop ? '4K 출력은 원본 길이와 효과에 따라 시간이 걸릴 수 있어요.' : '고해상도는 브라우저에서 렌더링이 오래 걸릴 수 있어요.'}</div>
           )}
         </div>
 
@@ -175,7 +193,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
           <div className="progress">
             <div className={`progress__bar${progress === 0 ? ' progress__bar--indeterminate' : ''}`}><div className="progress__fill" style={{ width: `${Math.round(progress * 100)}%` }} /></div>
             <div className="progress__status">{status}</div>
-            <div className="modal__hint"><Icon name="screen" />변환 중 화면이 꺼지지 않도록 유지합니다(지원 기기). 탭을 닫지 마세요.</div>
+            <div className="modal__hint"><Icon name="screen" />{desktop ? '컴퓨터의 네이티브 FFmpeg로 렌더링하고 있습니다. 앱을 종료하지 마세요.' : '변환 중 화면이 꺼지지 않도록 유지합니다(지원 기기). 탭을 닫지 마세요.'}</div>
           </div>
         )}
 
@@ -192,7 +210,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
           {phase === 'idle' && (
             <button className="btn btn--primary btn--lg" onClick={run} disabled={clips.length === 0}>내보내기 시작</button>
           )}
-          {phase === 'running' && <button className="btn btn--lg" disabled>처리 중…</button>}
+          {phase === 'running' && <button className="btn btn--lg btn--danger" onClick={cancel} disabled={cancelling}>{cancelling ? '취소 중…' : '렌더링 취소'}</button>}
           {phase === 'error' && <button className="btn btn--primary btn--lg" onClick={run}>다시 시도</button>}
           {phase === 'done' && (
             <button className="btn btn--primary btn--lg" onClick={save}><Icon name="download" />저장하기</button>
