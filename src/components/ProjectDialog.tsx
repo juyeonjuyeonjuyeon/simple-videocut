@@ -33,6 +33,7 @@ export default function ProjectDialog({ onClose }: { onClose: () => void }) {
   const doLoad = async (n: string) => {
     setBusy('불러오는 중…')
     try { const p = await loadProject(n); if (p) { replaceProject(p); onClose() } }
+    catch (error) { alert('복원 실패: ' + (error as Error).message) }
     finally { setBusy('') }
   }
   const doDelete = async (n: string) => {
