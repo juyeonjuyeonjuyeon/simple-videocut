@@ -25,7 +25,10 @@ function validateVideoBlob(blob: Blob): Promise<void> {
     }
     const src = URL.createObjectURL(blob)
     const video = document.createElement('video')
+    let settled = false
     const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
       video.removeAttribute('src')
       video.load()
       URL.revokeObjectURL(src)
@@ -33,8 +36,10 @@ function validateVideoBlob(blob: Blob): Promise<void> {
       else resolve()
     }
     const timer = window.setTimeout(() => finish(new Error('생성된 영상을 확인하는 데 시간이 너무 오래 걸립니다.')), 15000)
-    video.preload = 'metadata'
-    video.onloadedmetadata = () => {
+    video.preload = 'auto'
+    video.muted = true
+    video.playsInline = true
+    video.onloadeddata = () => {
       window.clearTimeout(timer)
       if (!Number.isFinite(video.duration) || video.duration <= 0 || video.videoWidth <= 0 || video.videoHeight <= 0) {
         finish(new Error('생성된 영상이 올바른 MP4/WebM 파일이 아닙니다.'))
@@ -115,8 +120,8 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
     try {
       const where = await saveBlob(blob, fullName)
       setStatus(where === 'saved' ? '저장 위치에 저장했습니다.' : '다운로드 폴더에 저장했습니다.')
-    } catch {
-      /* user cancelled */
+    } catch (error) {
+      if ((error as Error).name !== 'AbortError') setStatus(`저장 실패: ${(error as Error).message}`)
     }
   }
 
