@@ -29,6 +29,7 @@ export default function ProjectDialog({ onClose }: { onClose: () => void }) {
   const doSave = async () => {
     setBusy('저장 중…')
     try { await saveProject(name.trim() || '무제', snapshot()); await refresh() }
+    catch (error) { alert('저장 실패: ' + (error as Error).message) }
     finally { setBusy('') }
   }
   const doLoad = async (n: string) => {
@@ -39,15 +40,17 @@ export default function ProjectDialog({ onClose }: { onClose: () => void }) {
   }
   const doDelete = async (n: string) => {
     if (!confirm(`'${n}' 프로젝트를 삭제할까요?`)) return
-    await deleteProject(n)
-    refresh()
+    try { await deleteProject(n); await refresh() }
+    catch (error) { alert('삭제 실패: ' + (error as Error).message) }
   }
   const doExportFile = async () => {
     setBusy('파일 만드는 중…')
     try {
       const blob = await projectToFileBlob(name.trim() || '무제', snapshot())
       await saveBlob(blob, `${name.trim() || '무제'}.scut.json`)
-    } catch { /* cancelled */ } finally { setBusy('') }
+    } catch (error) {
+      if ((error as Error).name !== 'AbortError') alert((error as Error).message)
+    } finally { setBusy('') }
   }
   const doShareFile = async () => {
     setBusy('공유 파일 만드는 중…')
@@ -76,14 +79,14 @@ export default function ProjectDialog({ onClose }: { onClose: () => void }) {
       <div className="modal__panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
           <h2>프로젝트</h2>
-          {!busy && <button className="iconbtn" onClick={onClose} aria-label="닫기">✕</button>}
+          {!busy && <button className="iconbtn" onClick={onClose} aria-label="닫기"><Icon name="close" /></button>}
         </div>
 
         <div className="modal__field">
           <span>현재 프로젝트 저장</span>
           <div className="filename">
             <input className="filename__input" value={name} onChange={(e) => setName(e.target.value)} />
-            <button className="btn btn--primary" onClick={doSave} disabled={!!busy}>💾 저장</button>
+            <button className="btn btn--primary" onClick={doSave} disabled={!!busy}><Icon name="folder" />저장</button>
           </div>
         </div>
 

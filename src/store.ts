@@ -2,10 +2,10 @@ import { create } from 'zustand'
 import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop } from './types'
 import { NO_CROP, FONT_OPTIONS } from './types'
 import type { ProjectState } from './utils/project'
-import { probeVideo, probeImage, probeAudio, nextClipColor, isVideoFile, isImageFile, isAudioFile } from './utils/media'
+import { assertMediaCapacity, probeVideo, probeImage, probeAudio, nextClipColor, isVideoFile, isImageFile, isAudioFile } from './utils/media'
 import { clipTimelineDuration, clipStartOffsets, projectDuration, overlayLength, audioLength } from './utils/time'
 
-const uid = () => Math.random().toString(36).slice(2, 10)
+const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
 
 const IMAGE_NOMINAL_MAX = 3600 // images can be stretched up to this length (s)
 const DEFAULT_IMAGE_DUR = 5
@@ -76,6 +76,11 @@ interface EditorState {
 
 type MediaState = Pick<EditorState, 'clips' | 'overlays' | 'audios' | 'backgrounds'>
 const mediaItems = (s: MediaState) => [...s.clips, ...s.overlays, ...s.audios, ...s.backgrounds]
+const existingMediaFiles = (s: MediaState) => [...new Set(mediaItems(s).map((item) => item.file).filter((file) => file.size > 0))]
+const allowMediaBatch = (files: File[], state: MediaState) => {
+  try { assertMediaCapacity(files, existingMediaFiles(state)); return true }
+  catch (error) { alert((error as Error).message); return false }
+}
 
 const clampTrim = (c: { trimStart: number; trimEnd: number; duration: number }) => {
   c.trimStart = Math.max(0, Math.min(c.trimStart, c.duration - 0.1))
@@ -111,6 +116,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   // ---------- main track ----------
   addFiles: async (files) => {
     const list = Array.from(files).filter((f) => isVideoFile(f) || isImageFile(f))
+    if (!list.length || !allowMediaBatch(list, get())) return
     for (const file of list) {
       try {
         let clip: Clip
@@ -291,6 +297,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   // ---------- overlays ----------
   addOverlayFiles: async (files) => {
     const list = Array.from(files).filter((f) => isVideoFile(f) || isImageFile(f))
+    if (!list.length || !allowMediaBatch(list, get())) return
     for (const file of list) {
       try {
         const start = get().playhead
@@ -367,6 +374,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   // ---------- audio ----------
   addAudioFiles: async (files) => {
     const list = Array.from(files).filter((f) => isAudioFile(f))
+    if (!list.length || !allowMediaBatch(list, get())) return
     for (const file of list) {
       try {
         const { duration, src } = await probeAudio(file)

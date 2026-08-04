@@ -31,6 +31,20 @@ interface SerializedProject {
   media: MediaBlob[]
 }
 
+export const PROJECT_LIMITS = {
+  maxPortableBytes: 512 * 1024 * 1024,
+  maxDecodedMediaBytes: 384 * 1024 * 1024,
+  maxItemsPerTrack: 200,
+  maxNameLength: 255,
+  maxTextLength: 10_000,
+  maxDurationSeconds: 6 * 60 * 60,
+} as const
+
+export function assertPortableMediaBudget(encodedLengths: number[]): void {
+  const decodedBytes = encodedLengths.reduce((sum, length) => sum + Math.floor(length * 0.75), 0)
+  if (decodedBytes > PROJECT_LIMITS.maxDecodedMediaBytes) throw new Error('프로젝트의 디코딩된 미디어 용량이 너무 큽니다.')
+}
+
 export interface ProjectMeta { name: string; savedAt: number; size: number }
 
 // ---- serialize / deserialize ----
@@ -182,13 +196,18 @@ export async function saveProject(name: string, s: ProjectState): Promise<void> 
 export async function loadProject(name: string): Promise<ProjectState | null> {
   const st = await store('readonly')
   const p = await reqP<SerializedProject | undefined>(st.get(name))
-  return p ? verifyProjectMedia(deserialize(p)) : null
+  if (!p) return null
+  assertStoredProject(p)
+  return verifyProjectMedia(deserialize(p))
 }
 export async function listProjects(): Promise<ProjectMeta[]> {
   const st = await store('readonly')
   const all = await reqP<SerializedProject[]>(st.getAll())
   return all
-    .filter((p) => p.name !== AUTOSAVE_KEY)
+    .filter((p) => {
+      if (p.name === AUTOSAVE_KEY) return false
+      try { assertStoredProject(p); return true } catch { return false }
+    })
     .map((p) => ({ name: p.name, savedAt: p.savedAt, size: p.media.reduce((a, m) => a + m.blob.size, 0) }))
     .sort((a, b) => b.savedAt - a.savedAt)
 }
@@ -200,6 +219,7 @@ export async function autosaveMeta(): Promise<ProjectMeta | null> {
   const st = await store('readonly')
   const p = await reqP<SerializedProject | undefined>(st.get(AUTOSAVE_KEY))
   if (!p || (!p.clips.length && !p.overlays.length && !p.audios.length && !p.backgrounds.length && !p.texts.length)) return null
+  assertStoredProject(p)
   return { name: p.name, savedAt: p.savedAt, size: p.media.reduce((a, m) => a + m.blob.size, 0) }
 }
 
@@ -221,13 +241,17 @@ function base64ToBlob(b64: string, type: string): Blob {
 
 export async function projectToFileBlob(name: string, s: ProjectState): Promise<Blob> {
   const p = serialize(name, s)
+  const decodedBytes = p.media.reduce((sum, item) => sum + item.blob.size, 0)
+  if (decodedBytes > PROJECT_LIMITS.maxDecodedMediaBytes) {
+    throw new Error('공유용 프로젝트 파일은 원본 미디어 합계가 384MB 이하일 때 만들 수 있습니다.')
+  }
   const media = await Promise.all(
     p.media.map(async (m) => ({ id: m.id, name: m.name, type: m.type, data: await blobToBase64(m.blob) })),
   )
   return new Blob([JSON.stringify({ ...p, media })], { type: 'application/json' })
 }
 export async function fileBlobToProject(file: File): Promise<ProjectState> {
-  if (file.size > 1024 * 1024 * 1024) throw new Error('프로젝트 파일은 1GB 이하만 열 수 있습니다.')
+  if (file.size > PROJECT_LIMITS.maxPortableBytes) throw new Error('프로젝트 파일은 512MB 이하만 열 수 있습니다.')
   const json: unknown = JSON.parse(await file.text())
   assertPortableProject(json)
   const media: MediaBlob[] = (json.media || []).map((m: { id: string; name: string; type: string; data: string }) => ({
@@ -240,19 +264,131 @@ type PortableProject = Omit<SerializedProject, 'media'> & {
   media: { id: string; name: string; type: string; data: string }[]
 }
 
-function assertPortableProject(value: unknown): asserts value is PortableProject {
+const finite = (value: unknown, min: number, max: number, label: string) => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) throw new Error(`${label} 값이 잘못되었습니다.`)
+}
+const text = (value: unknown, max: number, label: string) => {
+  if (typeof value !== 'string' || value.length > max) throw new Error(`${label} 값이 잘못되었습니다.`)
+}
+const record = (value: unknown, label: string): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} 정보가 잘못되었습니다.`)
+  return value as Record<string, unknown>
+}
+const validateItem = (value: unknown, track: string) => {
+  const item = record(value, track)
+  text(item.id, 100, `${track} ID`)
+  if (track !== '텍스트') text(item.name, PROJECT_LIMITS.maxNameLength, `${track} 이름`)
+  if (track === '텍스트') {
+    text(item.text, PROJECT_LIMITS.maxTextLength, '텍스트 내용')
+    finite(item.start, 0, PROJECT_LIMITS.maxDurationSeconds, '텍스트 시작')
+    finite(item.end, 0, PROJECT_LIMITS.maxDurationSeconds, '텍스트 종료')
+    if ((item.end as number) < (item.start as number)) throw new Error('텍스트 시간 범위가 잘못되었습니다.')
+    finite(item.x, 0, 1, '텍스트 가로 위치')
+    finite(item.y, 0, 1, '텍스트 세로 위치')
+    finite(item.size, 0.001, 1, '텍스트 크기')
+    finite(item.angle, -180, 180, '텍스트 회전')
+    return
+  }
+  if (track !== '오디오' && !['video', 'image', 'color'].includes(String(item.kind))) throw new Error(`${track} 종류가 잘못되었습니다.`)
+  if ('duration' in item) finite(item.duration, 0.01, PROJECT_LIMITS.maxDurationSeconds, `${track} 길이`)
+  if ('trimStart' in item) finite(item.trimStart, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 시작 트림`)
+  if ('trimEnd' in item) finite(item.trimEnd, 0.01, PROJECT_LIMITS.maxDurationSeconds, `${track} 끝 트림`)
+  if (typeof item.trimStart === 'number' && typeof item.trimEnd === 'number' && item.trimEnd <= item.trimStart) throw new Error(`${track} 트림 범위가 잘못되었습니다.`)
+  if ('speed' in item) finite(item.speed, 0.25, 4, `${track} 속도`)
+  if ('volume' in item) finite(item.volume, 0, 2, `${track} 음량`)
+  if ('repeat' in item) finite(item.repeat, 1, 99, `${track} 반복`)
+  if ('start' in item) finite(item.start, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 시작 위치`)
+  if ('x' in item) finite(item.x, 0, 1, `${track} 가로 위치`)
+  if ('y' in item) finite(item.y, 0, 1, `${track} 세로 위치`)
+  if ('scale' in item) finite(item.scale, 0.1, 1, `${track} 크기`)
+  if ('angle' in item) finite(item.angle, -180, 180, `${track} 회전`)
+  if ('crop' in item) {
+    const crop = record(item.crop, `${track} 크롭`)
+    for (const side of ['top', 'right', 'bottom', 'left']) finite(crop[side], 0, 0.45, `${track} 크롭`)
+  }
+  if ('mediaId' in item && item.mediaId !== null) text(item.mediaId, 100, `${track} 미디어 연결`)
+}
+
+function assertBaseProject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object') throw new Error('올바른 간단컷 프로젝트가 아닙니다.')
   const p = value as Record<string, unknown>
   if (p.version !== 1) throw new Error('지원하지 않는 프로젝트 버전입니다.')
+  text(p.name, PROJECT_LIMITS.maxNameLength, '프로젝트 이름')
+  finite(p.savedAt, 0, Number.MAX_SAFE_INTEGER, '저장 시간')
   if (!['16:9', '9:16', '1:1'].includes(String(p.aspectRatio))) throw new Error('화면 비율 정보가 잘못되었습니다.')
+  const settings = record(p.exportSettings, '내보내기 설정')
+  if (![480, 720, 1080, 1440, 2160].includes(Number(settings.height))) throw new Error('내보내기 해상도가 잘못되었습니다.')
+  if (!['mp4', 'webm'].includes(String(settings.format))) throw new Error('내보내기 형식이 잘못되었습니다.')
+  text(settings.filename, 120, '내보내기 파일 이름')
   for (const key of ['clips', 'overlays', 'audios', 'backgrounds', 'texts', 'media']) {
     if (!Array.isArray(p[key])) throw new Error(`프로젝트의 ${key} 항목이 잘못되었습니다.`)
+    if ((p[key] as unknown[]).length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error(`프로젝트의 ${key} 항목 수가 너무 많습니다.`)
   }
+  for (const item of p.clips as unknown[]) validateItem(item, '클립')
+  for (const item of p.overlays as unknown[]) validateItem(item, '오버레이')
+  for (const item of p.audios as unknown[]) validateItem(item, '오디오')
+  for (const item of p.backgrounds as unknown[]) validateItem(item, '배경')
+  for (const item of p.texts as unknown[]) validateItem(item, '텍스트')
+
+  const clipDuration = (value: unknown) => {
+    const item = value as Record<string, unknown>
+    const trimStart = typeof item.trimStart === 'number' ? item.trimStart : 0
+    const trimEnd = typeof item.trimEnd === 'number' ? item.trimEnd : Number(item.duration || 0)
+    const speed = typeof item.speed === 'number' ? item.speed : 1
+    const repeat = typeof item.repeat === 'number' ? item.repeat : 1
+    return ((trimEnd - trimStart) / speed) * repeat
+  }
+  const mainDuration = (p.clips as unknown[]).reduce<number>((sum, item) => sum + clipDuration(item), 0)
+  if (mainDuration > PROJECT_LIMITS.maxDurationSeconds) throw new Error('프로젝트 전체 길이는 6시간을 넘을 수 없습니다.')
+  for (const key of ['overlays', 'audios', 'backgrounds']) {
+    for (const value of p[key] as unknown[]) {
+      const item = value as Record<string, unknown>
+      const end = Number(item.start || 0) + clipDuration(item)
+      if (end > PROJECT_LIMITS.maxDurationSeconds) throw new Error('프로젝트 전체 길이는 6시간을 넘을 수 없습니다.')
+    }
+  }
+  return p
+}
+
+function assertMediaReferences(p: Record<string, unknown>, ids: Set<string>): void {
+  for (const key of ['clips', 'overlays', 'audios', 'backgrounds']) {
+    for (const value of p[key] as unknown[]) {
+      const item = value as Record<string, unknown>
+      if (item.kind === 'color') continue
+      if (typeof item.mediaId !== 'string' || !ids.has(item.mediaId)) throw new Error('프로젝트의 미디어 연결 정보가 잘못되었습니다.')
+    }
+  }
+}
+
+export function assertPortableProject(value: unknown): asserts value is PortableProject {
+  const p = assertBaseProject(value)
+  const ids = new Set<string>()
+  const encodedLengths: number[] = []
   for (const media of p.media as unknown[]) {
-    if (!media || typeof media !== 'object') throw new Error('미디어 정보가 잘못되었습니다.')
-    const m = media as Record<string, unknown>
+    const m = record(media, '미디어')
     if (typeof m.id !== 'string' || typeof m.name !== 'string' || typeof m.type !== 'string' || typeof m.data !== 'string') {
       throw new Error('미디어 정보가 불완전합니다.')
     }
+    if (ids.has(m.id)) throw new Error('미디어 ID가 중복되었습니다.')
+    ids.add(m.id)
+    text(m.name, PROJECT_LIMITS.maxNameLength, '미디어 이름')
+    encodedLengths.push(m.data.length)
   }
+  assertPortableMediaBudget(encodedLengths)
+  assertMediaReferences(p, ids)
+}
+
+function assertStoredProject(value: unknown): asserts value is SerializedProject {
+  const p = assertBaseProject(value)
+  const ids = new Set<string>()
+  for (const media of p.media as unknown[]) {
+    const m = record(media, '저장 미디어')
+    if (typeof m.id !== 'string' || typeof m.name !== 'string' || typeof m.type !== 'string' || !(m.blob instanceof Blob) || m.blob.size <= 0) {
+      throw new Error('저장된 미디어 정보가 불완전합니다.')
+    }
+    if (ids.has(m.id)) throw new Error('저장된 미디어 ID가 중복되었습니다.')
+    ids.add(m.id)
+    text(m.name, PROJECT_LIMITS.maxNameLength, '저장 미디어 이름')
+  }
+  assertMediaReferences(p, ids)
 }

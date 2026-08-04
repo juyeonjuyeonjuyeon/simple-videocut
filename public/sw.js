@@ -1,4 +1,4 @@
-const CACHE = 'simplecut-shell-v1'
+const CACHE = 'simplecut-shell-v2'
 const scoped = (path = '') => new URL(path, self.registration.scope).pathname
 const SHELL = [scoped(), scoped('manifest.webmanifest'), scoped('dog.svg'), scoped('icon-192.png'), scoped('icon-512.png')]
 

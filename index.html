@@ -2,6 +2,8 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'" />
+    <meta name="referrer" content="no-referrer" />
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%dog.svg" />
     <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
     <link rel="apple-touch-icon" href="%BASE_URL%icon-192.png" />
@@ -21,7 +23,7 @@
   <body>
     <div id="root"></div>
     <div id="splash">
-      <div class="splash__logo">🐶</div>
+      <img class="splash__logo" src="%BASE_URL%dog.svg" alt="" />
       <div class="splash__name">간단컷</div>
       <div class="splash__spin"></div>
     </div>
@@ -34,7 +36,7 @@
         transition: opacity 0.35s ease;
       }
       #splash.hide { opacity: 0; pointer-events: none; }
-      .splash__logo { font-size: 44px; }
+      .splash__logo { width: 52px; height: 52px; }
       .splash__name { font-size: 20px; font-weight: 700; letter-spacing: 0.3px; }
       .splash__spin {
         width: 30px; height: 30px; margin-top: 6px;

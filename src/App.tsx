@@ -206,23 +206,18 @@ export default function App() {
     dragDepth.current--
     if (dragDepth.current <= 0) setDragging(false)
   }
+  const addCategorizedFiles = async (files: File[]) => {
+    const main = files.filter((file) => isVideoFile(file) || isImageFile(file))
+    const audio = files.filter(isAudioFile)
+    if (main.length) await addFiles(main)
+    if (audio.length) await addAudioFiles(audio)
+  }
   const onDrop = (e: React.DragEvent) => {
     if (!hasFiles(e)) return
     e.preventDefault()
     dragDepth.current = 0
     setDragging(false)
-    const files = Array.from(e.dataTransfer.files)
-    const main = files.filter((f) => isVideoFile(f) || isImageFile(f))
-    const audio = files.filter(isAudioFile)
-    if (main.length) addFiles(main)
-    if (audio.length) addAudioFiles(audio)
-  }
-  const addMixedFiles = (list: FileList) => {
-    const files = Array.from(list)
-    const main = files.filter((file) => isVideoFile(file) || isImageFile(file))
-    const audio = files.filter(isAudioFile)
-    if (main.length) void addFiles(main)
-    if (audio.length) void addAudioFiles(audio)
+    void addCategorizedFiles(Array.from(e.dataTransfer.files))
   }
 
   return (
@@ -243,7 +238,7 @@ export default function App() {
           </button>
         </div>
         <input ref={fileRef} type="file" accept={`video/*,image/*,${AUDIO_ACCEPT}`} multiple hidden
-          onChange={(e) => { if (e.target.files) addMixedFiles(e.target.files); e.target.value = '' }} />
+          onChange={(e) => { if (e.target.files) void addCategorizedFiles(Array.from(e.target.files)); e.target.value = '' }} />
         <input ref={overlayRef} type="file" accept="video/*,image/*" multiple hidden
           onChange={(e) => { if (e.target.files) addOverlayFiles(e.target.files); e.target.value = '' }} />
         <input ref={audioRef} type="file" accept={AUDIO_ACCEPT} multiple hidden

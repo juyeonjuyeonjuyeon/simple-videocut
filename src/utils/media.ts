@@ -4,6 +4,27 @@ const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.webm', '.ogv'])
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.avif'])
 const AUDIO_EXTENSIONS = new Set(['.m4a', '.aac', '.caf', '.wav', '.mp3', '.aif', '.aiff', '.flac', '.ogg', '.oga', '.opus'])
 
+export const MEDIA_LIMITS = {
+  maxFileBytes: 1024 * 1024 * 1024,
+  maxProjectBytes: 1536 * 1024 * 1024,
+  maxItems: 100,
+} as const
+
+type FileSize = Pick<File, 'name' | 'size'>
+
+/** Reject resource-exhausting batches before browser media parsers see them. */
+export function assertMediaCapacity(incoming: FileSize[], existing: FileSize[]): void {
+  if (existing.length + incoming.length > MEDIA_LIMITS.maxItems) {
+    throw new Error(`미디어는 프로젝트당 최대 ${MEDIA_LIMITS.maxItems}개까지 추가할 수 있습니다.`)
+  }
+  for (const file of incoming) {
+    if (file.size <= 0) throw new Error(`비어 있는 파일은 추가할 수 없습니다: ${file.name}`)
+    if (file.size > MEDIA_LIMITS.maxFileBytes) throw new Error(`파일 크기는 1GB 이하여야 합니다: ${file.name}`)
+  }
+  const total = [...existing, ...incoming].reduce((sum, file) => sum + file.size, 0)
+  if (total > MEDIA_LIMITS.maxProjectBytes) throw new Error('프로젝트 전체 미디어 용량은 1.5GB 이하여야 합니다.')
+}
+
 // Mobile file pickers may omit File.type, especially for Voice Memos.
 export const isVideoFile = (file: File) => file.type.startsWith('video/') || (!file.type && VIDEO_EXTENSIONS.has(extension(file)))
 export const isImageFile = (file: File) => file.type.startsWith('image/') || (!file.type && IMAGE_EXTENSIONS.has(extension(file)))
