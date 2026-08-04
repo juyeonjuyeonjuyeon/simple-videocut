@@ -420,10 +420,16 @@ export async function exportVideo(opts: ExportOptions): Promise<Blob> {
       )
     }
 
-    await fp.exec(args)
+    const exitCode = await fp.exec(args)
+    if (exitCode !== 0) {
+      throw new Error(`영상 변환에 실패했습니다. (FFmpeg 종료 코드 ${exitCode})`)
+    }
     const data = await fp.readFile(outName)
     // Copy into a fresh ArrayBuffer-backed array (readFile may be SharedArrayBuffer-backed).
     const bytes = new Uint8Array(data as Uint8Array)
+    if (bytes.byteLength === 0) {
+      throw new Error('영상 변환 결과가 비어 있습니다. 설정을 낮추거나 원본 파일을 다시 확인해 주세요.')
+    }
 
     // 5. Clean up the virtual filesystem for the next run.
     await cleanup(fp, outName, clips.length, texts.length, overlays.length, backgrounds.length, audios.length)

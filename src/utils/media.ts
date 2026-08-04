@@ -1,3 +1,16 @@
+const extension = (file: File) => file.name.toLowerCase().match(/\.[^.]+$/)?.[0] ?? ''
+
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.webm', '.ogv'])
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.avif'])
+const AUDIO_EXTENSIONS = new Set(['.m4a', '.aac', '.caf', '.wav', '.mp3', '.aif', '.aiff', '.flac', '.ogg', '.oga', '.opus'])
+
+// Mobile file pickers may omit File.type, especially for Voice Memos.
+export const isVideoFile = (file: File) => file.type.startsWith('video/') || (!file.type && VIDEO_EXTENSIONS.has(extension(file)))
+export const isImageFile = (file: File) => file.type.startsWith('image/') || (!file.type && IMAGE_EXTENSIONS.has(extension(file)))
+export const isAudioFile = (file: File) => file.type.startsWith('audio/') || AUDIO_EXTENSIONS.has(extension(file))
+
+export const AUDIO_ACCEPT = 'audio/*,.m4a,.aac,.caf,.wav,.mp3,.aif,.aiff,.flac,.ogg,.oga,.opus'
+
 /** Probe a video File for its duration and whether it carries an audio track. */
 export function probeVideo(file: File): Promise<{ duration: number; hasAudio: boolean; src: string }> {
   return new Promise((resolve, reject) => {

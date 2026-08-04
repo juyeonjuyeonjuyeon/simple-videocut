@@ -8,6 +8,7 @@ import ProjectDialog from './components/ProjectDialog'
 import { projectDuration, formatTime } from './utils/time'
 import { saveProject, loadProject, autosaveMeta, AUTOSAVE_KEY } from './utils/project'
 import type { ProjectMeta } from './utils/project'
+import { AUDIO_ACCEPT, isAudioFile, isImageFile, isVideoFile } from './utils/media'
 
 export default function App() {
   const clips = useEditor((s) => s.clips)
@@ -165,8 +166,8 @@ export default function App() {
     dragDepth.current = 0
     setDragging(false)
     const files = Array.from(e.dataTransfer.files)
-    const main = files.filter((f) => f.type.startsWith('video/') || f.type.startsWith('image/'))
-    const audio = files.filter((f) => f.type.startsWith('audio/'))
+    const main = files.filter((f) => isVideoFile(f) || isImageFile(f))
+    const audio = files.filter(isAudioFile)
     if (main.length) addFiles(main)
     if (audio.length) addAudioFiles(audio)
   }
@@ -192,7 +193,7 @@ export default function App() {
           onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }} />
         <input ref={overlayRef} type="file" accept="video/*,image/*" multiple hidden
           onChange={(e) => { if (e.target.files) addOverlayFiles(e.target.files); e.target.value = '' }} />
-        <input ref={audioRef} type="file" accept="audio/*" multiple hidden
+        <input ref={audioRef} type="file" accept={AUDIO_ACCEPT} multiple hidden
           onChange={(e) => { if (e.target.files) addAudioFiles(e.target.files); e.target.value = '' }} />
       </header>
 

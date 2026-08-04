@@ -17,6 +17,37 @@ const FORMATS: { v: 'mp4' | 'webm'; label: string }[] = [
   { v: 'webm', label: 'WebM (.webm)' },
 ]
 
+function validateVideoBlob(blob: Blob): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (blob.size === 0) {
+      reject(new Error('생성된 영상이 비어 있습니다.'))
+      return
+    }
+    const src = URL.createObjectURL(blob)
+    const video = document.createElement('video')
+    const finish = (error?: Error) => {
+      video.removeAttribute('src')
+      video.load()
+      URL.revokeObjectURL(src)
+      if (error) reject(error)
+      else resolve()
+    }
+    const timer = window.setTimeout(() => finish(new Error('생성된 영상을 확인하는 데 시간이 너무 오래 걸립니다.')), 15000)
+    video.preload = 'metadata'
+    video.onloadedmetadata = () => {
+      window.clearTimeout(timer)
+      if (!Number.isFinite(video.duration) || video.duration <= 0 || video.videoWidth <= 0 || video.videoHeight <= 0) {
+        finish(new Error('생성된 영상이 올바른 MP4/WebM 파일이 아닙니다.'))
+      } else finish()
+    }
+    video.onerror = () => {
+      window.clearTimeout(timer)
+      finish(new Error('생성된 영상을 이 기기에서 재생할 수 없습니다.'))
+    }
+    video.src = src
+  })
+}
+
 export default function ExportDialog({ onClose }: { onClose: () => void }) {
   const clips = useEditor((s) => s.clips)
   const texts = useEditor((s) => s.texts)
@@ -64,6 +95,8 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
           if (line.includes('frame=')) setStatus(line.trim().slice(0, 60))
         },
       })
+      setStatus('파일 재생 가능 여부 확인 중…')
+      await validateVideoBlob(out)
       setBlob(out)
       setUrl(URL.createObjectURL(out))
       setPhase('done')
