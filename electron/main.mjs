@@ -13,6 +13,8 @@ let workDir = null
 let processHandle = null
 let quitting = false
 
+const isRendering = () => Boolean(processHandle && processHandle.exitCode === null && processHandle.signalCode === null)
+
 async function workspace() {
   if (!workDir) workDir = await mkdtemp(join(tmpdir(), 'simplecut-render-'))
   return workDir
@@ -85,6 +87,7 @@ ipcMain.handle('native-ffmpeg:terminate', async () => {
 })
 
 function createWindow() {
+  let allowClose = false
   const window = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -101,16 +104,24 @@ function createWindow() {
   })
   if (process.env.SIMPLECUT_DEV_URL) window.loadURL(process.env.SIMPLECUT_DEV_URL)
   else window.loadFile(join(root, 'dist', 'index.html'))
-  window.on('close', (event) => {
-    if (!processHandle || quitting) return
+  window.on('close', async (event) => {
+    if (!isRendering() || quitting || allowClose) return
     event.preventDefault()
-    void dialog.showMessageBox(window, {
-      type: 'info',
+    const { response } = await dialog.showMessageBox(window, {
+      type: 'warning',
       title: '렌더링 진행 중',
       message: '영상 렌더링이 진행 중입니다.',
-      detail: '창을 최소화해도 렌더링은 계속됩니다. 작업을 취소하려면 내보내기 창의 취소 버튼을 사용하세요.',
-      buttons: ['확인'],
+      detail: '창을 최소화하면 렌더링은 계속됩니다. 지금 창을 닫으면 진행 중인 렌더링은 취소됩니다.',
+      buttons: ['계속 렌더링', '렌더링 취소하고 창 닫기'],
+      defaultId: 0,
+      cancelId: 0,
     })
+    if (response !== 1) return
+    processHandle?.kill('SIGKILL')
+    processHandle = null
+    await clearWorkspace()
+    allowClose = true
+    window.close()
   })
 }
 

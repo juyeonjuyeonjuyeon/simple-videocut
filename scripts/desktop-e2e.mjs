@@ -28,6 +28,6 @@ try {
   if (!status?.includes('완료')) throw new Error(`타임라인 내보내기가 완료되지 않았습니다: ${status}`)
   process.stdout.write(`${status}\n`)
 } finally {
-  await app.close()
+  app.process().kill('SIGKILL')
   rmSync(temp, { recursive: true, force: true })
 }

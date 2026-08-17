@@ -18,7 +18,7 @@
     "desktop:dev": "DESKTOP_BUILD=1 npm run build && electron .",
     "desktop:build": "DESKTOP_BUILD=1 npm run build && electron-builder --mac dir",
     "desktop:package": "DESKTOP_BUILD=1 npm run build && electron-builder --mac dmg",
-    "desktop:test": "node scripts/packaged-launch.mjs && node scripts/desktop-smoke.mjs && node scripts/desktop-e2e.mjs"
+    "desktop:test": "node scripts/packaged-launch.mjs && node scripts/desktop-close-test.mjs && node scripts/desktop-smoke.mjs && node scripts/desktop-e2e.mjs"
   },
   "dependencies": {
     "@ffmpeg/core": "0.12.10",
