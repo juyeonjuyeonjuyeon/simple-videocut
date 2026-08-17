@@ -91,7 +91,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     backgroundColor: '#15171b',
-    title: '간단컷',
+    title: 'SimpleCut',
     webPreferences: {
       preload: join(root, 'electron', 'preload.cjs'),
       contextIsolation: true,

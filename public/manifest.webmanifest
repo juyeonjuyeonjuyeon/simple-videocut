@@ -1,6 +1,6 @@
 {
-  "name": "간단컷 — 나만의 영상 편집기",
-  "short_name": "간단컷",
+  "name": "SimpleCut — 나만의 영상 편집기",
+  "short_name": "SimpleCut",
   "description": "기기 안에서 안전하게 동작하는 개인용 영상 편집기",
   "lang": "ko",
   "start_url": ".",

@@ -310,7 +310,7 @@ const validateItem = (value: unknown, track: string) => {
 }
 
 function assertBaseProject(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object') throw new Error('올바른 간단컷 프로젝트가 아닙니다.')
+  if (!value || typeof value !== 'object') throw new Error('올바른 SimpleCut 프로젝트가 아닙니다.')
   const p = value as Record<string, unknown>
   if (p.version !== 1) throw new Error('지원하지 않는 프로젝트 버전입니다.')
   text(p.name, PROJECT_LIMITS.maxNameLength, '프로젝트 이름')

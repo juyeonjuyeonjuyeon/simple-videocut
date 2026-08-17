@@ -59,7 +59,7 @@ export default function ProjectDialog({ onClose }: { onClose: () => void }) {
       const blob = await projectToFileBlob(projectName, snapshot())
       const file = new File([blob], `${projectName}.scut`, { type: 'application/json' })
       if (!navigator.share || !navigator.canShare?.({ files: [file] })) throw new Error('이 기기에서는 파일 공유를 지원하지 않습니다.')
-      await navigator.share({ title: `${projectName} — 간단컷 프로젝트`, files: [file] })
+      await navigator.share({ title: `${projectName} — SimpleCut 프로젝트`, files: [file] })
     } catch (error) {
       if ((error as Error).name !== 'AbortError') alert((error as Error).message)
     } finally { setBusy('') }

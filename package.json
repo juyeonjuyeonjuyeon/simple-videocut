@@ -16,9 +16,9 @@
     "test:e2e": "playwright test",
     "check": "npm run lint && npm run test && npm run build",
     "desktop:dev": "DESKTOP_BUILD=1 npm run build && electron .",
-    "desktop:build": "DESKTOP_BUILD=1 npm run build && electron-builder --mac dir && node scripts/sign-desktop.mjs",
+    "desktop:build": "DESKTOP_BUILD=1 npm run build && electron-builder --mac dir",
     "desktop:package": "DESKTOP_BUILD=1 npm run build && electron-builder --mac dmg",
-    "desktop:test": "node scripts/desktop-smoke.mjs && node scripts/desktop-e2e.mjs"
+    "desktop:test": "node scripts/packaged-launch.mjs && node scripts/desktop-smoke.mjs && node scripts/desktop-e2e.mjs"
   },
   "dependencies": {
     "@ffmpeg/core": "0.12.10",
@@ -47,10 +47,9 @@
   },
   "build": {
     "appId": "com.juyeon.simplecut",
-    "productName": "간단컷",
-    "afterPack": "scripts/after-pack.cjs",
+    "productName": "SimpleCut",
     "files": ["dist/**/*", "electron/**/*", "package.json"],
     "extraResources": [{ "from": "node_modules/ffmpeg-static/ffmpeg", "to": "ffmpeg" }],
-    "mac": { "target": ["dmg"], "category": "public.app-category.video", "icon": "public/icon-512.png" }
+    "mac": { "target": ["dmg"], "category": "public.app-category.video", "icon": "public/icon-512.png", "identity": "-" }
   }
 }

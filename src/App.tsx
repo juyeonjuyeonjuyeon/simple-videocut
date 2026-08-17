@@ -225,7 +225,7 @@ export default function App() {
       <header className="topbar">
         <div className="topbar__brand">
           <span className="topbar__logo"><Icon name="brand" /></span>
-          <span className="topbar__name">간단컷</span>
+          <span className="topbar__name">SimpleCut</span>
         </div>
         <div className="topbar__actions">
           <span className={`save-status save-status--${saveStatus}`} role="status">
