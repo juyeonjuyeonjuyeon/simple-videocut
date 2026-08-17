@@ -2,15 +2,18 @@ import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { _electron as electron } from 'playwright'
+import { createElectronTestEnvironment } from './electron-test-env.mjs'
 
 const output = process.env.SIMPLECUT_APP_OUTPUT || join(process.cwd(), 'dist', 'mac-arm64')
 const appName = readdirSync(output).find((name) => name === 'SimpleCut.app')
 if (!appName) throw new Error('검사할 SimpleCut 앱을 찾지 못했습니다.')
 const executable = join(output, appName, 'Contents', 'MacOS', 'SimpleCut')
-const app = await electron.launch({ executablePath: executable })
+const testEnv = createElectronTestEnvironment('simplecut-close-test')
+const app = await electron.launch({ executablePath: executable, args: testEnv.launchArgs })
 const processHandle = app.process()
 
 try {
+  await testEnv.verify(app)
   const page = await app.firstWindow({ timeout: 15_000 })
   await page.evaluate(async () => {
     const bridge = globalThis.simplecutDesktop
@@ -29,4 +32,5 @@ try {
   process.stdout.write('창은 닫히고 앱은 Dock에 유지됨\n')
 } finally {
   if (processHandle.exitCode === null) await app.close()
+  testEnv.cleanup()
 }

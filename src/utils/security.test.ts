@@ -15,6 +15,18 @@ const validProject = (): {
   clips: [], overlays: [], audios: [], backgrounds: [], texts: [], media: [],
 })
 
+const mediaClip = (speed = 1) => ({
+  id: 'c0', name: 'clip.mp4', kind: 'video', mediaId: 'm0',
+  duration: 2, trimStart: 0, trimEnd: 2, speed,
+  volume: 1, muted: false, hasAudio: true, color: '#123456',
+  rotate: 0, flipH: false, flipV: false, repeat: 1,
+  crop: { top: 0, right: 0, bottom: 0, left: 0 },
+})
+
+const addMedia = (project: ReturnType<typeof validProject>) => {
+  project.media = [{ id: 'm0', name: 'clip.mp4', type: 'video/mp4', data: 'AAAA' }]
+}
+
 describe('untrusted media limits', () => {
   it('rejects an oversized media file before browser decoding', () => {
     expect(() => assertMediaCapacity([
@@ -49,13 +61,26 @@ describe('portable project schema', () => {
 
   it('rejects a project whose repeated timeline exceeds the safe duration', () => {
     const project = validProject()
-    project.media = [{ id: 'm0', name: 'clip.mp4', type: 'video/mp4', data: 'AAAA' }]
+    addMedia(project)
     project.clips = [{
-      id: 'c0', name: 'clip.mp4', kind: 'video', mediaId: 'm0',
+      ...mediaClip(),
       duration: 3600, trimStart: 0, trimEnd: 3600,
-      speed: 0.25, volume: 1, repeat: 2,
-      crop: { top: 0, right: 0, bottom: 0, left: 0 },
+      speed: 0.1, repeat: 2,
     }]
     expect(() => assertPortableProject(project)).toThrow(/전체 길이/)
+  })
+
+  it('accepts the 0.1x minimum speed offered by the editor', () => {
+    const project = validProject()
+    addMedia(project)
+    project.clips = [mediaClip(0.1)]
+    expect(() => assertPortableProject(project)).not.toThrow()
+  })
+
+  it('rejects media items that omit required editing fields', () => {
+    const project = validProject()
+    addMedia(project)
+    project.clips = [{ id: 'c0', name: 'clip.mp4', kind: 'video', mediaId: 'm0' }]
+    expect(() => assertPortableProject(project)).toThrow(/길이|트림|속도|필수/)
   })
 })

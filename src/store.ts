@@ -6,6 +6,7 @@ import { assertMediaCapacity, probeVideo, probeImage, probeAudio, nextClipColor,
 import { clipTimelineDuration, clipStartOffsets, projectDuration, overlayLength, audioLength } from './utils/time'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
+const nativePathFor = (file: File) => window.simplecutDesktop?.filePath(file) || undefined
 
 const IMAGE_NOMINAL_MAX = 3600 // images can be stretched up to this length (s)
 const DEFAULT_IMAGE_DUR = 5
@@ -124,6 +125,7 @@ export const useEditor = create<EditorState>((set, get) => ({
           const { src } = await probeImage(file)
           clip = {
             id: uid(), kind: 'image', name: file.name, src, file,
+            nativePath: nativePathFor(file),
             duration: IMAGE_NOMINAL_MAX, trimStart: 0, trimEnd: DEFAULT_IMAGE_DUR,
             speed: 1, volume: 1, muted: false, hasAudio: false, color: nextClipColor(),
             ...TRANSFORM_DEFAULTS, repeat: 1,
@@ -132,6 +134,7 @@ export const useEditor = create<EditorState>((set, get) => ({
           const { duration, hasAudio, src } = await probeVideo(file)
           clip = {
             id: uid(), kind: 'video', name: file.name, src, file,
+            nativePath: nativePathFor(file),
             duration, trimStart: 0, trimEnd: duration,
             speed: 1, volume: 1, muted: false, hasAudio, color: nextClipColor(),
             ...TRANSFORM_DEFAULTS, repeat: 1,
@@ -200,10 +203,33 @@ export const useEditor = create<EditorState>((set, get) => ({
       const end = start + dur
       if (playhead > start + 0.05 && playhead < end - 0.05) {
         const c = clips[i]
-        const cutSource = c.trimStart + (playhead - start) * c.speed
-        const left: Clip = { ...c, id: uid(), trimEnd: cutSource }
-        const right: Clip = { ...c, id: uid(), trimStart: cutSource }
-        const nextClips = [...clips.slice(0, i), left, right, ...clips.slice(i + 1)]
+        const cycleDuration = (c.trimEnd - c.trimStart) / c.speed
+        const localTime = playhead - start
+        const cycleIndex = Math.min(c.repeat - 1, Math.floor(localTime / cycleDuration))
+        const timeInCycle = localTime - cycleIndex * cycleDuration
+        const nearStart = timeInCycle <= 0.05
+        const nearEnd = cycleDuration - timeInCycle <= 0.05
+
+        if ((nearStart || nearEnd) && c.repeat > 1) {
+          const boundary = cycleIndex + (nearEnd ? 1 : 0)
+          if (boundary > 0 && boundary < c.repeat) {
+            const left: Clip = { ...c, id: uid(), repeat: boundary }
+            const right: Clip = { ...c, id: uid(), repeat: c.repeat - boundary }
+            const nextClips = [...clips.slice(0, i), left, right, ...clips.slice(i + 1)]
+            set({ clips: nextClips, selection: { type: 'clip', id: right.id } })
+            return
+          }
+        }
+
+        const cutSource = Math.min(c.trimEnd, Math.max(c.trimStart, c.trimStart + timeInCycle * c.speed))
+        const pieces: Clip[] = []
+        if (cycleIndex > 0) pieces.push({ ...c, id: uid(), repeat: cycleIndex })
+        const left: Clip = { ...c, id: uid(), trimEnd: cutSource, repeat: 1 }
+        const right: Clip = { ...c, id: uid(), trimStart: cutSource, repeat: 1 }
+        pieces.push(left, right)
+        const remaining = c.repeat - cycleIndex - 1
+        if (remaining > 0) pieces.push({ ...c, id: uid(), repeat: remaining })
+        const nextClips = [...clips.slice(0, i), ...pieces, ...clips.slice(i + 1)]
         set({ clips: nextClips, selection: { type: 'clip', id: right.id } })
         return
       }
@@ -304,6 +330,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         let ov: Overlay
         const base = {
           id: uid(), name: file.name, file, color: nextClipColor(),
+          nativePath: nativePathFor(file),
           start, x: 0.5, y: 0.5, scale: 0.4, angle: 0, speed: 1, volume: 1, muted: false,
           ...TRANSFORM_DEFAULTS, repeat: 1,
         }
@@ -380,6 +407,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         const { duration, src } = await probeAudio(file)
         const a: AudioClip = {
           id: uid(), name: file.name, src, file,
+          nativePath: nativePathFor(file),
           duration, trimStart: 0, trimEnd: duration,
           volume: 1, muted: false, color: nextClipColor(), start: get().playhead, repeat: 1,
         }

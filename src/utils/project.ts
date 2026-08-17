@@ -4,7 +4,7 @@ const DB_NAME = 'simplecut-db'
 const STORE = 'projects'
 export const AUTOSAVE_KEY = '__autosave__'
 
-interface MediaBlob { id: string; blob: Blob; name: string; type: string }
+interface MediaBlob { id: string; blob: Blob | ArrayBuffer; name: string; type: string; nativePath?: string }
 
 /** The editable slice of state that a project captures. */
 export interface ProjectState {
@@ -47,25 +47,27 @@ export function assertPortableMediaBudget(encodedLengths: number[]): void {
 
 export interface ProjectMeta { name: string; savedAt: number; size: number }
 
+const mediaSize = (media: MediaBlob) => media.blob instanceof Blob ? media.blob.size : media.blob.byteLength
+
 // ---- serialize / deserialize ----
 
-type WithMedia = { file: File; src: string } & Record<string, unknown>
+type WithMedia = { file: File; src: string; nativePath?: string } & Record<string, unknown>
 
 function serialize(name: string, s: ProjectState): SerializedProject {
   const fileMap = new Map<File, string>()
   const media: MediaBlob[] = []
-  const ref = (file: File, src: string): string | null => {
+  const ref = (file: File, src: string, nativePath?: string): string | null => {
     if (!src) return null // color clips have no real media
     if (!fileMap.has(file)) {
       const id = 'm' + media.length
       fileMap.set(file, id)
-      media.push({ id, blob: file, name: file.name, type: file.type })
+      media.push({ id, blob: file, name: file.name, type: file.type, nativePath })
     }
     return fileMap.get(file)!
   }
   const strip = (it: WithMedia) => {
-    const { file, src, ...rest } = it
-    return { ...rest, mediaId: ref(file, src) }
+    const { file, src, nativePath, ...rest } = it
+    return { ...rest, mediaId: ref(file, src, nativePath) }
   }
   return {
     version: 1, name, savedAt: Date.now(),
@@ -86,8 +88,8 @@ function deserialize(p: SerializedProject): ProjectState {
   const fileFor = (id: string) => {
     if (!files.has(id)) {
       const m = byId.get(id)
-      if (!m || !m.blob || m.blob.size === 0) throw new Error(`원본 미디어가 없거나 비어 있습니다: ${m?.name || id}`)
-      files.set(id, new File([m.blob], m.name, { type: m.type || m.blob.type }))
+      if (!m || !m.blob || mediaSize(m) === 0) throw new Error(`원본 미디어가 없거나 비어 있습니다: ${m?.name || id}`)
+      files.set(id, new File([m.blob], m.name, { type: m.type || (m.blob instanceof Blob ? m.blob.type : '') }))
     }
     return files.get(id)!
   }
@@ -100,7 +102,7 @@ function deserialize(p: SerializedProject): ProjectState {
   const restore = <T>(it: object): T => {
     const { mediaId, ...rest } = it as { mediaId: string | null } & Record<string, unknown>
     if (mediaId && byId.has(mediaId)) {
-      return { ...rest, file: fileFor(mediaId), src: urlFor(mediaId) } as T
+      return { ...rest, file: fileFor(mediaId), src: urlFor(mediaId), nativePath: byId.get(mediaId)?.nativePath } as T
     }
     if (rest.kind === 'color') return { ...rest, file: new File([], 'bg'), src: '' } as T
     throw new Error(`원본 파일 연결 정보가 없습니다: ${String(rest.name || '이름 없는 미디어')}`)
@@ -189,9 +191,35 @@ async function store(mode: IDBTransactionMode) {
   return db.transaction(STORE, mode).objectStore(STORE)
 }
 
+let useArrayBufferStorage = false
+const withArrayBufferMedia = async (project: SerializedProject): Promise<SerializedProject> => ({
+  ...project,
+  media: await Promise.all(project.media.map(async (item) => ({
+    ...item,
+    blob: item.blob instanceof Blob ? await item.blob.arrayBuffer() : item.blob,
+  }))),
+})
+
 export async function saveProject(name: string, s: ProjectState): Promise<void> {
-  const st = await store('readwrite')
-  await reqP(st.put(serialize(name, s)))
+  const project = serialize(name, s)
+  const put = async (value: SerializedProject) => {
+    const st = await store('readwrite')
+    await reqP(st.put(value))
+  }
+  if (useArrayBufferStorage) {
+    await put(await withArrayBufferMedia(project))
+    return
+  }
+  try {
+    await put(project)
+  } catch (error) {
+    const name = (error as DOMException)?.name
+    if (name !== 'UnknownError' && name !== 'DataCloneError') throw error
+    // WebKit cannot persist Blob/File values in IndexedDB on some versions.
+    // ArrayBuffer is structured-clone safe there, so retry with the same bytes.
+    useArrayBufferStorage = true
+    await put(await withArrayBufferMedia(project))
+  }
 }
 export async function loadProject(name: string): Promise<ProjectState | null> {
   const st = await store('readonly')
@@ -208,7 +236,7 @@ export async function listProjects(): Promise<ProjectMeta[]> {
       if (p.name === AUTOSAVE_KEY) return false
       try { assertStoredProject(p); return true } catch { return false }
     })
-    .map((p) => ({ name: p.name, savedAt: p.savedAt, size: p.media.reduce((a, m) => a + m.blob.size, 0) }))
+    .map((p) => ({ name: p.name, savedAt: p.savedAt, size: p.media.reduce((a, m) => a + mediaSize(m), 0) }))
     .sort((a, b) => b.savedAt - a.savedAt)
 }
 export async function deleteProject(name: string): Promise<void> {
@@ -220,7 +248,7 @@ export async function autosaveMeta(): Promise<ProjectMeta | null> {
   const p = await reqP<SerializedProject | undefined>(st.get(AUTOSAVE_KEY))
   if (!p || (!p.clips.length && !p.overlays.length && !p.audios.length && !p.backgrounds.length && !p.texts.length)) return null
   assertStoredProject(p)
-  return { name: p.name, savedAt: p.savedAt, size: p.media.reduce((a, m) => a + m.blob.size, 0) }
+  return { name: p.name, savedAt: p.savedAt, size: p.media.reduce((a, m) => a + mediaSize(m), 0) }
 }
 
 // ---- portable file bundle (.scut.json) for iCloud Drive / sharing ----
@@ -241,12 +269,15 @@ function base64ToBlob(b64: string, type: string): Blob {
 
 export async function projectToFileBlob(name: string, s: ProjectState): Promise<Blob> {
   const p = serialize(name, s)
-  const decodedBytes = p.media.reduce((sum, item) => sum + item.blob.size, 0)
+  const decodedBytes = p.media.reduce((sum, item) => sum + mediaSize(item), 0)
   if (decodedBytes > PROJECT_LIMITS.maxDecodedMediaBytes) {
     throw new Error('공유용 프로젝트 파일은 원본 미디어 합계가 384MB 이하일 때 만들 수 있습니다.')
   }
   const media = await Promise.all(
-    p.media.map(async (m) => ({ id: m.id, name: m.name, type: m.type, data: await blobToBase64(m.blob) })),
+    p.media.map(async (m) => ({
+      id: m.id, name: m.name, type: m.type,
+      data: await blobToBase64(m.blob instanceof Blob ? m.blob : new Blob([m.blob], { type: m.type })),
+    })),
   )
   return new Blob([JSON.stringify({ ...p, media })], { type: 'application/json' })
 }
@@ -270,6 +301,9 @@ const finite = (value: unknown, min: number, max: number, label: string) => {
 const text = (value: unknown, max: number, label: string) => {
   if (typeof value !== 'string' || value.length > max) throw new Error(`${label} 값이 잘못되었습니다.`)
 }
+const bool = (value: unknown, label: string) => {
+  if (typeof value !== 'boolean') throw new Error(`${label} 값이 잘못되었습니다.`)
+}
 const record = (value: unknown, label: string): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} 정보가 잘못되었습니다.`)
   return value as Record<string, unknown>
@@ -286,27 +320,62 @@ const validateItem = (value: unknown, track: string) => {
     finite(item.x, 0, 1, '텍스트 가로 위치')
     finite(item.y, 0, 1, '텍스트 세로 위치')
     finite(item.size, 0.001, 1, '텍스트 크기')
-    finite(item.angle, -180, 180, '텍스트 회전')
+    text(item.color, 64, '텍스트 색상')
+    finite(item.colorAlpha, 0, 1, '텍스트 투명도')
+    bool(item.box, '텍스트 배경')
+    text(item.boxColor, 64, '텍스트 배경 색상')
+    finite(item.boxAlpha, 0, 1, '텍스트 배경 투명도')
+    text(item.font, 500, '텍스트 글꼴')
+    finite(item.strokeWidth, 0, 1, '텍스트 외곽선')
+    text(item.strokeColor, 64, '텍스트 외곽선 색상')
+    bool(item.shadow, '텍스트 그림자')
+    text(item.shadowColor, 64, '텍스트 그림자 색상')
+    finite(item.shadowBlur, 0, 2, '텍스트 그림자 흐림')
+    finite(item.shadowDist, 0, 2, '텍스트 그림자 거리')
+    if (!['left', 'center', 'right', 'justify'].includes(String(item.align))) throw new Error('텍스트 정렬 값이 잘못되었습니다.')
+    // angle was added after the first project format shipped.
+    if ('angle' in item) finite(item.angle, -180, 180, '텍스트 회전')
     return
   }
-  if (track !== '오디오' && !['video', 'image', 'color'].includes(String(item.kind))) throw new Error(`${track} 종류가 잘못되었습니다.`)
-  if ('duration' in item) finite(item.duration, 0.01, PROJECT_LIMITS.maxDurationSeconds, `${track} 길이`)
-  if ('trimStart' in item) finite(item.trimStart, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 시작 트림`)
-  if ('trimEnd' in item) finite(item.trimEnd, 0.01, PROJECT_LIMITS.maxDurationSeconds, `${track} 끝 트림`)
-  if (typeof item.trimStart === 'number' && typeof item.trimEnd === 'number' && item.trimEnd <= item.trimStart) throw new Error(`${track} 트림 범위가 잘못되었습니다.`)
-  if ('speed' in item) finite(item.speed, 0.25, 4, `${track} 속도`)
-  if ('volume' in item) finite(item.volume, 0, 2, `${track} 음량`)
-  if ('repeat' in item) finite(item.repeat, 1, 99, `${track} 반복`)
-  if ('start' in item) finite(item.start, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 시작 위치`)
-  if ('x' in item) finite(item.x, 0, 1, `${track} 가로 위치`)
-  if ('y' in item) finite(item.y, 0, 1, `${track} 세로 위치`)
-  if ('scale' in item) finite(item.scale, 0.1, 1, `${track} 크기`)
-  if ('angle' in item) finite(item.angle, -180, 180, `${track} 회전`)
-  if ('crop' in item) {
+  const visual = track !== '오디오'
+  if (visual && !['video', 'image', 'color'].includes(String(item.kind))) throw new Error(`${track} 종류가 잘못되었습니다.`)
+  finite(item.duration, 0.01, PROJECT_LIMITS.maxDurationSeconds, `${track} 길이`)
+  finite(item.trimStart, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 시작 트림`)
+  finite(item.trimEnd, 0.01, PROJECT_LIMITS.maxDurationSeconds, `${track} 끝 트림`)
+  if ((item.trimEnd as number) <= (item.trimStart as number) || (item.trimEnd as number) > (item.duration as number)) throw new Error(`${track} 트림 범위가 잘못되었습니다.`)
+  finite(item.volume, 0, 2, `${track} 음량`)
+  bool(item.muted, `${track} 음소거`)
+  text(item.color, 64, `${track} 색상`)
+  finite(item.repeat, 1, 99, `${track} 반복`)
+  if (!Number.isInteger(item.repeat as number)) throw new Error(`${track} 반복 값이 잘못되었습니다.`)
+
+  if (visual) {
+    finite(item.speed, 0.1, 4, `${track} 속도`)
+    bool(item.hasAudio, `${track} 오디오 정보`)
+    if (![0, 90, 180, 270].includes(Number(item.rotate))) throw new Error(`${track} 회전 값이 잘못되었습니다.`)
+    bool(item.flipH, `${track} 좌우 반전`)
+    bool(item.flipV, `${track} 상하 반전`)
     const crop = record(item.crop, `${track} 크롭`)
     for (const side of ['top', 'right', 'bottom', 'left']) finite(crop[side], 0, 0.45, `${track} 크롭`)
+    if (item.kind === 'color') {
+      if (item.mediaId !== null) throw new Error(`${track} 미디어 연결 값이 잘못되었습니다.`)
+      text(item.bgColor, 64, `${track} 배경 색상`)
+    } else {
+      text(item.mediaId, 100, `${track} 미디어 연결`)
+    }
+  } else {
+    text(item.mediaId, 100, `${track} 미디어 연결`)
   }
-  if ('mediaId' in item && item.mediaId !== null) text(item.mediaId, 100, `${track} 미디어 연결`)
+
+  if (track === '오버레이') {
+    finite(item.start, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 시작 위치`)
+    finite(item.x, 0, 1, `${track} 가로 위치`)
+    finite(item.y, 0, 1, `${track} 세로 위치`)
+    finite(item.scale, 0.1, 1, `${track} 크기`)
+    if ('angle' in item) finite(item.angle, -180, 180, `${track} 회전`)
+  } else if (track === '오디오' || track === '배경') {
+    finite(item.start, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 시작 위치`)
+  }
 }
 
 function assertBaseProject(value: unknown): Record<string, unknown> {
@@ -383,12 +452,14 @@ function assertStoredProject(value: unknown): asserts value is SerializedProject
   const ids = new Set<string>()
   for (const media of p.media as unknown[]) {
     const m = record(media, '저장 미디어')
-    if (typeof m.id !== 'string' || typeof m.name !== 'string' || typeof m.type !== 'string' || !(m.blob instanceof Blob) || m.blob.size <= 0) {
+    const storedBytes = m.blob instanceof Blob ? m.blob.size : m.blob instanceof ArrayBuffer ? m.blob.byteLength : 0
+    if (typeof m.id !== 'string' || typeof m.name !== 'string' || typeof m.type !== 'string' || storedBytes <= 0) {
       throw new Error('저장된 미디어 정보가 불완전합니다.')
     }
     if (ids.has(m.id)) throw new Error('저장된 미디어 ID가 중복되었습니다.')
     ids.add(m.id)
     text(m.name, PROJECT_LIMITS.maxNameLength, '저장 미디어 이름')
+    if ('nativePath' in m && m.nativePath !== undefined) text(m.nativePath, 4096, '원본 미디어 경로')
   }
   assertMediaReferences(p, ids)
 }

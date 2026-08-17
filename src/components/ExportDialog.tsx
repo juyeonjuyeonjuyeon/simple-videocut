@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useEditor } from '../store'
-import { cancelExport, exportVideo } from '../ffmpeg/exporter'
+import { cancelExport, discardNativeExport, exportVideo, isNativeExportFile, saveNativeExport } from '../ffmpeg/exporter'
+import type { NativeExportFile } from '../ffmpeg/exporter'
 import { projectDuration, formatTime } from '../utils/time'
 import { saveBlob, keepAwake } from '../utils/io'
 import type { ExportHeight } from '../types'
@@ -70,17 +71,21 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState('')
   const [url, setUrl] = useState<string | null>(null)
   const [blob, setBlob] = useState<Blob | null>(null)
+  const [nativeFile, setNativeFile] = useState<NativeExportFile | null>(null)
   const [error, setError] = useState('')
   const [cancelling, setCancelling] = useState(false)
   const cancelRequested = useRef(false)
 
   useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
+  useEffect(() => () => { if (nativeFile) void discardNativeExport(nativeFile) }, [nativeFile])
 
   const duration = projectDuration(clips, overlays, audios, texts, backgrounds)
   const fullName = `${exportSettings.filename || 'simplecut'}.${exportSettings.format}`
 
   const run = async () => {
     if (url) { URL.revokeObjectURL(url); setUrl(null) }
+    if (nativeFile) { await discardNativeExport(nativeFile); setNativeFile(null) }
+    setBlob(null)
     setPhase('running')
     setProgress(0)
     setStatus(desktop ? '네이티브 렌더링 엔진 준비 중…' : '엔진 로딩 중… (최초 1회는 시간이 걸립니다)')
@@ -105,10 +110,14 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
         onLog: (line) => { if (/error|failed/i.test(line)) console.warn(line) },
       })
       setProgress(0.98)
-      setStatus('파일 재생 가능 여부 확인 중…')
-      await validateVideoBlob(out)
-      setBlob(out)
-      setUrl(URL.createObjectURL(out))
+      if (isNativeExportFile(out)) {
+        setNativeFile(out)
+      } else {
+        setStatus('파일 재생 가능 여부 확인 중…')
+        await validateVideoBlob(out)
+        setBlob(out)
+        setUrl(URL.createObjectURL(out))
+      }
       setPhase('done')
       setProgress(1)
       setStatus(`완료! 크기 ${(out.size / 1024 / 1024).toFixed(1)} MB`)
@@ -135,10 +144,15 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
   }
 
   const save = async () => {
-    if (!blob) return
+    if (!blob && !nativeFile) return
     try {
-      const where = await saveBlob(blob, fullName)
-      setStatus(where === 'saved' ? '저장 위치에 저장했습니다.' : '다운로드 폴더에 저장했습니다.')
+      if (nativeFile) {
+        const where = await saveNativeExport(nativeFile, fullName)
+        setStatus(where === 'saved' ? '저장 위치에 저장했습니다.' : '저장을 취소했습니다.')
+      } else if (blob) {
+        const where = await saveBlob(blob, fullName)
+        setStatus(where === 'saved' ? '저장 위치에 저장했습니다.' : '다운로드 폴더에 저장했습니다.')
+      }
     } catch (error) {
       if ((error as Error).name !== 'AbortError') setStatus(`저장 실패: ${(error as Error).message}`)
     }
@@ -199,9 +213,9 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
 
         {phase === 'error' && <div className="modal__error"><Icon name="warning" />{error}</div>}
 
-        {phase === 'done' && url && (
+        {phase === 'done' && (url || nativeFile) && (
           <div className="modal__done">
-            <video src={url} controls className="modal__preview" />
+            {url ? <video src={url} controls className="modal__preview" /> : <div className="modal__native-file"><Icon name="video" />{nativeFile?.format.toUpperCase()} 파일 생성과 검증이 완료됐습니다.</div>}
             <div className="modal__status">{status}</div>
           </div>
         )}

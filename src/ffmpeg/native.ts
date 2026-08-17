@@ -1,7 +1,12 @@
 export interface DesktopFFmpegBridge {
   available(): Promise<boolean>
+  filePath(file: File): string
+  stageFile(name: string, file: File): Promise<void>
+  stagePath(name: string, sourcePath: string): Promise<void>
   writeFile(name: string, data: Uint8Array): Promise<void>
   readFile(name: string): Promise<Uint8Array>
+  fileSize(name: string): Promise<number>
+  saveFile(name: string, suggestedName: string): Promise<'saved' | 'cancelled'>
   deleteFile(name: string): Promise<void>
   exec(args: string[]): Promise<number>
   terminate(): Promise<void>
@@ -42,7 +47,12 @@ export class NativeFFmpeg {
   }
 
   writeFile(name: string, data: Uint8Array) { return this.bridge.writeFile(name, data) }
+  stageFile(name: string, file: File, nativePath?: string) {
+    return nativePath ? this.bridge.stagePath(name, nativePath) : this.bridge.stageFile(name, file)
+  }
   readFile(name: string) { return this.bridge.readFile(name) }
+  fileSize(name: string) { return this.bridge.fileSize(name) }
+  saveFile(name: string, suggestedName: string) { return this.bridge.saveFile(name, suggestedName) }
   deleteFile(name: string) { return this.bridge.deleteFile(name) }
   exec(args: string[]) { return this.bridge.exec(args) }
   terminate() {

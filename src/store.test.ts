@@ -1,0 +1,47 @@
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { Clip } from './types'
+import { useEditor } from './store'
+import { projectDuration } from './utils/time'
+
+const clip = (repeat = 1): Clip => ({
+  id: 'clip-1', kind: 'video', name: 'repeat.mp4', src: 'blob:repeat',
+  file: new File(['video'], 'repeat.mp4', { type: 'video/mp4' }),
+  duration: 2, trimStart: 0, trimEnd: 2, speed: 1, volume: 1, muted: false,
+  hasAudio: false, color: '#000000', rotate: 0, flipH: false, flipV: false,
+  crop: { top: 0, right: 0, bottom: 0, left: 0 }, repeat,
+})
+
+describe('timeline splitting', () => {
+  beforeEach(() => {
+    useEditor.setState({
+      clips: [clip(3)], overlays: [], audios: [], backgrounds: [], texts: [],
+      playhead: 2.5, selection: { type: 'clip', id: 'clip-1' },
+      isPlaying: false,
+    })
+  })
+
+  it('splits inside a repeated cycle without creating invalid source trims', () => {
+    const before = useEditor.getState()
+    const durationBefore = projectDuration(before.clips, [], [], [], [])
+
+    before.splitAtPlayhead()
+
+    const after = useEditor.getState()
+    expect(after.clips).toHaveLength(4)
+    expect(after.clips.map((item) => [item.trimStart, item.trimEnd, item.repeat])).toEqual([
+      [0, 2, 1], [0, 0.5, 1], [0.5, 2, 1], [0, 2, 1],
+    ])
+    expect(after.clips.every((item) => item.trimStart >= 0 && item.trimStart < item.trimEnd && item.trimEnd <= item.duration)).toBe(true)
+    expect(projectDuration(after.clips, [], [], [], [])).toBeCloseTo(durationBefore)
+  })
+
+  it('keeps repeated groups compact when splitting on a repeat boundary', () => {
+    useEditor.getState().setPlayhead(2)
+    useEditor.getState().splitAtPlayhead()
+
+    const after = useEditor.getState().clips
+    expect(after).toHaveLength(2)
+    expect(after.map((item) => item.repeat)).toEqual([1, 2])
+    expect(projectDuration(after, [], [], [], [])).toBeCloseTo(6)
+  })
+})

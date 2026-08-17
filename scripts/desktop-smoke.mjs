@@ -1,7 +1,10 @@
 import { _electron as electron } from 'playwright'
+import { createElectronTestEnvironment } from './electron-test-env.mjs'
 
-const app = await electron.launch({ args: ['.'] })
+const testEnv = createElectronTestEnvironment('simplecut-smoke-test')
+const app = await electron.launch({ args: ['.', ...testEnv.launchArgs] })
 try {
+  await testEnv.verify(app)
   const page = await app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
   const result = await page.evaluate(async () => {
@@ -21,4 +24,5 @@ try {
   process.stdout.write(`${JSON.stringify(result)}\n`)
 } finally {
   await app.close()
+  testEnv.cleanup()
 }

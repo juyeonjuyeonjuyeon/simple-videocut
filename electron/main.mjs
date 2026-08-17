@@ -1,8 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { copyFile, link, mkdtemp, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
+import { basename, isAbsolute, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
@@ -12,6 +12,8 @@ const ffmpegPath = app.isPackaged ? join(process.resourcesPath, 'ffmpeg') : requ
 let workDir = null
 let processHandle = null
 let quitting = false
+let quitReady = false
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
 const isRendering = () => Boolean(processHandle && processHandle.exitCode === null && processHandle.signalCode === null)
 
@@ -35,12 +37,43 @@ async function clearWorkspace() {
 }
 
 ipcMain.handle('native-ffmpeg:available', () => Boolean(ffmpegPath))
+ipcMain.handle('native-ffmpeg:stage-file', async (_event, name, sourcePath) => {
+  if (typeof sourcePath !== 'string' || !isAbsolute(sourcePath)) throw new Error('원본 파일 경로가 잘못되었습니다.')
+  const sourceInfo = await stat(sourcePath)
+  if (!sourceInfo.isFile() || sourceInfo.size <= 0) throw new Error('원본 파일이 없거나 비어 있습니다.')
+  const target = join(await workspace(), safeFile(name))
+  await unlink(target).catch(() => {})
+  await link(sourcePath, target).catch(async () => copyFile(sourcePath, target))
+})
 ipcMain.handle('native-ffmpeg:write-file', async (_event, name, data) => {
   await writeFile(join(await workspace(), safeFile(name)), Buffer.from(data))
 })
 ipcMain.handle('native-ffmpeg:read-file', async (_event, name) => {
   const data = await readFile(join(await workspace(), safeFile(name)))
   return new Uint8Array(data)
+})
+ipcMain.handle('native-ffmpeg:file-size', async (_event, name) => {
+  const info = await stat(join(await workspace(), safeFile(name)))
+  return info.size
+})
+ipcMain.handle('native-ffmpeg:save-file', async (event, name, suggestedName) => {
+  const source = join(await workspace(), safeFile(name))
+  const sourceInfo = await stat(source)
+  if (!sourceInfo.isFile() || sourceInfo.size <= 0) throw new Error('저장할 영상 파일이 없거나 비어 있습니다.')
+  const fallback = name.endsWith('.webm') ? 'simplecut.webm' : 'simplecut.mp4'
+  const safeSuggestion = typeof suggestedName === 'string' && suggestedName.length <= 255 ? basename(suggestedName) : fallback
+  const extension = safeSuggestion.toLowerCase().endsWith('.webm') ? 'webm' : 'mp4'
+  const window = BrowserWindow.fromWebContents(event.sender)
+  const options = {
+    defaultPath: safeSuggestion || fallback,
+    filters: [{ name: extension === 'webm' ? 'WebM 영상' : 'MP4 영상', extensions: [extension] }],
+  }
+  const result = window ? await dialog.showSaveDialog(window, options) : await dialog.showSaveDialog(options)
+  if (result.canceled || !result.filePath) return 'cancelled'
+  await copyFile(source, result.filePath)
+  const savedInfo = await stat(result.filePath)
+  if (savedInfo.size !== sourceInfo.size) throw new Error('저장된 파일 크기가 변환 결과와 다릅니다.')
+  return 'saved'
 })
 ipcMain.handle('native-ffmpeg:delete-file', async (_event, name) => {
   await unlink(join(await workspace(), safeFile(name))).catch(() => {})
@@ -125,7 +158,27 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(createWindow)
+if (!hasSingleInstanceLock) app.quit()
+else app.whenReady().then(createWindow)
+app.on('second-instance', () => {
+  const window = BrowserWindow.getAllWindows()[0]
+  if (!window) createWindow()
+  else {
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+  }
+})
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
-app.on('before-quit', () => { quitting = true; processHandle?.kill('SIGKILL'); void clearWorkspace() })
+app.on('before-quit', (event) => {
+  quitting = true
+  if (quitReady) return
+  event.preventDefault()
+  processHandle?.kill('SIGKILL')
+  processHandle = null
+  void clearWorkspace().finally(() => {
+    quitReady = true
+    app.quit()
+  })
+})

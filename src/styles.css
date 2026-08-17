@@ -1068,6 +1068,8 @@ input[type='range']:disabled { opacity: 0.4; }
 .modal__note b { color: var(--text); }
 .modal__done { display: flex; flex-direction: column; gap: 8px; }
 .modal__preview { width: 100%; border-radius: 8px; background: #000; max-height: 40dvh; }
+.modal__native-file { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 88px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-1); color: var(--text-dim); font-size: 13px; }
+.modal__native-file svg { width: 20px; height: 20px; }
 .modal__status { font-size: 13px; color: var(--text-dim); }
 .modal__actions { margin-top: 4px; }
 

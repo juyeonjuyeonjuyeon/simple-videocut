@@ -33,6 +33,8 @@ export interface Clip {
   /** Object URL for the source File. */
   src: string
   file: File
+  /** Desktop-only path retained locally so restored projects can stream from disk. */
+  nativePath?: string
   /** Source duration (seconds). For images this is a nominal max length. */
   duration: number
   /** Trim in/out within the source (seconds). For images: 0..displayLength. */
@@ -62,6 +64,7 @@ export interface Overlay {
   name: string
   src: string
   file: File
+  nativePath?: string
   duration: number
   trimStart: number
   trimEnd: number
@@ -98,6 +101,7 @@ export interface AudioClip {
   name: string
   src: string
   file: File
+  nativePath?: string
   duration: number
   trimStart: number
   trimEnd: number
