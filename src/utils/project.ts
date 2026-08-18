@@ -4,7 +4,14 @@ const DB_NAME = 'simplecut-db'
 const STORE = 'projects'
 export const AUTOSAVE_KEY = '__autosave__'
 
-interface MediaBlob { id: string; blob: Blob | ArrayBuffer; name: string; type: string; nativePath?: string }
+interface MediaBlob {
+  id: string
+  blob?: Blob | ArrayBuffer
+  name: string
+  type: string
+  size: number
+  nativeMediaId?: string
+}
 
 /** The editable slice of state that a project captures. */
 export interface ProjectState {
@@ -47,27 +54,27 @@ export function assertPortableMediaBudget(encodedLengths: number[]): void {
 
 export interface ProjectMeta { name: string; savedAt: number; size: number }
 
-const mediaSize = (media: MediaBlob) => media.blob instanceof Blob ? media.blob.size : media.blob.byteLength
+const mediaSize = (media: MediaBlob) => media.size || (media.blob instanceof Blob ? media.blob.size : media.blob?.byteLength || 0)
 
 // ---- serialize / deserialize ----
 
-type WithMedia = { file: File; src: string; nativePath?: string } & Record<string, unknown>
+type WithMedia = { file: File; src: string; sourceSize: number; nativeMediaId?: string } & Record<string, unknown>
 
 function serialize(name: string, s: ProjectState): SerializedProject {
   const fileMap = new Map<File, string>()
   const media: MediaBlob[] = []
-  const ref = (file: File, src: string, nativePath?: string): string | null => {
+  const ref = (file: File, src: string, sourceSize: number, nativeMediaId?: string): string | null => {
     if (!src) return null // color clips have no real media
     if (!fileMap.has(file)) {
       const id = 'm' + media.length
       fileMap.set(file, id)
-      media.push({ id, blob: file, name: file.name, type: file.type, nativePath })
+      media.push({ id, blob: file, name: file.name, type: file.type, size: sourceSize || file.size, nativeMediaId })
     }
     return fileMap.get(file)!
   }
   const strip = (it: WithMedia) => {
-    const { file, src, nativePath, ...rest } = it
-    return { ...rest, mediaId: ref(file, src, nativePath) }
+    const { file, src, sourceSize, nativeMediaId, ...rest } = it
+    return { ...rest, mediaId: ref(file, src, sourceSize, nativeMediaId) }
   }
   return {
     version: 1, name, savedAt: Date.now(),
@@ -88,23 +95,33 @@ function deserialize(p: SerializedProject): ProjectState {
   const fileFor = (id: string) => {
     if (!files.has(id)) {
       const m = byId.get(id)
-      if (!m || !m.blob || mediaSize(m) === 0) throw new Error(`원본 미디어가 없거나 비어 있습니다: ${m?.name || id}`)
-      files.set(id, new File([m.blob], m.name, { type: m.type || (m.blob instanceof Blob ? m.blob.type : '') }))
+      if (!m || mediaSize(m) === 0 || (!m.blob && !m.nativeMediaId)) throw new Error(`원본 미디어가 없거나 비어 있습니다: ${m?.name || id}`)
+      files.set(id, m.blob
+        ? new File([m.blob], m.name, { type: m.type || (m.blob instanceof Blob ? m.blob.type : '') })
+        : new File([], m.name, { type: m.type }))
     }
     return files.get(id)!
   }
   const urlFor = (id: string) => {
     // Create the URL from the reconstructed File. This is more reliable than
     // using an IndexedDB-returned Blob directly in mobile Safari.
-    if (!urls.has(id)) urls.set(id, URL.createObjectURL(fileFor(id)))
+    if (!urls.has(id)) {
+      const media = byId.get(id)
+      if (media?.nativeMediaId && window.simplecutDesktop) urls.set(id, window.simplecutDesktop.mediaUrl(media.nativeMediaId))
+      else urls.set(id, URL.createObjectURL(fileFor(id)))
+    }
     return urls.get(id)!
   }
   const restore = <T>(it: object): T => {
     const { mediaId, ...rest } = it as { mediaId: string | null } & Record<string, unknown>
     if (mediaId && byId.has(mediaId)) {
-      return { ...rest, file: fileFor(mediaId), src: urlFor(mediaId), nativePath: byId.get(mediaId)?.nativePath } as T
+      const media = byId.get(mediaId)!
+      return {
+        ...rest, file: fileFor(mediaId), src: urlFor(mediaId), sourceSize: mediaSize(media),
+        nativeMediaId: media.nativeMediaId,
+      } as T
     }
-    if (rest.kind === 'color') return { ...rest, file: new File([], 'bg'), src: '' } as T
+    if (rest.kind === 'color') return { ...rest, file: new File([], 'bg'), src: '', sourceSize: 0 } as T
     throw new Error(`원본 파일 연결 정보가 없습니다: ${String(rest.name || '이름 없는 미디어')}`)
   }
   return {
@@ -117,35 +134,38 @@ function deserialize(p: SerializedProject): ProjectState {
   }
 }
 
-function verifyElement(file: File, kind: 'video' | 'image' | 'audio'): Promise<void> {
+type VerifiableMedia = { file: File; src: string; name: string; sourceSize: number; nativeMediaId?: string }
+
+function verifyElement(item: VerifiableMedia, kind: 'video' | 'image' | 'audio'): Promise<void> {
   return new Promise((resolve, reject) => {
-    const src = URL.createObjectURL(file)
+    const temporaryUrl = item.nativeMediaId ? null : URL.createObjectURL(item.file)
+    const src = temporaryUrl || item.src
     const el = kind === 'image' ? new Image() : document.createElement(kind)
     let settled = false
     const finish = (error?: Error) => {
       if (settled) return
       settled = true
       window.clearTimeout(timer)
-      URL.revokeObjectURL(src)
+      if (temporaryUrl) URL.revokeObjectURL(temporaryUrl)
       if (error) reject(error)
       else resolve()
     }
-    const timer = window.setTimeout(() => finish(new Error(`파일 확인 시간이 초과됐습니다: ${file.name}`)), 12000)
+    const timer = window.setTimeout(() => finish(new Error(`파일 확인 시간이 초과됐습니다: ${item.name}`)), 12000)
     if (kind === 'image') {
       el.onload = () => finish()
-      el.onerror = () => finish(new Error(`이미지를 복원할 수 없습니다: ${file.name}`))
+      el.onerror = () => finish(new Error(`이미지를 복원할 수 없습니다: ${item.name}`))
       ;(el as HTMLImageElement).src = src
     } else {
       const media = el as HTMLMediaElement
       media.preload = kind === 'video' ? 'auto' : 'metadata'
       const ready = () => {
-        if (!Number.isFinite(media.duration) || media.duration <= 0) finish(new Error(`${kind === 'video' ? '영상을' : '음성을'} 복원할 수 없습니다: ${file.name}`))
-        else if (kind === 'video' && (!(media as HTMLVideoElement).videoWidth || !(media as HTMLVideoElement).videoHeight)) finish(new Error(`영상 프레임을 복원할 수 없습니다: ${file.name}`))
+        if (!Number.isFinite(media.duration) || media.duration <= 0) finish(new Error(`${kind === 'video' ? '영상을' : '음성을'} 복원할 수 없습니다: ${item.name}`))
+        else if (kind === 'video' && (!(media as HTMLVideoElement).videoWidth || !(media as HTMLVideoElement).videoHeight)) finish(new Error(`영상 프레임을 복원할 수 없습니다: ${item.name}`))
         else finish()
       }
       if (kind === 'video') media.onloadeddata = ready
       else media.onloadedmetadata = ready
-      media.onerror = () => finish(new Error(`${kind === 'video' ? '영상을' : '음성을'} 이 브라우저에서 재생할 수 없습니다: ${file.name}`))
+      media.onerror = () => finish(new Error(`${kind === 'video' ? '영상을' : '음성을'} 이 브라우저에서 재생할 수 없습니다: ${item.name}`))
       if (kind === 'video') {
         ;(media as HTMLVideoElement).muted = true
         ;(media as HTMLVideoElement).playsInline = true
@@ -156,17 +176,18 @@ function verifyElement(file: File, kind: 'video' | 'image' | 'audio'): Promise<v
 }
 
 async function verifyProjectMedia(p: ProjectState): Promise<ProjectState> {
-  const checked = new Set<File>()
-  const verify = async (file: File, kind: 'video' | 'image' | 'audio') => {
-    if (checked.has(file)) return
-    checked.add(file)
-    if (!file.size) throw new Error(`원본 파일이 비어 있습니다: ${file.name}`)
-    await verifyElement(file, kind)
+  const checked = new Set<File | string>()
+  const verify = async (item: VerifiableMedia, kind: 'video' | 'image' | 'audio') => {
+    const key = item.nativeMediaId || item.file
+    if (checked.has(key)) return
+    checked.add(key)
+    if (!item.sourceSize || (!item.nativeMediaId && !item.file.size)) throw new Error(`원본 파일이 비어 있습니다: ${item.name}`)
+    await verifyElement(item, kind)
   }
-  for (const c of p.clips) if (c.kind !== 'color') await verify(c.file, c.kind === 'image' ? 'image' : 'video')
-  for (const o of p.overlays) await verify(o.file, o.kind === 'image' ? 'image' : 'video')
-  for (const b of p.backgrounds) if (b.kind !== 'color') await verify(b.file, b.kind === 'image' ? 'image' : 'video')
-  for (const a of p.audios) await verify(a.file, 'audio')
+  for (const c of p.clips) if (c.kind !== 'color') await verify(c, c.kind === 'image' ? 'image' : 'video')
+  for (const o of p.overlays) await verify(o, o.kind === 'image' ? 'image' : 'video')
+  for (const b of p.backgrounds) if (b.kind !== 'color') await verify(b, b.kind === 'image' ? 'image' : 'video')
+  for (const a of p.audios) await verify(a, 'audio')
   return p
 }
 
@@ -192,6 +213,7 @@ async function store(mode: IDBTransactionMode) {
 }
 
 let useArrayBufferStorage = false
+const nativeMediaCache = new WeakMap<File, string>()
 const withArrayBufferMedia = async (project: SerializedProject): Promise<SerializedProject> => ({
   ...project,
   media: await Promise.all(project.media.map(async (item) => ({
@@ -200,8 +222,38 @@ const withArrayBufferMedia = async (project: SerializedProject): Promise<Seriali
   }))),
 })
 
-export async function saveProject(name: string, s: ProjectState): Promise<void> {
-  const project = serialize(name, s)
+const desktopBridge = () => typeof window !== 'undefined' ? window.simplecutDesktop : undefined
+
+async function serializeDesktop(name: string, state: ProjectState): Promise<SerializedProject> {
+  const bridge = desktopBridge()
+  if (!bridge) throw new Error('데스크톱 프로젝트 저장 기능을 사용할 수 없습니다.')
+  const project = serialize(name, state)
+  const media = await Promise.all(project.media.map(async (item) => {
+    const sourceFile = item.blob instanceof File ? item.blob : null
+    let nativeMediaId = item.nativeMediaId || (sourceFile ? nativeMediaCache.get(sourceFile) : undefined)
+    let size = mediaSize(item)
+    if (!nativeMediaId) {
+      let registered: { id: string; size: number }
+      try {
+        if (!sourceFile) throw new Error('로컬 파일 경로가 없습니다.')
+        registered = await bridge.registerMedia(sourceFile)
+      } catch {
+        if (!item.blob || !size) throw new Error(`데스크톱 보관소에 미디어를 등록할 수 없습니다: ${item.name}`)
+        const bytes = item.blob instanceof Blob
+          ? new Uint8Array(await item.blob.arrayBuffer())
+          : new Uint8Array(item.blob)
+        registered = await bridge.importMedia(item.name, bytes)
+      }
+      nativeMediaId = registered.id
+      size = registered.size
+      if (sourceFile) nativeMediaCache.set(sourceFile, nativeMediaId)
+    }
+    return { id: item.id, name: item.name, type: item.type, size, nativeMediaId }
+  }))
+  return { ...project, media }
+}
+
+async function putWebProject(project: SerializedProject): Promise<void> {
   const put = async (value: SerializedProject) => {
     const st = await store('readwrite')
     await reqP(st.put(value))
@@ -221,14 +273,16 @@ export async function saveProject(name: string, s: ProjectState): Promise<void> 
     await put(await withArrayBufferMedia(project))
   }
 }
-export async function loadProject(name: string): Promise<ProjectState | null> {
+
+async function getWebProject(name: string): Promise<SerializedProject | null> {
+  if (typeof indexedDB === 'undefined') return null
   const st = await store('readonly')
   const p = await reqP<SerializedProject | undefined>(st.get(name))
-  if (!p) return null
-  assertStoredProject(p)
-  return verifyProjectMedia(deserialize(p))
+  return p || null
 }
-export async function listProjects(): Promise<ProjectMeta[]> {
+
+async function listWebProjects(): Promise<ProjectMeta[]> {
+  if (typeof indexedDB === 'undefined') return []
   const st = await store('readonly')
   const all = await reqP<SerializedProject[]>(st.getAll())
   return all
@@ -239,13 +293,80 @@ export async function listProjects(): Promise<ProjectMeta[]> {
     .map((p) => ({ name: p.name, savedAt: p.savedAt, size: p.media.reduce((a, m) => a + mediaSize(m), 0) }))
     .sort((a, b) => b.savedAt - a.savedAt)
 }
-export async function deleteProject(name: string): Promise<void> {
+
+async function deleteWebProject(name: string): Promise<void> {
+  if (typeof indexedDB === 'undefined') return
   const st = await store('readwrite')
   await reqP(st.delete(name))
 }
+
+export async function saveProject(name: string, s: ProjectState): Promise<void> {
+  const bridge = desktopBridge()
+  if (bridge) {
+    const project = await serializeDesktop(name, s)
+    assertStoredProject(project)
+    await bridge.projectSave(name, project)
+    // A successfully migrated project no longer needs its legacy Blob copy.
+    await deleteWebProject(name)
+    return
+  }
+  await putWebProject(serialize(name, s))
+}
+
+export async function loadProject(name: string): Promise<ProjectState | null> {
+  const bridge = desktopBridge()
+  let nativeError: unknown = null
+  if (bridge) {
+    const candidates = await bridge.projectLoad(name)
+    for (const candidate of candidates) {
+      try {
+        assertStoredProject(candidate)
+        return await verifyProjectMedia(deserialize(candidate))
+      } catch (error) {
+        nativeError = error
+      }
+    }
+  }
+  const project = await getWebProject(name)
+  if (!project) {
+    if (nativeError) throw nativeError
+    return null
+  }
+  assertStoredProject(project)
+  return verifyProjectMedia(deserialize(project))
+}
+
+export async function listProjects(): Promise<ProjectMeta[]> {
+  const native = desktopBridge() ? await desktopBridge()!.projectList() : []
+  const legacy = await listWebProjects()
+  const byName = new Map<string, ProjectMeta>()
+  for (const project of [...legacy, ...native]) {
+    if (typeof project.name !== 'string' || !Number.isFinite(project.savedAt) || !Number.isFinite(project.size)) continue
+    const current = byName.get(project.name)
+    if (!current || project.savedAt >= current.savedAt) byName.set(project.name, project)
+  }
+  return [...byName.values()].sort((a, b) => b.savedAt - a.savedAt)
+}
+
+export async function deleteProject(name: string): Promise<void> {
+  await Promise.all([
+    desktopBridge()?.projectDelete(name),
+    deleteWebProject(name),
+  ])
+}
+
 export async function autosaveMeta(): Promise<ProjectMeta | null> {
-  const st = await store('readonly')
-  const p = await reqP<SerializedProject | undefined>(st.get(AUTOSAVE_KEY))
+  const bridge = desktopBridge()
+  if (bridge) {
+    for (const candidate of await bridge.projectLoad(AUTOSAVE_KEY)) {
+      try {
+        assertStoredProject(candidate)
+        if (!candidate.clips.length && !candidate.overlays.length && !candidate.audios.length && !candidate.backgrounds.length && !candidate.texts.length) continue
+        return { name: candidate.name, savedAt: candidate.savedAt, size: candidate.media.reduce((a, m) => a + mediaSize(m), 0) }
+      } catch { /* try an older atomic autosave generation */ }
+    }
+  }
+  const p = await getWebProject(AUTOSAVE_KEY)
   if (!p || (!p.clips.length && !p.overlays.length && !p.audios.length && !p.backgrounds.length && !p.texts.length)) return null
   assertStoredProject(p)
   return { name: p.name, savedAt: p.savedAt, size: p.media.reduce((a, m) => a + mediaSize(m), 0) }
@@ -274,10 +395,17 @@ export async function projectToFileBlob(name: string, s: ProjectState): Promise<
     throw new Error('공유용 프로젝트 파일은 원본 미디어 합계가 384MB 이하일 때 만들 수 있습니다.')
   }
   const media = await Promise.all(
-    p.media.map(async (m) => ({
-      id: m.id, name: m.name, type: m.type,
-      data: await blobToBase64(m.blob instanceof Blob ? m.blob : new Blob([m.blob], { type: m.type })),
-    })),
+    p.media.map(async (m) => {
+      let blob: Blob
+      if (m.blob instanceof Blob && m.blob.size) blob = m.blob
+      else if (m.blob instanceof ArrayBuffer && m.blob.byteLength) blob = new Blob([m.blob], { type: m.type })
+      else if (m.nativeMediaId && desktopBridge()) {
+        const bytes = Uint8Array.from(await desktopBridge()!.readMedia(m.nativeMediaId))
+        blob = new Blob([bytes.buffer], { type: m.type })
+      }
+      else throw new Error(`공유 파일에 넣을 원본 미디어를 찾을 수 없습니다: ${m.name}`)
+      return { id: m.id, name: m.name, type: m.type, data: await blobToBase64(blob) }
+    }),
   )
   return new Blob([JSON.stringify({ ...p, media })], { type: 'application/json' })
 }
@@ -286,7 +414,7 @@ export async function fileBlobToProject(file: File): Promise<ProjectState> {
   const json: unknown = JSON.parse(await file.text())
   assertPortableProject(json)
   const media: MediaBlob[] = (json.media || []).map((m: { id: string; name: string; type: string; data: string }) => ({
-    id: m.id, name: m.name, type: m.type, blob: base64ToBlob(m.data, m.type),
+    id: m.id, name: m.name, type: m.type, blob: base64ToBlob(m.data, m.type), size: Math.floor(m.data.length * 0.75),
   }))
   return verifyProjectMedia(deserialize({ ...json, media }))
 }
@@ -452,14 +580,15 @@ function assertStoredProject(value: unknown): asserts value is SerializedProject
   const ids = new Set<string>()
   for (const media of p.media as unknown[]) {
     const m = record(media, '저장 미디어')
-    const storedBytes = m.blob instanceof Blob ? m.blob.size : m.blob instanceof ArrayBuffer ? m.blob.byteLength : 0
-    if (typeof m.id !== 'string' || typeof m.name !== 'string' || typeof m.type !== 'string' || storedBytes <= 0) {
+    const blobBytes = m.blob instanceof Blob ? m.blob.size : m.blob instanceof ArrayBuffer ? m.blob.byteLength : 0
+    const declaredBytes = typeof m.size === 'number' && Number.isFinite(m.size) ? m.size : 0
+    const managed = typeof m.nativeMediaId === 'string' && /^[0-9a-f-]{36}(?:\.[a-z0-9]{1,10})?$/.test(m.nativeMediaId)
+    if (typeof m.id !== 'string' || typeof m.name !== 'string' || typeof m.type !== 'string' || Math.max(blobBytes, declaredBytes) <= 0 || (!blobBytes && !managed)) {
       throw new Error('저장된 미디어 정보가 불완전합니다.')
     }
     if (ids.has(m.id)) throw new Error('저장된 미디어 ID가 중복되었습니다.')
     ids.add(m.id)
     text(m.name, PROJECT_LIMITS.maxNameLength, '저장 미디어 이름')
-    if ('nativePath' in m && m.nativePath !== undefined) text(m.nativePath, 4096, '원본 미디어 경로')
   }
   assertMediaReferences(p, ids)
 }

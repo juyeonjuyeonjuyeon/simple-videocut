@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Clip } from './types'
+import type { ProjectState } from './utils/project'
 import { useEditor } from './store'
 import { projectDuration } from './utils/time'
 
 const clip = (repeat = 1): Clip => ({
   id: 'clip-1', kind: 'video', name: 'repeat.mp4', src: 'blob:repeat',
   file: new File(['video'], 'repeat.mp4', { type: 'video/mp4' }),
+  sourceSize: 5,
   duration: 2, trimStart: 0, trimEnd: 2, speed: 1, volume: 1, muted: false,
   hasAudio: false, color: '#000000', rotate: 0, flipH: false, flipV: false,
   crop: { top: 0, right: 0, bottom: 0, left: 0 }, repeat,
@@ -43,5 +45,19 @@ describe('timeline splitting', () => {
     expect(after).toHaveLength(2)
     expect(after.map((item) => item.repeat)).toEqual([1, 2])
     expect(projectDuration(after, [], [], [], [])).toBeCloseTo(6)
+  })
+
+  it('starts a loaded project with a clean undo history', () => {
+    useEditor.getState().updateClip('clip-1', { volume: 0.5 })
+    expect(useEditor.getState().canUndo).toBe(true)
+
+    const project: ProjectState = {
+      clips: [clip(1)], overlays: [], audios: [], backgrounds: [], texts: [],
+      aspectRatio: '16:9', exportSettings: { height: 720, format: 'mp4', filename: 'loaded' },
+    }
+    useEditor.getState().replaceProject(project)
+
+    expect(useEditor.getState().canUndo).toBe(false)
+    expect(useEditor.getState().canRedo).toBe(false)
   })
 })

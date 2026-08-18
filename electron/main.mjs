@@ -1,10 +1,12 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, protocol } from 'electron'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { copyFile, link, mkdtemp, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { basename, isAbsolute, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { validateFFmpegArgs } from './ffmpeg-args.mjs'
+import { createNativeProjectStore } from './native-project-store.mjs'
 
 const require = createRequire(import.meta.url)
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
@@ -14,8 +16,35 @@ let processHandle = null
 let quitting = false
 let quitReady = false
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
+let projectStore = null
+let videoEncoderPromise = null
+
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'simplecut-media',
+  privileges: { standard: true, secure: true, stream: true, supportFetchAPI: false },
+}])
+
+const nativeProjects = () => {
+  if (!projectStore) projectStore = createNativeProjectStore(join(app.getPath('userData'), 'native-library-v2'))
+  return projectStore
+}
 
 const isRendering = () => Boolean(processHandle && processHandle.exitCode === null && processHandle.signalCode === null)
+
+function detectVideoEncoder() {
+  if (videoEncoderPromise) return videoEncoderPromise
+  videoEncoderPromise = new Promise((resolve) => {
+    const child = spawn(ffmpegPath, ['-hide_banner', '-encoders'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    let output = ''
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => { if (output.length < 2_000_000) output += chunk })
+    child.stderr.on('data', (chunk) => { if (output.length < 2_000_000) output += chunk })
+    child.once('error', () => resolve(null))
+    child.once('close', (code) => resolve(code === 0 && /\bh264_videotoolbox\b/.test(output) ? 'h264_videotoolbox' : null))
+  })
+  return videoEncoderPromise
+}
 
 async function workspace() {
   if (!workDir) workDir = await mkdtemp(join(tmpdir(), 'simplecut-render-'))
@@ -37,6 +66,14 @@ async function clearWorkspace() {
 }
 
 ipcMain.handle('native-ffmpeg:available', () => Boolean(ffmpegPath))
+ipcMain.handle('native-ffmpeg:video-encoder', () => detectVideoEncoder())
+ipcMain.handle('native-media:register', async (_event, sourcePath, name) => nativeProjects().registerMedia(sourcePath, name))
+ipcMain.handle('native-media:import', async (_event, name, data) => nativeProjects().importMedia(name, data))
+ipcMain.handle('native-media:read', async (_event, id) => new Uint8Array(await readFile(nativeProjects().mediaPath(id))))
+ipcMain.handle('native-project:save', async (_event, name, project) => nativeProjects().saveProject(name, project))
+ipcMain.handle('native-project:load', async (_event, name) => nativeProjects().loadProjectCandidates(name))
+ipcMain.handle('native-project:list', async () => nativeProjects().listProjects())
+ipcMain.handle('native-project:delete', async (_event, name) => nativeProjects().deleteProject(name))
 ipcMain.handle('native-ffmpeg:stage-file', async (_event, name, sourcePath) => {
   if (typeof sourcePath !== 'string' || !isAbsolute(sourcePath)) throw new Error('원본 파일 경로가 잘못되었습니다.')
   const sourceInfo = await stat(sourcePath)
@@ -44,6 +81,14 @@ ipcMain.handle('native-ffmpeg:stage-file', async (_event, name, sourcePath) => {
   const target = join(await workspace(), safeFile(name))
   await unlink(target).catch(() => {})
   await link(sourcePath, target).catch(async () => copyFile(sourcePath, target))
+})
+ipcMain.handle('native-ffmpeg:stage-media', async (_event, name, id) => {
+  const source = nativeProjects().mediaPath(id)
+  const sourceInfo = await stat(source)
+  if (!sourceInfo.isFile() || sourceInfo.size <= 0) throw new Error('관리 중인 원본 파일이 없거나 비어 있습니다.')
+  const target = join(await workspace(), safeFile(name))
+  await unlink(target).catch(() => {})
+  await link(source, target).catch(async () => copyFile(source, target))
 })
 ipcMain.handle('native-ffmpeg:write-file', async (_event, name, data) => {
   await writeFile(join(await workspace(), safeFile(name)), Buffer.from(data))
@@ -80,7 +125,7 @@ ipcMain.handle('native-ffmpeg:delete-file', async (_event, name) => {
 })
 ipcMain.handle('native-ffmpeg:exec', async (event, args) => {
   if (processHandle) throw new Error('이미 영상 렌더링이 진행 중입니다.')
-  if (!Array.isArray(args) || args.some((arg) => typeof arg !== 'string')) throw new Error('FFmpeg 명령이 잘못되었습니다.')
+  validateFFmpegArgs(args)
   const durationIndex = args.lastIndexOf('-t')
   const duration = durationIndex >= 0 ? Number(args[durationIndex + 1]) : 0
   return new Promise((resolve, reject) => {
@@ -135,8 +180,19 @@ function createWindow() {
       sandbox: true,
     },
   })
-  if (process.env.SIMPLECUT_DEV_URL) window.loadURL(process.env.SIMPLECUT_DEV_URL)
-  else window.loadFile(join(root, 'dist', 'index.html'))
+  const entryPath = join(root, 'dist', 'index.html')
+  const entryUrl = pathToFileURL(entryPath).toString()
+  const devUrl = !app.isPackaged ? process.env.SIMPLECUT_DEV_URL : ''
+  const validDevUrl = Boolean(devUrl && /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(devUrl))
+  const allowedOrigin = validDevUrl ? new URL(devUrl).origin : ''
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  window.webContents.on('will-attach-webview', (event) => event.preventDefault())
+  window.webContents.on('will-navigate', (event, url) => {
+    const allowed = validDevUrl ? new URL(url).origin === allowedOrigin : url === entryUrl
+    if (!allowed) event.preventDefault()
+  })
+  if (validDevUrl) window.loadURL(devUrl)
+  else window.loadFile(entryPath)
   window.on('close', async (event) => {
     if (!isRendering() || quitting || allowClose) return
     event.preventDefault()
@@ -159,7 +215,21 @@ function createWindow() {
 }
 
 if (!hasSingleInstanceLock) app.quit()
-else app.whenReady().then(createWindow)
+else app.whenReady().then(async () => {
+  await nativeProjects().initialize()
+  protocol.handle('simplecut-media', async (request) => {
+    try {
+      const url = new URL(request.url)
+      if (url.hostname !== 'media') return new Response(null, { status: 404 })
+      const id = decodeURIComponent(url.pathname.slice(1))
+      const source = nativeProjects().mediaPath(id)
+      return net.fetch(pathToFileURL(source).toString(), { headers: request.headers })
+    } catch {
+      return new Response(null, { status: 404 })
+    }
+  })
+  createWindow()
+})
 app.on('second-instance', () => {
   const window = BrowserWindow.getAllWindows()[0]
   if (!window) createWindow()

@@ -6,7 +6,11 @@ import { assertMediaCapacity, probeVideo, probeImage, probeAudio, nextClipColor,
 import { clipTimelineDuration, clipStartOffsets, projectDuration, overlayLength, audioLength } from './utils/time'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
-const nativePathFor = (file: File) => window.simplecutDesktop?.filePath(file) || undefined
+const registerNativeMedia = async (file: File) => {
+  if (!window.simplecutDesktop) return undefined
+  try { return (await window.simplecutDesktop.registerMedia(file)).id }
+  catch (error) { console.warn('데스크톱 미디어 등록을 나중으로 미룹니다.', error); return undefined }
+}
 
 const IMAGE_NOMINAL_MAX = 3600 // images can be stretched up to this length (s)
 const DEFAULT_IMAGE_DUR = 5
@@ -77,7 +81,16 @@ interface EditorState {
 
 type MediaState = Pick<EditorState, 'clips' | 'overlays' | 'audios' | 'backgrounds'>
 const mediaItems = (s: MediaState) => [...s.clips, ...s.overlays, ...s.audios, ...s.backgrounds]
-const existingMediaFiles = (s: MediaState) => [...new Set(mediaItems(s).map((item) => item.file).filter((file) => file.size > 0))]
+const existingMediaFiles = (s: MediaState) => {
+  const seen = new Set<File | string>()
+  return mediaItems(s).flatMap((item) => {
+    if (!item.sourceSize) return []
+    const key = item.nativeMediaId || item.file
+    if (seen.has(key)) return []
+    seen.add(key)
+    return [{ name: item.name, size: item.sourceSize }]
+  })
+}
 const allowMediaBatch = (files: File[], state: MediaState) => {
   try { assertMediaCapacity(files, existingMediaFiles(state)); return true }
   catch (error) { alert((error as Error).message); return false }
@@ -125,7 +138,7 @@ export const useEditor = create<EditorState>((set, get) => ({
           const { src } = await probeImage(file)
           clip = {
             id: uid(), kind: 'image', name: file.name, src, file,
-            nativePath: nativePathFor(file),
+            sourceSize: file.size, nativeMediaId: await registerNativeMedia(file),
             duration: IMAGE_NOMINAL_MAX, trimStart: 0, trimEnd: DEFAULT_IMAGE_DUR,
             speed: 1, volume: 1, muted: false, hasAudio: false, color: nextClipColor(),
             ...TRANSFORM_DEFAULTS, repeat: 1,
@@ -134,7 +147,7 @@ export const useEditor = create<EditorState>((set, get) => ({
           const { duration, hasAudio, src } = await probeVideo(file)
           clip = {
             id: uid(), kind: 'video', name: file.name, src, file,
-            nativePath: nativePathFor(file),
+            sourceSize: file.size, nativeMediaId: await registerNativeMedia(file),
             duration, trimStart: 0, trimEnd: duration,
             speed: 1, volume: 1, muted: false, hasAudio, color: nextClipColor(),
             ...TRANSFORM_DEFAULTS, repeat: 1,
@@ -268,6 +281,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   addBackground: () => {
     const bg: Background = {
       id: uid(), kind: 'color', name: '단색 배경', src: '', file: new File([], 'bg'),
+      sourceSize: 0,
       duration: IMAGE_NOMINAL_MAX, trimStart: 0, trimEnd: DEFAULT_IMAGE_DUR,
       speed: 1, volume: 1, muted: false, hasAudio: false, color: '#3a4250',
       ...TRANSFORM_DEFAULTS, repeat: 1, bgColor: '#000000', start: get().playhead,
@@ -330,7 +344,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         let ov: Overlay
         const base = {
           id: uid(), name: file.name, file, color: nextClipColor(),
-          nativePath: nativePathFor(file),
+          sourceSize: file.size, nativeMediaId: await registerNativeMedia(file),
           start, x: 0.5, y: 0.5, scale: 0.4, angle: 0, speed: 1, volume: 1, muted: false,
           ...TRANSFORM_DEFAULTS, repeat: 1,
         }
@@ -407,7 +421,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         const { duration, src } = await probeAudio(file)
         const a: AudioClip = {
           id: uid(), name: file.name, src, file,
-          nativePath: nativePathFor(file),
+          sourceSize: file.size, nativeMediaId: await registerNativeMedia(file),
           duration, trimStart: 0, trimEnd: duration,
           volume: 1, muted: false, color: nextClipColor(), start: get().playhead, repeat: 1,
         }
@@ -536,17 +550,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
   },
 
-  replaceProject: (p) => {
-    set({
-      clips: p.clips,
-      // Backfill fields added in newer versions so older saves stay valid.
-      overlays: p.overlays.map((o) => ({ ...o, angle: o.angle ?? 0 })),
-      audios: p.audios, backgrounds: p.backgrounds,
-      texts: p.texts.map((t) => ({ ...t, angle: t.angle ?? 0 })),
-      aspectRatio: p.aspectRatio, exportSettings: p.exportSettings,
-      selection: null, playhead: 0, isPlaying: false,
-    })
-  },
+  replaceProject: (p) => replaceEditorProject(p),
 }))
 
 type EditorSnapshot = Pick<EditorState,
@@ -583,6 +587,26 @@ const releaseSnapshotMedia = (candidate: EditorSnapshot) => {
   for (const item of mediaItems(candidate)) if (item.src && !live.has(item.src)) URL.revokeObjectURL(item.src)
 }
 
+function replaceEditorProject(p: ProjectState) {
+  const discarded = [takeSnapshot(useEditor.getState()), ...past, ...future]
+  past.length = 0
+  future = []
+  lastHistoryKey = ''
+  lastHistoryAt = 0
+  applyingHistory = true
+  useEditor.setState({
+    clips: p.clips,
+    // Backfill fields added in newer versions so older saves stay valid.
+    overlays: p.overlays.map((o) => ({ ...o, angle: o.angle ?? 0 })),
+    audios: p.audios, backgrounds: p.backgrounds,
+    texts: p.texts.map((t) => ({ ...t, angle: t.angle ?? 0 })),
+    aspectRatio: p.aspectRatio, exportSettings: p.exportSettings,
+    selection: null, playhead: 0, isPlaying: false, canUndo: false, canRedo: false,
+  })
+  applyingHistory = false
+  for (const snapshot of discarded) releaseSnapshotMedia(snapshot)
+}
+
 function undoEditor() {
   const target = past.pop()
   if (!target) return
@@ -609,7 +633,9 @@ useEditor.subscribe((state, previous) => {
   if (key !== lastHistoryKey || now - lastHistoryAt > 450) past.push(takeSnapshot(previous))
   lastHistoryKey = key
   lastHistoryAt = now
+  const abandonedFuture = future
   future = []
+  for (const snapshot of abandonedFuture) releaseSnapshotMedia(snapshot)
   if (past.length > 50) {
     const dropped = past.shift()
     if (dropped) releaseSnapshotMedia(dropped)

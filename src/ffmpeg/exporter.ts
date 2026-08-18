@@ -16,7 +16,8 @@ interface FFmpegEngine {
   on(event: 'progress', handler: ProgressHandler): void
   off(event: 'progress', handler: ProgressHandler): void
   exec(args: string[]): Promise<number>
-  stageFile?(name: string, file: File, nativePath?: string): Promise<void>
+  videoEncoder?(): Promise<'h264_videotoolbox' | null>
+  stageFile?(name: string, file: File, nativeMediaId?: string): Promise<void>
   writeFile(name: string, data: Uint8Array): Promise<unknown>
   readFile(name: string): Promise<Uint8Array | string>
   fileSize?(name: string): Promise<number>
@@ -73,8 +74,24 @@ export function parseVideoStreamInfo(lines: string[]): VideoStreamInfo {
   }
 }
 
-export function shouldNormalizeInput(info: VideoStreamInfo, outputWidth: number, outputHeight: number): boolean {
+export function shouldNormalizeInput(info: VideoStreamInfo, outputWidth: number, outputHeight: number, nativeDesktop = false): boolean {
+  if (nativeDesktop) return false
   return info.codec === 'hevc' || info.codec === 'h265' || info.width > outputWidth || info.height > outputHeight
+}
+
+export function mp4VideoEncodingArgs(height: number, encoder: 'h264_videotoolbox' | null): string[] {
+  if (!encoder) return ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p']
+  const bitrate = height >= 2160 ? 20 : height >= 1440 ? 10 : height >= 1080 ? 6 : height >= 720 ? 3 : 1.5
+  const bitrateText = `${bitrate}M`
+  return [
+    '-c:v', encoder,
+    '-b:v', bitrateText,
+    '-maxrate', `${bitrate * 1.5}M`,
+    '-bufsize', `${bitrate * 2}M`,
+    '-profile:v', 'high',
+    '-allow_sw', '1',
+    '-pix_fmt', 'yuv420p',
+  ]
 }
 
 export function createProgressReporter(onProgress?: (ratio: number) => void) {
@@ -272,6 +289,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
   if (clips.length === 0) throw new Error('내보낼 클립이 없습니다.')
 
   const fp = await getFFmpeg(onLog)
+  const nativeVideoEncoder = fp.videoEncoder ? await fp.videoEncoder().catch(() => null) : null
   const { w: W, h: H } = aspectToWH(aspect, height)
   const duration = projectDuration(clips, overlays, audios, texts, backgrounds)
 
@@ -288,10 +306,10 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     await fp.deleteFile(outName).catch(() => {})
     const visualCount = clips.filter((item) => item.kind !== 'color').length + overlays.length + backgrounds.filter((item) => item.kind !== 'color').length
     let visualIndex = 0
-    const stageMedia = async (name: string, item: { file: File; nativePath?: string }) => {
+    const stageMedia = async (name: string, item: { file: File; nativeMediaId?: string }) => {
       if (fp.stageFile) {
         try {
-          await fp.stageFile(name, item.file, item.nativePath)
+          await fp.stageFile(name, item.file, item.nativeMediaId)
           return
         } catch (error) {
           externalLog?.(`원본 경로를 사용할 수 없어 저장된 사본을 사용합니다: ${(error as Error).message}`)
@@ -311,7 +329,10 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       // A repeated trimmed source cannot be expressed correctly with
       // -stream_loop alone: FFmpeg would continue past the trim point before
       // looping the whole original. Materialize one trimmed cycle first.
-      const needsNormalization = item.kind === 'video' ? shouldNormalizeInput(info, W, H) || item.repeat > 1 : oversizedImage
+      const nativeDesktop = Boolean(fp.fileSize)
+      const needsNormalization = item.kind === 'video'
+        ? shouldNormalizeInput(info, W, H, nativeDesktop) || item.repeat > 1
+        : oversizedImage && !nativeDesktop
       const stageStart = 0.05 + (0.2 * visualIndex) / Math.max(1, visualCount)
       visualIndex++
       if (!needsNormalization) {
@@ -322,23 +343,33 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
 
       const normalizedName = `${normalizedBase}.${item.kind === 'image' ? 'png' : 'mp4'}`
       const scaleMode = cover ? 'increase' : 'decrease'
-      const normalizeArgs = ['-y']
-      if (item.kind === 'video') normalizeArgs.push('-ss', String(item.trimStart), '-t', String(item.trimEnd - item.trimStart))
-      normalizeArgs.push('-i', sourceName, '-map', '0:v:0')
-      if (item.kind === 'video' && info.hasAudio) normalizeArgs.push('-map', '0:a:0')
-      normalizeArgs.push('-vf', `scale=${W}:${H}:force_original_aspect_ratio=${scaleMode}:force_divisible_by=2`)
-      if (item.kind === 'image') {
-        normalizeArgs.push('-frames:v', '1', normalizedName)
-      } else {
-        normalizeArgs.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p')
-        if (info.hasAudio) normalizeArgs.push('-c:a', 'aac', '-b:a', '192k')
-        else normalizeArgs.push('-an')
-        normalizeArgs.push(normalizedName)
+      const makeNormalizeArgs = (encoder: 'h264_videotoolbox' | null) => {
+        const normalizeArgs = ['-y']
+        if (item.kind === 'video') normalizeArgs.push('-ss', String(item.trimStart), '-t', String(item.trimEnd - item.trimStart))
+        normalizeArgs.push('-i', sourceName, '-map', '0:v:0')
+        if (item.kind === 'video' && info.hasAudio) normalizeArgs.push('-map', '0:a:0')
+        normalizeArgs.push('-vf', `scale=${W}:${H}:force_original_aspect_ratio=${scaleMode}:force_divisible_by=2`)
+        if (item.kind === 'image') normalizeArgs.push('-frames:v', '1', normalizedName)
+        else {
+          normalizeArgs.push(...(encoder
+            ? mp4VideoEncodingArgs(H, encoder)
+            : ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p']))
+          if (info.hasAudio) normalizeArgs.push('-c:a', 'aac', '-b:a', '192k')
+          else normalizeArgs.push('-an')
+          normalizeArgs.push(normalizedName)
+        }
+        return normalizeArgs
       }
 
       progressReporter.setStage(stageStart, 0.2 / Math.max(1, visualCount))
       logBuffer = []
-      const normalizeExitCode = await fp.exec(normalizeArgs)
+      let normalizeExitCode = await fp.exec(makeNormalizeArgs(item.kind === 'video' ? nativeVideoEncoder : null))
+      if (normalizeExitCode !== 0 && item.kind === 'video' && nativeVideoEncoder) {
+        externalLog?.('하드웨어 미디어 준비가 실패해 호환 인코딩으로 다시 시도합니다.')
+        await fp.deleteFile(normalizedName).catch(() => {})
+        logBuffer = []
+        normalizeExitCode = await fp.exec(makeNormalizeArgs(null))
+      }
       if (normalizeExitCode !== 0) {
         resetEngine = true
         const useful = logBuffer.filter((line) => /error|invalid|failed|unable|unsupported|cannot|memory/i.test(line))
@@ -365,7 +396,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         inputTrimStarts.push(0)
         continue
       }
-      if (!clip.file.size) throw new Error(`원본 영상 파일이 비어 있습니다: ${clip.name}`)
+      if (!clip.sourceSize) throw new Error(`원본 영상 파일이 비어 있습니다: ${clip.name}`)
       const sourceName = `in${i}`
       await stageMedia(sourceName, clip)
       const cropped = Boolean(clip.crop.top || clip.crop.right || clip.crop.bottom || clip.crop.left)
@@ -385,7 +416,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     const overlayFiles: string[] = []
     const overlayTrimStarts: number[] = []
     for (let k = 0; k < overlays.length; k++) {
-      if (!overlays[k].file.size) throw new Error(`원본 오버레이 파일이 비어 있습니다: ${overlays[k].name}`)
+      if (!overlays[k].sourceSize) throw new Error(`원본 오버레이 파일이 비어 있습니다: ${overlays[k].name}`)
       await stageMedia(`ov${k}`, overlays[k])
       const prepared = await prepareVisual(`ov${k}`, `normov${k}`, overlays[k], false)
       overlayFiles.push(prepared.fileName)
@@ -403,7 +434,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         backgroundTrimStarts.push(0)
         continue
       }
-      if (!b.file.size) throw new Error(`원본 배경 파일이 비어 있습니다: ${b.name}`)
+      if (!b.sourceSize) throw new Error(`원본 배경 파일이 비어 있습니다: ${b.name}`)
       await stageMedia(`bg${k}`, b)
       const prepared = await prepareVisual(`bg${k}`, `normbg${k}`, b, true)
       backgroundFiles.push(prepared.fileName)
@@ -413,7 +444,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     const audioFiles: string[] = []
     const audioTrimStarts: number[] = []
     for (let k = 0; k < audios.length; k++) {
-      if (!audios[k].file.size) throw new Error(`원본 음성 파일이 비어 있습니다: ${audios[k].name}`)
+      if (!audios[k].sourceSize) throw new Error(`원본 음성 파일이 비어 있습니다: ${audios[k].name}`)
       await stageMedia(`audio${k}`, audios[k])
       if (audios[k].repeat > 1) {
         const normalizedName = `normaudio${k}.m4a`
@@ -626,20 +657,31 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
 
     args.push('-filter_complex', filters.join(';'))
     args.push('-map', lastV, '-map', '[finala]', '-t', duration.toFixed(3))
-    if (format === 'webm') {
-      args.push(
+    const finalArgs = (encoder: 'h264_videotoolbox' | null) => {
+      const next = [...args]
+      if (format === 'webm') {
+        next.push(
         '-c:v', 'libvpx', '-b:v', '1.5M', '-crf', '12', '-pix_fmt', 'yuv420p',
         '-c:a', 'libvorbis', '-q:a', '4', outName,
-      )
-    } else {
-      args.push(
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p',
+        )
+      } else {
+        next.push(
+        ...mp4VideoEncodingArgs(H, encoder),
         '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', outName,
-      )
+        )
+      }
+      return next
     }
 
     progressReporter.setStage(0.25, 0.7)
-    const exitCode = await fp.exec(args)
+    logBuffer = []
+    let exitCode = await fp.exec(finalArgs(format === 'mp4' ? nativeVideoEncoder : null))
+    if (exitCode !== 0 && format === 'mp4' && nativeVideoEncoder) {
+      externalLog?.('하드웨어 인코딩이 실패해 호환 인코딩으로 자동 재시도합니다.')
+      await fp.deleteFile(outName).catch(() => {})
+      logBuffer = []
+      exitCode = await fp.exec(finalArgs(null))
+    }
     if (exitCode !== 0) {
       resetEngine = true
       const useful = logBuffer.filter((line) => /error|invalid|failed|unable|not found|no such|unsupported|cannot|memory/i.test(line))

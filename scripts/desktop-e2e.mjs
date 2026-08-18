@@ -48,18 +48,11 @@ try {
   await audioRepeatControl.locator('input[type=number]').fill('2')
   await audioRepeatControl.locator('input[type=number]').blur()
   await page.getByRole('button', { name: '텍스트', exact: true }).click()
-  await page.waitForFunction(() => new Promise((resolve) => {
-    const opened = globalThis.indexedDB.open('simplecut-db', 1)
-    opened.onerror = () => resolve(false)
-    opened.onsuccess = () => {
-      const request = opened.result.transaction('projects', 'readonly').objectStore('projects').get('__autosave__')
-      request.onerror = () => resolve(false)
-      request.onsuccess = () => {
-        const project = request.result
-        resolve(Boolean(project && project.clips.length === 1 && project.clips[0].trimStart === 0.5 && project.clips[0].trimEnd === 1.5 && project.clips[0].repeat === 3 && project.overlays.length === 1 && project.backgrounds.length === 1 && project.audios.length === 1 && project.audios[0].trimStart === 1 && project.audios[0].trimEnd === 3 && project.audios[0].repeat === 2 && project.texts.length === 1 && project.media.every((item) => item.nativePath)))
-      }
-    }
-  }), null, { timeout: 20_000 })
+  await page.waitForFunction(async () => {
+    const projects = await globalThis.simplecutDesktop?.projectLoad('__autosave__')
+    const project = projects?.[0]
+    return Boolean(project && project.clips.length === 1 && project.clips[0].trimStart === 0.5 && project.clips[0].trimEnd === 1.5 && project.clips[0].repeat === 3 && project.overlays.length === 1 && project.backgrounds.length === 1 && project.audios.length === 1 && project.audios[0].trimStart === 1 && project.audios[0].trimEnd === 3 && project.audios[0].repeat === 2 && project.texts.length === 1 && project.media.every((item) => item.nativeMediaId && item.size > 0 && !('blob' in item)))
+  }, null, { timeout: 20_000 })
   await page.getByRole('status').filter({ hasText: '저장됨' }).waitFor({ timeout: 15_000 })
   await page.waitForTimeout(300)
   await app.close()

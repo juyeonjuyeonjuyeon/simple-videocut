@@ -1,8 +1,16 @@
 export interface DesktopFFmpegBridge {
   available(): Promise<boolean>
-  filePath(file: File): string
+  videoEncoder(): Promise<'h264_videotoolbox' | null>
+  registerMedia(file: File): Promise<{ id: string; size: number }>
+  importMedia(name: string, data: Uint8Array): Promise<{ id: string; size: number }>
+  readMedia(id: string): Promise<Uint8Array>
+  mediaUrl(id: string): string
+  projectSave(name: string, project: unknown): Promise<void>
+  projectLoad(name: string): Promise<unknown[]>
+  projectList(): Promise<Array<{ name: string; savedAt: number; size: number }>>
+  projectDelete(name: string): Promise<void>
   stageFile(name: string, file: File): Promise<void>
-  stagePath(name: string, sourcePath: string): Promise<void>
+  stageMedia(name: string, id: string): Promise<void>
   writeFile(name: string, data: Uint8Array): Promise<void>
   readFile(name: string): Promise<Uint8Array>
   fileSize(name: string): Promise<number>
@@ -47,14 +55,15 @@ export class NativeFFmpeg {
   }
 
   writeFile(name: string, data: Uint8Array) { return this.bridge.writeFile(name, data) }
-  stageFile(name: string, file: File, nativePath?: string) {
-    return nativePath ? this.bridge.stagePath(name, nativePath) : this.bridge.stageFile(name, file)
+  stageFile(name: string, file: File, nativeMediaId?: string) {
+    return nativeMediaId ? this.bridge.stageMedia(name, nativeMediaId) : this.bridge.stageFile(name, file)
   }
   readFile(name: string) { return this.bridge.readFile(name) }
   fileSize(name: string) { return this.bridge.fileSize(name) }
   saveFile(name: string, suggestedName: string) { return this.bridge.saveFile(name, suggestedName) }
   deleteFile(name: string) { return this.bridge.deleteFile(name) }
   exec(args: string[]) { return this.bridge.exec(args) }
+  videoEncoder() { return this.bridge.videoEncoder() }
   terminate() {
     this.removeLog?.()
     this.removeProgress?.()
