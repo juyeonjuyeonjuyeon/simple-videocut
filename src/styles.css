@@ -128,6 +128,7 @@ button, input, textarea { font-family: inherit; }
 }
 .preview__frame {
   position: relative;
+  isolation: isolate;
   background: #000;
   border-radius: 0;
   overflow: hidden;
@@ -141,7 +142,7 @@ button, input, textarea { font-family: inherit; }
   object-fit: contain;
   background: transparent;
   display: block;
-  z-index: 1;
+  z-index: 1000;
 }
 .preview__bg {
   position: absolute;
@@ -162,10 +163,18 @@ button, input, textarea { font-family: inherit; }
   cursor: move;
   border-radius: 4px;
   touch-action: none;
-  z-index: 2;
   line-height: 0;
 }
-.preview__overlay--selected { outline: 2px solid var(--accent); outline-offset: 1px; z-index: 4; }
+.preview__overlay-controls {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 4px;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  cursor: move;
+  line-height: 0;
+  touch-action: none;
+}
 .preview__overlay-clip {
   width: 100%;
   line-height: 0;
@@ -234,7 +243,6 @@ button, input, textarea { font-family: inherit; }
 .preview__text {
   position: absolute;
   transform: translate(-50%, -50%);
-  z-index: 3;
   font-weight: 700;
   white-space: pre;
   line-height: 1.25;
@@ -248,7 +256,7 @@ button, input, textarea { font-family: inherit; }
 .preview__resize--text { right: -9px; bottom: -9px; }
 
 /* Interactive crop editor (double-click a main clip) */
-.cropedit { position: absolute; inset: 0; z-index: 8; }
+.cropedit { position: absolute; inset: 0; z-index: 4000; }
 .cropedit__rect {
   position: absolute;
   border: 2px solid var(--accent);
@@ -302,7 +310,7 @@ button, input, textarea { font-family: inherit; }
   padding: 4px 10px;
   border-radius: 999px;
   white-space: nowrap;
-  z-index: 9;
+  z-index: 4001;
 }
 
 /* ---------- Transport ---------- */

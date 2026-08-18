@@ -10,6 +10,7 @@ import { saveProject, loadProject, autosaveMeta, AUTOSAVE_KEY } from './utils/pr
 import type { ProjectMeta } from './utils/project'
 import { AUDIO_ACCEPT, isAudioFile, isImageFile, isVideoFile } from './utils/media'
 import Icon from './components/Icon'
+import { startPointerDrag } from './utils/pointer'
 
 export default function App() {
   const clips = useEditor((s) => s.clips)
@@ -52,20 +53,13 @@ export default function App() {
 
   const startResize = (axis: 'w' | 'h') => (e: React.PointerEvent) => {
     e.preventDefault()
-    document.body.style.userSelect = 'none'
     document.body.style.cursor = axis === 'w' ? 'ew-resize' : 'ns-resize'
-    const move = (ev: PointerEvent) => {
+    startPointerDrag((ev) => {
       if (axis === 'w') setInspectorW(Math.max(240, Math.min(window.innerWidth - ev.clientX, 640)))
       else setTimelineH(Math.max(140, Math.min(window.innerHeight - ev.clientY, window.innerHeight * 0.72)))
-    }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      document.body.style.userSelect = ''
+    }, () => {
       document.body.style.cursor = ''
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    })
   }
   const appStyle = {
     ['--inspector-w' as string]: `${inspectorW}px`,
@@ -96,9 +90,14 @@ export default function App() {
       if (!(s.clips.length || s.overlays.length || s.audios.length || s.backgrounds.length || s.texts.length)) return
       const sig = signature()
       if (sig === lastSig.current) { dirty = false; return }
-      if (inFlight) { queued = true; return }
+      if (inFlight) {
+        queued = true
+        setSaveStatus('saving')
+        return
+      }
       inFlight = true
       setSaveStatus('saving')
+      let succeeded = false
       try {
         await saveProject(AUTOSAVE_KEY, {
           clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
@@ -106,7 +105,7 @@ export default function App() {
         })
         lastSig.current = sig
         dirty = signature() !== sig
-        setSaveStatus('saved')
+        succeeded = true
       } catch (error) {
         console.error('자동 저장 실패', error)
         setSaveStatus('error')
@@ -114,14 +113,18 @@ export default function App() {
         inFlight = false
         if (queued || dirty) {
           queued = false
+          setSaveStatus('saving')
           window.clearTimeout(timer)
           timer = window.setTimeout(() => { void saveNow() }, 250)
+        } else if (succeeded) {
+          setSaveStatus('saved')
         }
       }
     }
     const schedule = () => {
       if (signature() === lastSig.current) return
       dirty = true
+      setSaveStatus('saving')
       window.clearTimeout(timer)
       timer = window.setTimeout(() => { void saveNow() }, 800)
     }

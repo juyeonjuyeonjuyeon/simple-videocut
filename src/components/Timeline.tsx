@@ -11,6 +11,8 @@ import {
   formatTimeFine,
 } from '../utils/time'
 import { contrastText } from '../utils/color'
+import { packVisualLanes } from '../utils/layers'
+import { startPointerDrag as startDrag } from '../utils/pointer'
 import type { Clip, Selection } from '../types'
 
 const clipBg = (c: Clip) => (c.kind === 'color' ? c.bgColor ?? '#000000' : c.color)
@@ -30,20 +32,6 @@ const LONG_PRESS_MS = 520
 type FreeKind = 'overlay' | 'audio' | 'text' | 'background'
 
 const clampPps = (p: number) => Math.max(MIN_PX_PER_SEC, Math.min(p, MAX_PX_PER_SEC))
-
-function startDrag(onMove: (e: PointerEvent) => void, onEnd?: (e: PointerEvent) => void) {
-  const prevUserSelect = document.body.style.userSelect
-  document.body.style.userSelect = 'none'
-  const move = (e: PointerEvent) => onMove(e)
-  const up = (e: PointerEvent) => {
-    window.removeEventListener('pointermove', move)
-    window.removeEventListener('pointerup', up)
-    document.body.style.userSelect = prevUserSelect
-    onEnd?.(e)
-  }
-  window.addEventListener('pointermove', move)
-  window.addEventListener('pointerup', up)
-}
 
 export default function Timeline() {
   const clips = useEditor((s) => s.clips)
@@ -187,10 +175,10 @@ export default function Timeline() {
   }, [total, trackW])
 
   // Lane packing for the free tracks.
-  const overlayLanes = packLanes(overlays.map((o) => ({ start: o.start, end: o.start + overlayLength(o) })))
+  const overlayLanes = packVisualLanes(overlays.map((o) => ({ start: o.start, end: o.start + overlayLength(o) })))
   const audioLanes = packLanes(audios.map((a) => ({ start: a.start, end: a.start + audioLength(a) })))
-  const textLanes = packLanes(texts.map((t) => ({ start: t.start, end: t.end })))
-  const bgLanes = packLanes(backgrounds.map((b) => ({ start: b.start, end: b.start + clipTimelineDuration(b) })))
+  const textLanes = packVisualLanes(texts.map((t) => ({ start: t.start, end: t.end })))
+  const bgLanes = packVisualLanes(backgrounds.map((b) => ({ start: b.start, end: b.start + clipTimelineDuration(b) })))
   const nOverlayLanes = overlayLanes.length ? Math.max(...overlayLanes) + 1 : 0
   const nAudioLanes = audioLanes.length ? Math.max(...audioLanes) + 1 : 0
   const nTextLanes = textLanes.length ? Math.max(...textLanes) + 1 : 0
@@ -331,9 +319,10 @@ export default function Timeline() {
         }
         reorderClip(id, target)
       },
-      (ev) => {
+      (ev, cancelled) => {
         window.clearTimeout(longPress)
         setDragId(null)
+        if (cancelled) return
         if (menuOpened) return
         if (!moved) {
           if (onName && wasSelected) startEdit('clip', id)
@@ -422,8 +411,9 @@ export default function Timeline() {
         else if (kind === 'background') updateBackground(id, { start: ns })
         else updateText(id, { start: ns, end: ns + len })
       },
-      (ev) => {
+      (ev, cancelled) => {
         window.clearTimeout(longPress)
+        if (cancelled) return
         if (menuOpened) return
         if (!moved) {
           if (onName && wasSelected) startEdit(kind, id)
@@ -581,7 +571,22 @@ export default function Timeline() {
             ))}
           </div>
 
-          {/* Overlay lanes (PiP) */}
+          {/* Text is always composited above media overlays. */}
+          {nTextLanes > 0 && (
+            <div
+              className="timeline__lane timeline__lane--text"
+              style={{ height: nTextLanes * TXT_LANE_H }}
+              onPointerDown={(e) => e.target === e.currentTarget && select(null)}
+            >
+              {texts.map((t, i) =>
+                freeChip('text', t.id, t.start, t.end - t.start, textLanes[i], TXT_LANE_H, '#3a4250',
+                  `T ${t.text}`,
+                  selection?.type === 'text' && selection.id === t.id),
+              )}
+            </div>
+          )}
+
+          {/* Overlay lanes (PiP), frontmost overlapping layer on the top row. */}
           {nOverlayLanes > 0 && (
             <div
               className="timeline__lane timeline__lane--overlay"
@@ -646,21 +651,6 @@ export default function Timeline() {
                 freeChip('audio', a.id, a.start, audioLength(a), audioLanes[i], AUD_LANE_H, a.color,
                   `음악 · ${a.name}${a.repeat > 1 ? ` · 반복 ${a.repeat}회` : ''}${a.muted ? ' · 음소거' : ''}`,
                   selection?.type === 'audio' && selection.id === a.id),
-              )}
-            </div>
-          )}
-
-          {/* Text lanes */}
-          {nTextLanes > 0 && (
-            <div
-              className="timeline__lane timeline__lane--text"
-              style={{ height: nTextLanes * TXT_LANE_H }}
-              onPointerDown={(e) => e.target === e.currentTarget && select(null)}
-            >
-              {texts.map((t, i) =>
-                freeChip('text', t.id, t.start, t.end - t.start, textLanes[i], TXT_LANE_H, '#3a4250',
-                  `T ${t.text}`,
-                  selection?.type === 'text' && selection.id === t.id),
               )}
             </div>
           )}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useEditor } from '../store'
 import type { AspectRatio } from '../types'
 import {
@@ -11,6 +11,8 @@ import {
 } from '../utils/time'
 import { cssTransform, cssCropFill } from '../utils/transform'
 import { hexToRgba } from '../utils/color'
+import { overlayPreviewZ, PREVIEW_Z, textPreviewZ } from '../utils/layers'
+import { startPointerDrag } from '../utils/pointer'
 import Icon from './Icon'
 
 const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
@@ -61,12 +63,30 @@ export default function Preview() {
   const gainNodes = useRef<Map<HTMLMediaElement, GainNode>>(new Map())
   const [box, setBox] = useState({ w: 0, h: 0 })
   const [cropMode, setCropMode] = useState(false)
+  const [overlayControlHeight, setOverlayControlHeight] = useState(0)
   const selClip = selection?.type === 'clip' ? clips.find((c) => c.id === selection.id) : null
   const selOverlayId = selection?.type === 'overlay' ? selection.id : null
+  const selOverlay = selOverlayId ? overlays.find((o) => o.id === selOverlayId) : null
 
   // Leave crop mode when the selection changes.
   const selectionKey = selection ? `${selection.type}:${selection.id}` : ''
   useEffect(() => { setCropMode(false) }, [selectionKey])
+
+  // Keep editing controls above the content stack without changing the
+  // selected overlay's actual compositing order.
+  useLayoutEffect(() => {
+    if (!selOverlayId) {
+      setOverlayControlHeight(0)
+      return
+    }
+    const element = wrapEls.current.get(selOverlayId)
+    if (!element) return
+    const measure = () => setOverlayControlHeight(element.offsetHeight)
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    measure()
+    return () => observer.disconnect()
+  }, [selOverlayId, box.w, box.h])
 
   // ---- interactive crop / pan (works for the main clip and PiP overlays) ----
   type CropKind = 'clip' | 'overlay'
@@ -82,16 +102,7 @@ export default function Preview() {
     kind === 'clip' ? updateClip(id, { crop }) : updateOverlay(id, { crop })
 
   const withCropDrag = (onMove: (ev: PointerEvent) => void) => {
-    const prev = document.body.style.userSelect
-    document.body.style.userSelect = 'none'
-    const move = (ev: PointerEvent) => onMove(ev)
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      document.body.style.userSelect = prev
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    startPointerDrag(onMove)
   }
 
   const cropCorner = (kind: CropKind, id: string, corner: 'tl' | 'tr' | 'bl' | 'br') => (e: React.PointerEvent) => {
@@ -479,25 +490,16 @@ export default function Preview() {
     // Offset from the cursor to the overlay center, kept constant while dragging.
     const grabDx = e.clientX - (rect.left + o.x * rect.width)
     const grabDy = e.clientY - (rect.top + o.y * rect.height)
-    const prevSel = document.body.style.userSelect
-    document.body.style.userSelect = 'none'
-    const move = (ev: PointerEvent) => {
+    startPointerDrag((ev) => {
       updateOverlay(id, {
         x: (ev.clientX - grabDx - rect.left) / rect.width,
         y: (ev.clientY - grabDy - rect.top) / rect.height,
       })
-    }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      document.body.style.userSelect = prevSel
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    })
   }
 
-  // ---- drag the corner handle to resize a PiP overlay ----
-  const onResizeDown = (e: React.PointerEvent, id: string) => {
+  // ---- resize a PiP overlay while its opposite corner stays anchored ----
+  const onResizeDown = (e: React.PointerEvent, id: string, corner: 'tl' | 'tr' | 'bl' | 'br') => {
     e.stopPropagation()
     if (e.button !== 0) return
     select({ type: 'overlay', id })
@@ -508,23 +510,35 @@ export default function Preview() {
     const rect = frame.getBoundingClientRect()
     const centerX = rect.left + o.x * rect.width
     const centerY = rect.top + o.y * rect.height
-    // Radial resize: distance from the overlay center drives the scale, so dragging
-    // a corner outward in *any* direction grows it and inward shrinks it.
-    const d0 = Math.hypot(e.clientX - centerX, e.clientY - centerY) || 1
-    const s0 = o.scale
-    const prevSel = document.body.style.userSelect
-    document.body.style.userSelect = 'none'
-    const move = (ev: PointerEvent) => {
-      const d = Math.hypot(ev.clientX - centerX, ev.clientY - centerY)
-      updateOverlay(id, { scale: Math.max(0.05, Math.min((s0 * d) / d0, 3)) })
-    }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      document.body.style.userSelect = prevSel
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    const width = o.scale * rect.width
+    const height = wrapEls.current.get(id)?.offsetHeight || width / (16 / 9)
+    const aspect = width / Math.max(1, height)
+    const signX = corner === 'tr' || corner === 'br' ? 1 : -1
+    const signY = corner === 'bl' || corner === 'br' ? 1 : -1
+    const radians = ((o.angle || 0) * Math.PI) / 180
+    const ux = Math.cos(radians), uy = Math.sin(radians)
+    const vx = -Math.sin(radians), vy = Math.cos(radians)
+    const anchorX = centerX - signX * ux * width / 2 - signY * vx * height / 2
+    const anchorY = centerY - signX * uy * width / 2 - signY * vy * height / 2
+    const minWidth = rect.width * 0.1
+    const maxWidth = rect.width
+
+    startPointerDrag((ev) => {
+      const dx = ev.clientX - anchorX
+      const dy = ev.clientY - anchorY
+      const localWidth = signX * (dx * ux + dy * uy)
+      const localHeight = signY * (dx * vx + dy * vy)
+      const projectedWidth = (localWidth + localHeight / aspect) / (1 + 1 / (aspect * aspect))
+      const nextWidth = Math.max(minWidth, Math.min(projectedWidth, maxWidth))
+      const nextHeight = nextWidth / aspect
+      const nextCenterX = anchorX + signX * ux * nextWidth / 2 + signY * vx * nextHeight / 2
+      const nextCenterY = anchorY + signX * uy * nextWidth / 2 + signY * vy * nextHeight / 2
+      updateOverlay(id, {
+        x: (nextCenterX - rect.left) / rect.width,
+        y: (nextCenterY - rect.top) / rect.height,
+        scale: nextWidth / rect.width,
+      })
+    })
   }
 
   // ---- drag the rotation handle to spin a layer freely (overlay or text) ----
@@ -542,22 +556,13 @@ export default function Preview() {
     const cx = rect.left + item.x * rect.width
     const cy = rect.top + item.y * rect.height
     const base = (item.angle || 0) - (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI
-    const prevSel = document.body.style.userSelect
-    document.body.style.userSelect = 'none'
-    const move = (ev: PointerEvent) => {
+    startPointerDrag((ev) => {
       let deg = base + (Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180) / Math.PI
       deg = Math.round(((deg + 540) % 360) - 180) // normalize to -180..180
       if (!ev.shiftKey && Math.abs(deg % 90) <= 4) deg = Math.round(deg / 90) * 90 // snap near right angles
       if (kind === 'overlay') updateOverlay(id, { angle: deg })
       else updateText(id, { angle: deg })
-    }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      document.body.style.userSelect = prevSel
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    })
   }
 
   // ---- drag a text overlay around the frame (mouse + touch via pointer events) ----
@@ -572,21 +577,12 @@ export default function Preview() {
     const rect = frame.getBoundingClientRect()
     const grabDx = e.clientX - (rect.left + t.x * rect.width)
     const grabDy = e.clientY - (rect.top + t.y * rect.height)
-    const prevSel = document.body.style.userSelect
-    document.body.style.userSelect = 'none'
-    const move = (ev: PointerEvent) => {
+    startPointerDrag((ev) => {
       updateText(id, {
         x: (ev.clientX - grabDx - rect.left) / rect.width,
         y: (ev.clientY - grabDy - rect.top) / rect.height,
       })
-    }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      document.body.style.userSelect = prevSel
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    })
   }
 
   // ---- drag the corner handle to resize text (distance-from-center based) ----
@@ -603,19 +599,10 @@ export default function Preview() {
     const cy = rect.top + t.y * rect.height
     const startDist = Math.hypot(e.clientX - cx, e.clientY - cy) || 1
     const startSize = t.size
-    const prevSel = document.body.style.userSelect
-    document.body.style.userSelect = 'none'
-    const move = (ev: PointerEvent) => {
+    startPointerDrag((ev) => {
       const d = Math.hypot(ev.clientX - cx, ev.clientY - cy)
       updateText(id, { size: (startSize * d) / startDist })
-    }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      document.body.style.userSelect = prevSel
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    })
   }
 
   const visibleTexts = texts.filter((t) => playhead >= t.start && playhead <= t.end)
@@ -655,14 +642,22 @@ export default function Preview() {
         <img ref={mainImgRef} className="preview__video" alt="" style={{ display: 'none' }} />
         <div ref={mainColorRef} className="preview__video" style={{ display: 'none' }} />
 
-        {overlays.map((o) => {
+        {overlays.map((o, layerIndex) => {
           const sel = selection?.type === 'overlay' && selection.id === o.id
           return (
             <div
               key={o.id}
+              data-layer-name={o.name}
+              aria-label={`오버레이 ${o.name}`}
               ref={(el) => { if (el) wrapEls.current.set(o.id, el); else wrapEls.current.delete(o.id) }}
-              className={`preview__overlay${sel ? ' preview__overlay--selected' : ''}`}
-              style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${o.scale * 100}%`, visibility: 'hidden' }}
+              className="preview__overlay"
+              style={{
+                left: `${o.x * 100}%`,
+                top: `${o.y * 100}%`,
+                width: `${o.scale * 100}%`,
+                visibility: 'hidden',
+                zIndex: overlayPreviewZ(layerIndex),
+              }}
               onPointerDown={(e) => onOverlayDown(e, o.id)}
               onDoubleClick={(e) => { e.stopPropagation(); if (sel) setCropMode((m) => !m) }}
             >
@@ -683,16 +678,33 @@ export default function Preview() {
                   />
                 )}
               </div>
-              {sel && !cropMode && (['tl', 'tr', 'bl', 'br'] as const).map((corner) => (
-                <span key={corner} className={`preview__resize preview__resize--${corner}`} onPointerDown={(e) => onResizeDown(e, o.id)} />
-              ))}
-              {sel && !cropMode && (
-                <span className="preview__rotate" title="끌어서 회전" onPointerDown={onRotateDown('overlay', o.id)} />
-              )}
-              {sel && cropMode && selOverlayId === o.id && cropEditor('overlay', o.id, o.crop)}
             </div>
           )
         })}
+
+        {selOverlay && overlayControlHeight > 0 && (
+          <div
+            className="preview__overlay-controls"
+            style={{
+              left: `${selOverlay.x * 100}%`,
+              top: `${selOverlay.y * 100}%`,
+              width: `${selOverlay.scale * 100}%`,
+              height: overlayControlHeight,
+              transform: `translate(-50%, -50%) rotate(${selOverlay.angle || 0}deg)`,
+              zIndex: PREVIEW_Z.editor,
+            }}
+            onPointerDown={(event) => onOverlayDown(event, selOverlay.id)}
+            onDoubleClick={(event) => { event.stopPropagation(); setCropMode((mode) => !mode) }}
+          >
+            {!cropMode && (['tl', 'tr', 'bl', 'br'] as const).map((corner) => (
+              <span key={corner} className={`preview__resize preview__resize--${corner}`} onPointerDown={(event) => onResizeDown(event, selOverlay.id, corner)} />
+            ))}
+            {!cropMode && (
+              <span className="preview__rotate" title="끌어서 회전" onPointerDown={onRotateDown('overlay', selOverlay.id)} />
+            )}
+            {cropMode && cropEditor('overlay', selOverlay.id, selOverlay.crop)}
+          </div>
+        )}
 
         {!hasContent && (
           <div className="preview__empty">
@@ -701,7 +713,7 @@ export default function Preview() {
           </div>
         )}
 
-        {visibleTexts.map((t) => {
+        {visibleTexts.map((t, layerIndex) => {
           const fontPx = t.size * box.h
           const sel = selection?.type === 'text' && selection.id === t.id
           return (
@@ -722,6 +734,7 @@ export default function Preview() {
                 paintOrder: 'stroke fill',
                 textShadow: t.shadow ? `0 ${t.shadowDist * fontPx}px ${t.shadowBlur * fontPx}px ${t.shadowColor}` : 'none',
                 transform: `translate(-50%, -50%) rotate(${t.angle || 0}deg)`,
+                zIndex: textPreviewZ(layerIndex),
               }}
               onPointerDown={(e) => onTextDown(e, t.id)}
             >

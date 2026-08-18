@@ -28,6 +28,8 @@ test('mobile Safari restores video and M4A, then exports playable video', async 
     await page.goto('/')
     await page.locator('header input[type=file]').first().setInputFiles(video)
     await page.locator('header input[type=file]').nth(2).setInputFiles(audio)
+    await expect(page.getByText('mobile-source.mp4', { exact: false }).first()).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByText('iphone-recording.m4a', { exact: false }).first()).toBeVisible({ timeout: 20_000 })
     await page.getByRole('status').filter({ hasText: '저장됨' }).waitFor({ timeout: 20_000 })
 
     await page.reload()
