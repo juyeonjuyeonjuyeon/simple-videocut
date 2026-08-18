@@ -8,11 +8,14 @@ import {
   audioLength,
   clipTimelineDuration,
   projectDuration,
+  clipStartOffsets,
+  fadeLevel,
 } from '../utils/time'
 import { cssTransform, cssCropFill } from '../utils/transform'
 import { hexToRgba } from '../utils/color'
 import { overlayPreviewZ, PREVIEW_Z, textPreviewZ } from '../utils/layers'
 import { startPointerDrag } from '../utils/pointer'
+import { positionAt } from '../utils/motion'
 import Icon from './Icon'
 
 const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
@@ -43,6 +46,7 @@ export default function Preview() {
   const setPlaying = useEditor((s) => s.setPlaying)
   const select = useEditor((s) => s.select)
   const updateOverlay = useEditor((s) => s.updateOverlay)
+  const updateLayerPosition = useEditor((s) => s.updateLayerPosition)
   const updateText = useEditor((s) => s.updateText)
   const updateClip = useEditor((s) => s.updateClip)
 
@@ -67,6 +71,7 @@ export default function Preview() {
   const selClip = selection?.type === 'clip' ? clips.find((c) => c.id === selection.id) : null
   const selOverlayId = selection?.type === 'overlay' ? selection.id : null
   const selOverlay = selOverlayId ? overlays.find((o) => o.id === selOverlayId) : null
+  const selOverlayPosition = selOverlay ? positionAt(selOverlay, playhead - selOverlay.start) : null
 
   // Leave crop mode when the selection changes.
   const selectionKey = selection ? `${selection.type}:${selection.id}` : ''
@@ -259,6 +264,8 @@ export default function Preview() {
       return
     }
     const clip = res.clip
+    const localTimeline = Math.max(0, time - clipStartOffsets(cur)[res.index])
+    const clipOpacity = fadeLevel(localTimeline, clipTimelineDuration(clip), clip.fadeIn, clip.fadeOut)
     // While crop-editing this clip we show the FULL frame (so the crop rect can be
     // dragged); otherwise the kept region is scaled up to fill with no margins.
     const editingCrop = cropMode && selection?.type === 'clip' && selection.id === clip.id
@@ -270,6 +277,7 @@ export default function Preview() {
       if (colorEl) {
         colorEl.style.display = ''
         colorEl.style.background = clip.bgColor || '#000000'
+        colorEl.style.opacity = String(clipOpacity)
       }
       v.style.display = 'none'
       img.style.display = 'none'
@@ -282,6 +290,7 @@ export default function Preview() {
       img.style.display = ''
       img.style.transform = tf
       img.style.clipPath = cp
+      img.style.opacity = String(clipOpacity)
       v.style.display = 'none'
       if (!v.paused) v.pause()
       loadedMainId.current = null
@@ -290,9 +299,10 @@ export default function Preview() {
     v.style.display = ''
     v.style.transform = tf
     v.style.clipPath = cp
+    v.style.opacity = String(clipOpacity)
     img.style.display = 'none'
     v.playbackRate = clip.speed
-    setGain(v, clip.volume, clip.muted)
+    setGain(v, clip.volume * clipOpacity, clip.muted)
     if (loadedMainId.current !== clip.id) {
       loadedMainId.current = clip.id
       v.src = clip.src
@@ -319,10 +329,16 @@ export default function Preview() {
   const syncOverlays = (time: number, playing: boolean) => {
     for (const o of useEditor.getState().overlays) {
       const wrap = wrapEls.current.get(o.id)
-      const active = time >= o.start - 1e-3 && time < o.start + overlayLength(o)
+      const len = overlayLength(o)
+      const active = !o.hidden && time >= o.start - 1e-3 && time < o.start + len
+      const layerOpacity = (o.opacity ?? 1) * fadeLevel(time - o.start, len, o.fadeIn, o.fadeOut)
+      const position = positionAt(o, time - o.start)
       if (wrap) {
         wrap.style.visibility = active ? 'visible' : 'hidden'
         wrap.style.transform = `translate(-50%, -50%) rotate(${o.angle || 0}deg)`
+        wrap.style.opacity = String(layerOpacity)
+        wrap.style.left = `${position.x * 100}%`
+        wrap.style.top = `${position.y * 100}%`
       }
       const media = overlayEls.current.get(o.id)
       if (media) {
@@ -340,7 +356,7 @@ export default function Preview() {
         continue
       }
       v.playbackRate = o.speed
-      setGain(v, o.volume, o.muted)
+      setGain(v, o.volume * fadeLevel(time - o.start, len, o.fadeIn, o.fadeOut), o.muted)
       const oBase = (o.trimEnd - o.trimStart) / o.speed
       const oInto = time - o.start
       const local = o.trimStart + (o.repeat > 1 && oBase > 0 ? oInto % oBase : oInto) * o.speed
@@ -362,7 +378,7 @@ export default function Preview() {
       const el = audioEls.current.get(a.id)
       if (!el) continue
       const active = time >= a.start - 1e-3 && time < a.start + audioLength(a)
-      setGain(el, a.volume, a.muted)
+      setGain(el, a.volume * fadeLevel(time - a.start, audioLength(a), a.fadeIn, a.fadeOut), a.muted)
       const aBase = a.trimEnd - a.trimStart
       const aInto = time - a.start
       const local = a.trimStart + (a.repeat > 1 && aBase > 0 ? aInto % aBase : aInto)
@@ -384,9 +400,12 @@ export default function Preview() {
   const syncBackgrounds = (time: number, playing: boolean) => {
     for (const b of useEditor.getState().backgrounds) {
       const wrap = bgWrapEls.current.get(b.id)
-      const active = time >= b.start - 1e-3 && time < b.start + clipTimelineDuration(b)
+      const len = clipTimelineDuration(b)
+      const active = !b.hidden && time >= b.start - 1e-3 && time < b.start + len
+      const layerOpacity = (b.opacity ?? 1) * fadeLevel(time - b.start, len, b.fadeIn, b.fadeOut)
       if (wrap) {
         wrap.style.visibility = active ? 'visible' : 'hidden'
+        wrap.style.opacity = String(layerOpacity)
         if (b.kind === 'color') wrap.style.background = b.bgColor || '#000000'
       }
       if (b.kind !== 'video') continue
@@ -397,7 +416,7 @@ export default function Preview() {
         continue
       }
       v.playbackRate = b.speed
-      setGain(v, b.volume, b.muted)
+      setGain(v, b.volume * fadeLevel(time - b.start, len, b.fadeIn, b.fadeOut), b.muted)
       const base = (b.trimEnd - b.trimStart) / b.speed
       const into = time - b.start
       const local = b.trimStart + (b.repeat > 1 && base > 0 ? into % base : into) * b.speed
@@ -486,12 +505,14 @@ export default function Preview() {
     const frame = frameRef.current
     const o = useEditor.getState().overlays.find((x) => x.id === id)
     if (!frame || !o) return
+    if (o.locked) return
     const rect = frame.getBoundingClientRect()
+    const position = positionAt(o, useEditor.getState().playhead - o.start)
     // Offset from the cursor to the overlay center, kept constant while dragging.
-    const grabDx = e.clientX - (rect.left + o.x * rect.width)
-    const grabDy = e.clientY - (rect.top + o.y * rect.height)
+    const grabDx = e.clientX - (rect.left + position.x * rect.width)
+    const grabDy = e.clientY - (rect.top + position.y * rect.height)
     startPointerDrag((ev) => {
-      updateOverlay(id, {
+      updateLayerPosition('overlay', id, {
         x: (ev.clientX - grabDx - rect.left) / rect.width,
         y: (ev.clientY - grabDy - rect.top) / rect.height,
       })
@@ -508,8 +529,9 @@ export default function Preview() {
     const o = useEditor.getState().overlays.find((x) => x.id === id)
     if (!frame || !o) return
     const rect = frame.getBoundingClientRect()
-    const centerX = rect.left + o.x * rect.width
-    const centerY = rect.top + o.y * rect.height
+    const position = positionAt(o, useEditor.getState().playhead - o.start)
+    const centerX = rect.left + position.x * rect.width
+    const centerY = rect.top + position.y * rect.height
     const width = o.scale * rect.width
     const height = wrapEls.current.get(id)?.offsetHeight || width / (16 / 9)
     const aspect = width / Math.max(1, height)
@@ -533,11 +555,11 @@ export default function Preview() {
       const nextHeight = nextWidth / aspect
       const nextCenterX = anchorX + signX * ux * nextWidth / 2 + signY * vx * nextHeight / 2
       const nextCenterY = anchorY + signX * uy * nextWidth / 2 + signY * vy * nextHeight / 2
-      updateOverlay(id, {
+      updateLayerPosition('overlay', id, {
         x: (nextCenterX - rect.left) / rect.width,
         y: (nextCenterY - rect.top) / rect.height,
-        scale: nextWidth / rect.width,
       })
+      updateOverlay(id, { scale: nextWidth / rect.width })
     })
   }
 
@@ -553,8 +575,9 @@ export default function Preview() {
       : useEditor.getState().texts.find((t) => t.id === id)
     if (!frame || !item) return
     const rect = frame.getBoundingClientRect()
-    const cx = rect.left + item.x * rect.width
-    const cy = rect.top + item.y * rect.height
+    const position = positionAt(item, useEditor.getState().playhead - item.start)
+    const cx = rect.left + position.x * rect.width
+    const cy = rect.top + position.y * rect.height
     const base = (item.angle || 0) - (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI
     startPointerDrag((ev) => {
       let deg = base + (Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180) / Math.PI
@@ -574,11 +597,13 @@ export default function Preview() {
     const frame = frameRef.current
     const t = useEditor.getState().texts.find((x) => x.id === id)
     if (!frame || !t) return
+    if (t.locked) return
     const rect = frame.getBoundingClientRect()
-    const grabDx = e.clientX - (rect.left + t.x * rect.width)
-    const grabDy = e.clientY - (rect.top + t.y * rect.height)
+    const position = positionAt(t, useEditor.getState().playhead - t.start)
+    const grabDx = e.clientX - (rect.left + position.x * rect.width)
+    const grabDy = e.clientY - (rect.top + position.y * rect.height)
     startPointerDrag((ev) => {
-      updateText(id, {
+      updateLayerPosition('text', id, {
         x: (ev.clientX - grabDx - rect.left) / rect.width,
         y: (ev.clientY - grabDy - rect.top) / rect.height,
       })
@@ -595,8 +620,9 @@ export default function Preview() {
     const t = useEditor.getState().texts.find((x) => x.id === id)
     if (!frame || !t) return
     const rect = frame.getBoundingClientRect()
-    const cx = rect.left + t.x * rect.width
-    const cy = rect.top + t.y * rect.height
+    const position = positionAt(t, useEditor.getState().playhead - t.start)
+    const cx = rect.left + position.x * rect.width
+    const cy = rect.top + position.y * rect.height
     const startDist = Math.hypot(e.clientX - cx, e.clientY - cy) || 1
     const startSize = t.size
     startPointerDrag((ev) => {
@@ -605,7 +631,7 @@ export default function Preview() {
     })
   }
 
-  const visibleTexts = texts.filter((t) => playhead >= t.start && playhead <= t.end)
+  const visibleTexts = texts.filter((t) => !t.hidden && playhead >= t.start && playhead <= t.end)
   const hasContent = clips.length > 0 || overlays.length > 0 || audios.length > 0 || backgrounds.length > 0
 
   return (
@@ -644,6 +670,7 @@ export default function Preview() {
 
         {overlays.map((o, layerIndex) => {
           const sel = selection?.type === 'overlay' && selection.id === o.id
+          const position = positionAt(o, playhead - o.start)
           return (
             <div
               key={o.id}
@@ -652,8 +679,8 @@ export default function Preview() {
               ref={(el) => { if (el) wrapEls.current.set(o.id, el); else wrapEls.current.delete(o.id) }}
               className="preview__overlay"
               style={{
-                left: `${o.x * 100}%`,
-                top: `${o.y * 100}%`,
+                left: `${position.x * 100}%`,
+                top: `${position.y * 100}%`,
                 width: `${o.scale * 100}%`,
                 visibility: 'hidden',
                 zIndex: overlayPreviewZ(layerIndex),
@@ -682,12 +709,12 @@ export default function Preview() {
           )
         })}
 
-        {selOverlay && overlayControlHeight > 0 && (
+        {selOverlay && selOverlayPosition && !selOverlay.hidden && overlayControlHeight > 0 && (
           <div
             className="preview__overlay-controls"
             style={{
-              left: `${selOverlay.x * 100}%`,
-              top: `${selOverlay.y * 100}%`,
+              left: `${selOverlayPosition.x * 100}%`,
+              top: `${selOverlayPosition.y * 100}%`,
               width: `${selOverlay.scale * 100}%`,
               height: overlayControlHeight,
               transform: `translate(-50%, -50%) rotate(${selOverlay.angle || 0}deg)`,
@@ -696,13 +723,13 @@ export default function Preview() {
             onPointerDown={(event) => onOverlayDown(event, selOverlay.id)}
             onDoubleClick={(event) => { event.stopPropagation(); setCropMode((mode) => !mode) }}
           >
-            {!cropMode && (['tl', 'tr', 'bl', 'br'] as const).map((corner) => (
+            {!cropMode && !selOverlay.locked && (['tl', 'tr', 'bl', 'br'] as const).map((corner) => (
               <span key={corner} className={`preview__resize preview__resize--${corner}`} onPointerDown={(event) => onResizeDown(event, selOverlay.id, corner)} />
             ))}
-            {!cropMode && (
+            {!cropMode && !selOverlay.locked && (
               <span className="preview__rotate" title="끌어서 회전" onPointerDown={onRotateDown('overlay', selOverlay.id)} />
             )}
-            {cropMode && cropEditor('overlay', selOverlay.id, selOverlay.crop)}
+            {cropMode && !selOverlay.locked && cropEditor('overlay', selOverlay.id, selOverlay.crop)}
           </div>
         )}
 
@@ -716,13 +743,14 @@ export default function Preview() {
         {visibleTexts.map((t, layerIndex) => {
           const fontPx = t.size * box.h
           const sel = selection?.type === 'text' && selection.id === t.id
+          const position = positionAt(t, playhead - t.start)
           return (
             <div
               key={t.id}
               className={`preview__text${sel ? ' preview__text--selected' : ''}`}
               style={{
-                left: `${t.x * 100}%`,
-                top: `${t.y * 100}%`,
+                left: `${position.x * 100}%`,
+                top: `${position.y * 100}%`,
                 fontSize: `${fontPx}px`,
                 fontFamily: t.font,
                 color: hexToRgba(t.color, t.colorAlpha),
@@ -734,13 +762,14 @@ export default function Preview() {
                 paintOrder: 'stroke fill',
                 textShadow: t.shadow ? `0 ${t.shadowDist * fontPx}px ${t.shadowBlur * fontPx}px ${t.shadowColor}` : 'none',
                 transform: `translate(-50%, -50%) rotate(${t.angle || 0}deg)`,
+                opacity: (t.opacity ?? 1) * fadeLevel(playhead - t.start, t.end - t.start, t.fadeIn, t.fadeOut),
                 zIndex: textPreviewZ(layerIndex),
               }}
               onPointerDown={(e) => onTextDown(e, t.id)}
             >
               {t.text}
-              {sel && <span className="preview__resize preview__resize--text" onPointerDown={(e) => onTextResize(e, t.id)} />}
-              {sel && <span className="preview__rotate preview__rotate--text" title="끌어서 회전" onPointerDown={onRotateDown('text', t.id)} />}
+              {sel && !t.locked && <span className="preview__resize preview__resize--text" onPointerDown={(e) => onTextResize(e, t.id)} />}
+              {sel && !t.locked && <span className="preview__rotate preview__rotate--text" title="끌어서 회전" onPointerDown={onRotateDown('text', t.id)} />}
             </div>
           )
         })}

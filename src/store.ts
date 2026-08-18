@@ -1,9 +1,10 @@
 import { create } from 'zustand'
-import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop } from './types'
+import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing } from './types'
 import { NO_CROP, FONT_OPTIONS } from './types'
 import type { ProjectState } from './utils/project'
 import { assertMediaCapacity, probeVideo, probeImage, probeAudio, nextClipColor, isVideoFile, isImageFile, isAudioFile } from './utils/media'
 import { clipTimelineDuration, clipStartOffsets, projectDuration, overlayLength, audioLength } from './utils/time'
+import { keyframeAt, positionAt } from './utils/motion'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
 const registerNativeMedia = async (file: File) => {
@@ -21,6 +22,7 @@ interface EditorState {
   audios: AudioClip[]
   texts: TextOverlay[]
   backgrounds: Background[]
+  markers: TimelineMarker[]
   selection: Selection
   aspectRatio: AspectRatio
   playhead: number
@@ -62,6 +64,17 @@ interface EditorState {
   updateText: (id: string, patch: Partial<TextOverlay>) => void
   removeText: (id: string) => void
   raiseText: (id: string, dir: -1 | 1) => void
+
+  // ---- timeline markers ----
+  addMarker: (time?: number) => void
+  updateMarker: (id: string, patch: Partial<TimelineMarker>) => void
+  removeMarker: (id: string) => void
+
+  // ---- position keyframes (overlay + text) ----
+  updateLayerPosition: (type: 'overlay' | 'text', id: string, patch: Partial<{ x: number; y: number }>) => void
+  togglePositionKeyframe: (type: 'overlay' | 'text', id: string) => void
+  clearPositionKeyframes: (type: 'overlay' | 'text', id: string) => void
+  setPositionKeyframeEasing: (type: 'overlay' | 'text', id: string, keyframeId: string, easing: KeyframeEasing) => void
 
   // ---- misc ----
   select: (sel: Selection) => void
@@ -108,6 +121,13 @@ const clampCrop = (c: Crop): Crop => ({
   left: Math.max(0, Math.min(c.left, 0.45)),
 })
 
+const clampFades = <T extends { fadeIn?: number; fadeOut?: number }>(item: T, length: number): T => {
+  const max = Math.max(0, length / 2)
+  item.fadeIn = Math.max(0, Math.min(item.fadeIn ?? 0, max))
+  item.fadeOut = Math.max(0, Math.min(item.fadeOut ?? 0, max))
+  return item
+}
+
 const TRANSFORM_DEFAULTS = { rotate: 0 as const, flipH: false, flipV: false, crop: NO_CROP }
 
 export const useEditor = create<EditorState>((set, get) => ({
@@ -116,6 +136,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   audios: [],
   texts: [],
   backgrounds: [],
+  markers: [],
   selection: null,
   aspectRatio: '16:9',
   playhead: 0,
@@ -141,7 +162,7 @@ export const useEditor = create<EditorState>((set, get) => ({
             sourceSize: file.size, nativeMediaId: await registerNativeMedia(file),
             duration: IMAGE_NOMINAL_MAX, trimStart: 0, trimEnd: DEFAULT_IMAGE_DUR,
             speed: 1, volume: 1, muted: false, hasAudio: false, color: nextClipColor(),
-            ...TRANSFORM_DEFAULTS, repeat: 1,
+            ...TRANSFORM_DEFAULTS, repeat: 1, fadeIn: 0, fadeOut: 0,
           }
         } else {
           const { duration, hasAudio, src } = await probeVideo(file)
@@ -150,7 +171,7 @@ export const useEditor = create<EditorState>((set, get) => ({
             sourceSize: file.size, nativeMediaId: await registerNativeMedia(file),
             duration, trimStart: 0, trimEnd: duration,
             speed: 1, volume: 1, muted: false, hasAudio, color: nextClipColor(),
-            ...TRANSFORM_DEFAULTS, repeat: 1,
+            ...TRANSFORM_DEFAULTS, repeat: 1, fadeIn: 0, fadeOut: 0,
           }
         }
         set((s) => ({
@@ -181,6 +202,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.volume = Math.max(0, Math.min(next.volume, 2))
         next.crop = clampCrop(next.crop)
         next.repeat = Math.max(1, Math.min(Math.round(next.repeat), 99))
+        clampFades(next, clipTimelineDuration(next))
         return next
       }),
     })),
@@ -256,7 +278,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     const c = s.clips[i]
     if (c.kind === 'color') return
     const start = clipStartOffsets(s.clips)[i]
-    const ov: Overlay = { ...c, start, x: 0.5, y: 0.5, scale: 0.5, angle: 0 }
+    const ov: Overlay = {
+      ...c, start, x: 0.5, y: 0.5, scale: 0.5, angle: 0,
+      opacity: 1, locked: false, hidden: false, positionKeyframes: [],
+    }
     set({
       clips: s.clips.filter((x) => x.id !== id),
       overlays: [...s.overlays, ov],
@@ -269,7 +294,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const i = s.clips.findIndex((c) => c.id === id)
     if (i < 0) return
     const start = clipStartOffsets(s.clips)[i]
-    const bg: Background = { ...s.clips[i], start }
+    const bg: Background = { ...s.clips[i], start, opacity: 1, locked: false, hidden: false }
     set({
       clips: s.clips.filter((x) => x.id !== id),
       backgrounds: [...s.backgrounds, bg],
@@ -284,7 +309,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       sourceSize: 0,
       duration: IMAGE_NOMINAL_MAX, trimStart: 0, trimEnd: DEFAULT_IMAGE_DUR,
       speed: 1, volume: 1, muted: false, hasAudio: false, color: '#3a4250',
-      ...TRANSFORM_DEFAULTS, repeat: 1, bgColor: '#000000', start: get().playhead,
+      ...TRANSFORM_DEFAULTS, repeat: 1, fadeIn: 0, fadeOut: 0, bgColor: '#000000', start: get().playhead,
+      opacity: 1, locked: false, hidden: false,
     }
     set((s) => ({ backgrounds: [...s.backgrounds, bg], selection: { type: 'background', id: bg.id } }))
   },
@@ -300,6 +326,8 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.repeat = Math.max(1, Math.min(Math.round(next.repeat), 99))
         next.start = Math.max(0, next.start)
         next.crop = clampCrop(next.crop)
+        next.opacity = Math.max(0, Math.min(next.opacity ?? 1, 1))
+        clampFades(next, clipTimelineDuration(next))
         return next
       }),
     })),
@@ -325,8 +353,8 @@ export const useEditor = create<EditorState>((set, get) => ({
     set((s) => {
       const b = s.backgrounds.find((x) => x.id === id)
       if (!b) return s
-      const { start: _s, ...clip } = b
-      void _s
+      const { start: _s, opacity: _o, locked: _l, hidden: _h, ...clip } = b
+      void _s; void _o; void _l; void _h
       return {
         backgrounds: s.backgrounds.filter((x) => x.id !== id),
         clips: [...s.clips, clip as Clip],
@@ -346,7 +374,8 @@ export const useEditor = create<EditorState>((set, get) => ({
           id: uid(), name: file.name, file, color: nextClipColor(),
           sourceSize: file.size, nativeMediaId: await registerNativeMedia(file),
           start, x: 0.5, y: 0.5, scale: 0.4, angle: 0, speed: 1, volume: 1, muted: false,
-          ...TRANSFORM_DEFAULTS, repeat: 1,
+          ...TRANSFORM_DEFAULTS, repeat: 1, opacity: 1, locked: false, hidden: false,
+          fadeIn: 0, fadeOut: 0, positionKeyframes: [],
         }
         if (isImageFile(file)) {
           const { src } = await probeImage(file)
@@ -377,6 +406,11 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.start = Math.max(0, next.start)
         next.crop = clampCrop(next.crop)
         next.repeat = Math.max(1, Math.min(Math.round(next.repeat), 99))
+        next.opacity = Math.max(0, Math.min(next.opacity ?? 1, 1))
+        clampFades(next, overlayLength(next))
+        next.positionKeyframes = (next.positionKeyframes ?? [])
+          .map((frame) => ({ ...frame, time: Math.max(0, Math.min(frame.time, overlayLength(next))) }))
+          .sort((a, b) => a.time - b.time)
         return next
       }),
     })),
@@ -403,8 +437,11 @@ export const useEditor = create<EditorState>((set, get) => ({
       const o = s.overlays.find((x) => x.id === id)
       if (!o) return s
       // Drop the overlay-only fields; the rest is a Clip.
-      const { start: _s, x: _x, y: _y, scale: _sc, ...clip } = o
-      void _s; void _x; void _y; void _sc
+      const {
+        start: _s, x: _x, y: _y, scale: _sc, angle: _a,
+        opacity: _o, locked: _l, hidden: _h, positionKeyframes: _pk, ...clip
+      } = o
+      void _s; void _x; void _y; void _sc; void _a; void _o; void _l; void _h; void _pk
       return {
         overlays: s.overlays.filter((x) => x.id !== id),
         clips: [...s.clips, clip as Clip],
@@ -424,6 +461,7 @@ export const useEditor = create<EditorState>((set, get) => ({
           sourceSize: file.size, nativeMediaId: await registerNativeMedia(file),
           duration, trimStart: 0, trimEnd: duration,
           volume: 1, muted: false, color: nextClipColor(), start: get().playhead, repeat: 1,
+          fadeIn: 0, fadeOut: 0,
         }
         set((s) => ({ audios: [...s.audios, a], selection: { type: 'audio', id: a.id } }))
       } catch (e) {
@@ -442,6 +480,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.volume = Math.max(0, Math.min(next.volume, 2))
         next.start = Math.max(0, next.start)
         next.repeat = Math.max(1, Math.min(Math.round(next.repeat), 99))
+        clampFades(next, audioLength(next))
         return next
       }),
     })),
@@ -465,6 +504,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       font: FONT_OPTIONS[0].value, strokeWidth: 0, strokeColor: '#000000',
       shadow: true, shadowColor: '#000000', shadowBlur: 0.12, shadowDist: 0.04,
       align: 'center', angle: 0,
+      opacity: 1, locked: false, hidden: false, fadeIn: 0, fadeOut: 0, positionKeyframes: [],
     }
     set((st) => ({ texts: [...st.texts, text], selection: { type: 'text', id: text.id } }))
   },
@@ -479,6 +519,11 @@ export const useEditor = create<EditorState>((set, get) => ({
         n.size = Math.max(0.02, Math.min(n.size, 0.4))
         n.colorAlpha = Math.max(0, Math.min(n.colorAlpha, 1))
         n.boxAlpha = Math.max(0, Math.min(n.boxAlpha, 1))
+        n.opacity = Math.max(0, Math.min(n.opacity ?? 1, 1))
+        clampFades(n, Math.max(0, n.end - n.start))
+        n.positionKeyframes = (n.positionKeyframes ?? [])
+          .map((frame) => ({ ...frame, time: Math.max(0, Math.min(frame.time, Math.max(0, n.end - n.start))) }))
+          .sort((a, b) => a.time - b.time)
         return n
       }),
     })),
@@ -497,6 +542,98 @@ export const useEditor = create<EditorState>((set, get) => ({
       const texts = s.texts.slice()
       ;[texts[i], texts[j]] = [texts[j], texts[i]]
       return { texts }
+    }),
+
+  // ---------- timeline markers ----------
+  addMarker: (time) => {
+    const marker: TimelineMarker = {
+      id: uid(),
+      time: Math.max(0, time ?? get().playhead),
+      label: `마커 ${get().markers.length + 1}`,
+      color: '#f2a65a',
+    }
+    set((s) => ({ markers: [...s.markers, marker].sort((a, b) => a.time - b.time) }))
+  },
+
+  updateMarker: (id, patch) =>
+    set((s) => ({
+      markers: s.markers
+        .map((m) => m.id === id
+          ? { ...m, ...patch, time: Math.max(0, patch.time ?? m.time), label: (patch.label ?? m.label).slice(0, 120) }
+          : m)
+        .sort((a, b) => a.time - b.time),
+    })),
+
+  removeMarker: (id) => set((s) => ({ markers: s.markers.filter((m) => m.id !== id) })),
+
+  // ---------- position keyframes ----------
+  updateLayerPosition: (type, id, patch) =>
+    set((s) => {
+      const update = <T extends Overlay | TextOverlay>(item: T): T => {
+        if (item.id !== id) return item
+        const start = item.start
+        const length = type === 'overlay' ? overlayLength(item as Overlay) : (item as TextOverlay).end - start
+        const local = Math.max(0, Math.min(s.playhead - start, length))
+        const frames = item.positionKeyframes ?? []
+        if (!frames.length) {
+          return {
+            ...item,
+            x: Math.max(0, Math.min(patch.x ?? item.x, 1)),
+            y: Math.max(0, Math.min(patch.y ?? item.y, 1)),
+          }
+        }
+        const current = positionAt(item, local)
+        const existing = keyframeAt(frames, local)
+        const frame = {
+          id: existing?.id ?? uid(), time: existing?.time ?? local,
+          x: Math.max(0, Math.min(patch.x ?? current.x, 1)),
+          y: Math.max(0, Math.min(patch.y ?? current.y, 1)),
+          easing: existing?.easing ?? 'ease-in-out' as const,
+        }
+        return {
+          ...item,
+          positionKeyframes: [...frames.filter((candidate) => candidate.id !== existing?.id), frame].sort((a, b) => a.time - b.time),
+        }
+      }
+      return type === 'overlay'
+        ? { overlays: s.overlays.map((item) => update(item)) }
+        : { texts: s.texts.map((item) => update(item)) }
+    }),
+
+  togglePositionKeyframe: (type, id) =>
+    set((s) => {
+      const update = <T extends Overlay | TextOverlay>(item: T): T => {
+        if (item.id !== id) return item
+        const length = type === 'overlay' ? overlayLength(item as Overlay) : (item as TextOverlay).end - item.start
+        const local = Math.max(0, Math.min(s.playhead - item.start, length))
+        const frames = item.positionKeyframes ?? []
+        const existing = keyframeAt(frames, local)
+        if (existing) return { ...item, positionKeyframes: frames.filter((frame) => frame.id !== existing.id) }
+        const position = positionAt(item, local)
+        return {
+          ...item,
+          positionKeyframes: [...frames, { id: uid(), time: local, ...position, easing: 'ease-in-out' as const }]
+            .sort((a, b) => a.time - b.time),
+        }
+      }
+      return type === 'overlay'
+        ? { overlays: s.overlays.map((item) => update(item)) }
+        : { texts: s.texts.map((item) => update(item)) }
+    }),
+
+  clearPositionKeyframes: (type, id) =>
+    set((s) => type === 'overlay'
+      ? { overlays: s.overlays.map((item) => item.id === id ? { ...item, positionKeyframes: [] } : item) }
+      : { texts: s.texts.map((item) => item.id === id ? { ...item, positionKeyframes: [] } : item) }),
+
+  setPositionKeyframeEasing: (type, id, keyframeId, easing) =>
+    set((s) => {
+      const patch = <T extends Overlay | TextOverlay>(item: T): T => item.id === id
+        ? { ...item, positionKeyframes: (item.positionKeyframes ?? []).map((frame) => frame.id === keyframeId ? { ...frame, easing } : frame) }
+        : item
+      return type === 'overlay'
+        ? { overlays: s.overlays.map((item) => patch(item)) }
+        : { texts: s.texts.map((item) => patch(item)) }
     }),
 
   // ---------- misc ----------
@@ -554,11 +691,11 @@ export const useEditor = create<EditorState>((set, get) => ({
 }))
 
 type EditorSnapshot = Pick<EditorState,
-  'clips' | 'overlays' | 'audios' | 'texts' | 'backgrounds' | 'aspectRatio' | 'exportSettings'>
+  'clips' | 'overlays' | 'audios' | 'texts' | 'backgrounds' | 'markers' | 'aspectRatio' | 'exportSettings'>
 
 const takeSnapshot = (s: EditorState): EditorSnapshot => ({
   clips: s.clips, overlays: s.overlays, audios: s.audios, texts: s.texts,
-  backgrounds: s.backgrounds, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
+  backgrounds: s.backgrounds, markers: s.markers, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
 })
 
 const past: EditorSnapshot[] = []
@@ -573,6 +710,7 @@ const historyKey = (a: EditorState, b: EditorState) => {
   if (a.audios !== b.audios) return 'audios'
   if (a.texts !== b.texts) return 'texts'
   if (a.backgrounds !== b.backgrounds) return 'backgrounds'
+  if (a.markers !== b.markers) return 'markers'
   if (a.aspectRatio !== b.aspectRatio) return 'aspectRatio'
   if (a.exportSettings !== b.exportSettings) return 'exportSettings'
   return ''
@@ -595,11 +733,24 @@ function replaceEditorProject(p: ProjectState) {
   lastHistoryAt = 0
   applyingHistory = true
   useEditor.setState({
-    clips: p.clips,
     // Backfill fields added in newer versions so older saves stay valid.
-    overlays: p.overlays.map((o) => ({ ...o, angle: o.angle ?? 0 })),
-    audios: p.audios, backgrounds: p.backgrounds,
-    texts: p.texts.map((t) => ({ ...t, angle: t.angle ?? 0 })),
+    overlays: p.overlays.map((o) => ({
+      ...o, angle: o.angle ?? 0, opacity: o.opacity ?? 1,
+      locked: o.locked ?? false, hidden: o.hidden ?? false,
+      fadeIn: o.fadeIn ?? 0, fadeOut: o.fadeOut ?? 0, positionKeyframes: o.positionKeyframes ?? [],
+    })),
+    audios: p.audios.map((a) => ({ ...a, fadeIn: a.fadeIn ?? 0, fadeOut: a.fadeOut ?? 0 })),
+    backgrounds: p.backgrounds.map((b) => ({
+      ...b, opacity: b.opacity ?? 1, locked: b.locked ?? false, hidden: b.hidden ?? false,
+      fadeIn: b.fadeIn ?? 0, fadeOut: b.fadeOut ?? 0,
+    })),
+    texts: p.texts.map((t) => ({
+      ...t, angle: t.angle ?? 0, opacity: t.opacity ?? 1,
+      locked: t.locked ?? false, hidden: t.hidden ?? false,
+      fadeIn: t.fadeIn ?? 0, fadeOut: t.fadeOut ?? 0, positionKeyframes: t.positionKeyframes ?? [],
+    })),
+    clips: p.clips.map((c) => ({ ...c, fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 })),
+    markers: p.markers ?? [],
     aspectRatio: p.aspectRatio, exportSettings: p.exportSettings,
     selection: null, playhead: 0, isPlaying: false, canUndo: false, canRedo: false,
   })

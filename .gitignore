@@ -23,3 +23,5 @@ vite.config.d.ts
 # local test scripts
 test-*.mjs
 .playwright-cli/
+playwright-report/
+test-results/

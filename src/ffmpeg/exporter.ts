@@ -4,6 +4,7 @@ import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, Cr
 import { aspectToWH, projectDuration, overlayLength, audioLength, clipTimelineDuration } from '../utils/time'
 import { hexToRgba } from '../utils/color'
 import { hasNativeFFmpeg, NativeFFmpeg } from './native'
+import { positionExpression } from '../utils/motion'
 
 // Keep the encoding engine on the same origin. Exports must not depend on a
 // third-party CDN being reachable after the editor itself has loaded.
@@ -135,6 +136,25 @@ function buildAtempo(speed: number): string {
   }
   parts.push(Number(r.toFixed(6)))
   return parts.map((p) => `atempo=${p},`).join('')
+}
+
+function videoEnvelope(length: number, fadeIn = 0, fadeOut = 0, opacity = 1): string {
+  const parts: string[] = []
+  if (opacity < 0.9999) parts.push(`colorchannelmixer=aa=${Math.max(0, Math.min(1, opacity)).toFixed(4)}`)
+  const safeIn = Math.max(0, Math.min(fadeIn, length / 2))
+  const safeOut = Math.max(0, Math.min(fadeOut, length / 2))
+  if (safeIn > 0.001) parts.push(`fade=t=in:st=0:d=${safeIn.toFixed(3)}:alpha=1`)
+  if (safeOut > 0.001) parts.push(`fade=t=out:st=${Math.max(0, length - safeOut).toFixed(3)}:d=${safeOut.toFixed(3)}:alpha=1`)
+  return parts.length ? `${parts.join(',')},` : ''
+}
+
+function audioEnvelope(length: number, fadeIn = 0, fadeOut = 0): string {
+  const parts: string[] = []
+  const safeIn = Math.max(0, Math.min(fadeIn, length / 2))
+  const safeOut = Math.max(0, Math.min(fadeOut, length / 2))
+  if (safeIn > 0.001) parts.push(`afade=t=in:st=0:d=${safeIn.toFixed(3)}`)
+  if (safeOut > 0.001) parts.push(`afade=t=out:st=${Math.max(0, length - safeOut).toFixed(3)}:d=${safeOut.toFixed(3)}`)
+  return parts.length ? `${parts.join(',')},` : ''
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -281,10 +301,11 @@ function ovLen(o: Overlay): number {
 }
 
 export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
-  const { clips, texts, aspect, height, onProgress, onLog } = opts
-  const overlays = (opts.overlays ?? []).filter((o) => o.kind === 'video' || o.kind === 'image')
+  const { clips, aspect, height, onProgress, onLog } = opts
+  const texts = opts.texts.filter((text) => !text.hidden)
+  const overlays = (opts.overlays ?? []).filter((o) => !o.hidden && (o.kind === 'video' || o.kind === 'image'))
   const audios = opts.audios ?? []
-  const backgrounds = opts.backgrounds ?? []
+  const backgrounds = (opts.backgrounds ?? []).filter((background) => !background.hidden)
   const format = opts.format ?? 'mp4'
   if (clips.length === 0) throw new Error('내보낼 클립이 없습니다.')
 
@@ -408,7 +429,9 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
 
     // 2. Render each text overlay to a PNG at output resolution.
     for (let k = 0; k < texts.length; k++) {
-      await fp.writeFile(`text${k}.png`, await renderTextPng(texts[k], W, H))
+      const text = texts[k]
+      const renderText = text.positionKeyframes?.length ? { ...text, x: 0.5, y: 0.5 } : text
+      await fp.writeFile(`text${k}.png`, await renderTextPng(renderText, W, H))
     }
 
     // 2b. Write free-track media once and remember which video layers carry audio.
@@ -522,7 +545,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       const segDur = clipTimelineDuration(c)
       if (c.kind === 'color') {
         const hex = (c.bgColor || '#000000').replace('#', '0x')
-        filters.push(`color=c=${hex}:s=${W}x${H}:r=30:d=${segDur.toFixed(3)},setsar=1,format=rgba[v${p}]`)
+        filters.push(`color=c=${hex}:s=${W}x${H}:r=30:d=${segDur.toFixed(3)},setsar=1,format=rgba,${videoEnvelope(segDur, c.fadeIn, c.fadeOut)}null[v${p}]`)
       } else {
         // Cropped clips fill the frame (cover) like the preview; uncropped clips
         // keep their aspect with letterbox padding so no content is lost.
@@ -532,14 +555,15 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
           ? `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}`
           : `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
         filters.push(
-          `[${inputIdxOf[p]}:v]setpts=PTS/${sp},${spatialFilters(c)}${fit},setsar=1,fps=30,format=rgba[v${p}]`,
+          `[${inputIdxOf[p]}:v]setpts=PTS/${sp},${spatialFilters(c)}${fit},setsar=1,fps=30,format=rgba,` +
+            `${videoEnvelope(segDur, c.fadeIn, c.fadeOut)}null[v${p}]`,
         )
       }
 
       const useAudio = c.kind === 'video' && audioFlags[p] && !c.muted && c.volume > 0
       if (useAudio) {
         filters.push(
-          `[${inputIdxOf[p]}:a]${buildAtempo(sp)}volume=${c.volume},aresample=44100,` +
+          `[${inputIdxOf[p]}:a]${buildAtempo(sp)}volume=${c.volume},${audioEnvelope(segDur, c.fadeIn, c.fadeOut)}aresample=44100,` +
             `aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=0:${segDur.toFixed(3)},asetpts=N/SR/TB[a${p}]`,
         )
       } else {
@@ -564,12 +588,16 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       const out = `[bgo${k}]`
       if (b.kind === 'color') {
         const color = (b.bgColor || '#000000').replace('#', '0x')
-        filters.push(`color=c=${color}:s=${W}x${H}:r=30:d=${len.toFixed(3)},format=rgba,setpts=PTS+${shift.toFixed(3)}/TB[bgv${k}]`)
+        filters.push(
+          `color=c=${color}:s=${W}x${H}:r=30:d=${len.toFixed(3)},format=rgba,` +
+          `${videoEnvelope(len, b.fadeIn, b.fadeOut, b.opacity ?? 1)}setpts=PTS+${shift.toFixed(3)}/TB[bgv${k}]`,
+        )
       } else {
         const speedF = b.kind === 'video' ? `setpts=PTS/${b.speed},` : ''
         filters.push(
           `[${bgInputIdx[k]}:v]${speedF}${spatialFilters(b)}` +
           `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},format=rgba,` +
+          `${videoEnvelope(len, b.fadeIn, b.fadeOut, b.opacity ?? 1)}` +
           `tpad=start_duration=${shift.toFixed(3)}:start_mode=add:color=0x00000000[bgv${k}]`,
         )
       }
@@ -597,11 +625,15 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         : ''
       filters.push(
         `[${ovIdx}:v]${speedF}${spatialFilters(o)}scale=${ovW}:-2,format=rgba,${rotF}` +
+          `${videoEnvelope(len, o.fadeIn, o.fadeOut, o.opacity ?? 1)}` +
           `tpad=start_duration=${shift.toFixed(3)}:start_mode=add:color=0x00000000[ovv${k}]`,
       )
       const out = `[ovo${k}]`
+      const localTime = `(t-${shift.toFixed(6)})`
+      const x = positionExpression(o, 'x', localTime)
+      const y = positionExpression(o, 'y', localTime)
       filters.push(
-        `${lastV}[ovv${k}]overlay=x='${o.x.toFixed(4)}*W-w/2':y='${o.y.toFixed(4)}*H-h/2':` +
+        `${lastV}[ovv${k}]overlay=x='(${x})*W-w/2':y='(${y})*H-h/2':eval=frame:` +
           `eof_action=pass:enable='between(t,${shift.toFixed(3)},${(shift + len).toFixed(3)})'${out}`,
       )
       lastV = out
@@ -611,8 +643,19 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     texts.forEach((t, k) => {
       const inputIdx = inputCount + k
       const out = `[txt${k}]`
+      const len = Math.max(0.001, t.end - t.start)
+      const hasPositionKeyframes = Boolean(t.positionKeyframes?.length)
       filters.push(
-        `${lastV}[${inputIdx}:v]overlay=0:0:eof_action=pass:` +
+        `[${inputIdx}:v]format=rgba,${videoEnvelope(len, t.fadeIn, t.fadeOut, t.opacity ?? 1)}` +
+          `setpts=PTS+${t.start.toFixed(3)}/TB[textv${k}]`,
+      )
+      filters.push(
+        `${lastV}[textv${k}]overlay=` +
+          (hasPositionKeyframes
+            ? `x='((${positionExpression(t, 'x', `(t-${t.start.toFixed(6)})`)})-0.5)*W':` +
+              `y='((${positionExpression(t, 'y', `(t-${t.start.toFixed(6)})`)})-0.5)*H':eval=frame:`
+            : 'x=0:y=0:') +
+          `eof_action=pass:` +
           `enable='between(t,${t.start.toFixed(3)},${t.end.toFixed(3)})'${out}`,
       )
       lastV = out
@@ -626,7 +669,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       if (!overlayAudioFlags[k] || o.muted || o.volume <= 0 || o.kind !== 'video') return
       const label = `aov${k}`
       filters.push(
-        `[${ovBase + k}:a]${buildAtempo(o.speed)}volume=${o.volume},aresample=44100,` +
+        `[${ovBase + k}:a]${buildAtempo(o.speed)}volume=${o.volume},${audioEnvelope(ovLen(o), o.fadeIn, o.fadeOut)}aresample=44100,` +
         `aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${Math.round(o.start * 1000)}:all=1,` +
         `apad=whole_dur=${duration.toFixed(3)},atrim=0:${duration.toFixed(3)}[${label}]`,
       )
@@ -636,7 +679,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       if (!backgroundAudioFlags[k] || b.muted || b.volume <= 0 || b.kind !== 'video') return
       const label = `abg${k}`
       filters.push(
-        `[${bgInputIdx[k]}:a]${buildAtempo(b.speed)}volume=${b.volume},aresample=44100,` +
+        `[${bgInputIdx[k]}:a]${buildAtempo(b.speed)}volume=${b.volume},${audioEnvelope(clipTimelineDuration(b), b.fadeIn, b.fadeOut)}aresample=44100,` +
         `aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${Math.round(b.start * 1000)}:all=1,` +
         `apad=whole_dur=${duration.toFixed(3)},atrim=0:${duration.toFixed(3)}[${label}]`,
       )
@@ -646,7 +689,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       if (a.muted || a.volume <= 0) return
       const label = `amusic${k}`
       filters.push(
-        `[${audioBase + k}:a]volume=${a.volume},aresample=44100,` +
+        `[${audioBase + k}:a]volume=${a.volume},${audioEnvelope(audioLength(a), a.fadeIn, a.fadeOut)}aresample=44100,` +
         `aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${Math.round(a.start * 1000)}:all=1,` +
         `apad=whole_dur=${duration.toFixed(3)},atrim=0:${duration.toFixed(3)}[${label}]`,
       )

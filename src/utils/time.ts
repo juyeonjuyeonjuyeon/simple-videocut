@@ -20,6 +20,14 @@ export function audioLength(a: AudioClip): number {
   return (a.trimEnd - a.trimStart) * Math.max(1, a.repeat)
 }
 
+/** Linear non-destructive fade envelope for a local timeline position. */
+export function fadeLevel(localTime: number, length: number, fadeIn = 0, fadeOut = 0): number {
+  if (length <= 0 || localTime < 0 || localTime > length) return 0
+  const inLevel = fadeIn > 0 ? Math.min(1, Math.max(0, localTime / fadeIn)) : 1
+  const outLevel = fadeOut > 0 ? Math.min(1, Math.max(0, (length - localTime) / fadeOut)) : 1
+  return Math.min(inLevel, outLevel)
+}
+
 /** Overall project length = the latest end across all tracks. */
 export function projectDuration(
   clips: Clip[],

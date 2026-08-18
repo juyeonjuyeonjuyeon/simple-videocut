@@ -15,6 +15,26 @@ export interface Crop {
   left: number
 }
 
+/** A named point on the shared timeline used for navigation and snapping. */
+export interface TimelineMarker {
+  id: string
+  time: number
+  label: string
+  color: string
+}
+
+export type KeyframeEasing = 'linear' | 'ease-in-out'
+
+/** Position automation shared by picture-in-picture and text layers. */
+export interface PositionKeyframe {
+  id: string
+  /** Seconds from the owning layer's timeline start. */
+  time: number
+  x: number
+  y: number
+  easing: KeyframeEasing
+}
+
 export const NO_CROP: Crop = { top: 0, right: 0, bottom: 0, left: 0 }
 
 /** Visual transform shared by clips and overlays. */
@@ -55,6 +75,9 @@ export interface Clip {
   crop: Crop
   /** Number of times the trimmed segment repeats back-to-back (>=1). */
   repeat: number
+  /** Non-destructive fade at the beginning/end of this timeline segment. */
+  fadeIn?: number
+  fadeOut?: number
   /** Solid background color when kind === 'color'. */
   bgColor?: string
 }
@@ -90,12 +113,24 @@ export interface Overlay {
   flipV: boolean
   crop: Crop
   repeat: number
+  /** Whole-layer opacity; separate from media pixels and audio volume. */
+  opacity?: number
+  /** Locked layers remain visible but cannot be moved/resized accidentally. */
+  locked?: boolean
+  /** Hidden layers stay in the project/timeline but are skipped in preview/export. */
+  hidden?: boolean
+  fadeIn?: number
+  fadeOut?: number
+  positionKeyframes?: PositionKeyframe[]
 }
 
 /** A full-frame backdrop rendered BEHIND the main track (its own lower layer). */
 export interface Background extends Clip {
   /** Timeline start time (seconds). */
   start: number
+  opacity?: number
+  locked?: boolean
+  hidden?: boolean
 }
 
 /** A music / audio clip mixed into the timeline. */
@@ -115,6 +150,8 @@ export interface AudioClip {
   /** Timeline start time (seconds). */
   start: number
   repeat: number
+  fadeIn?: number
+  fadeOut?: number
 }
 
 /** A text/subtitle overlay shown over a time range on the timeline. */
@@ -150,6 +187,13 @@ export interface TextOverlay {
   align: 'left' | 'center' | 'right' | 'justify'
   /** Free rotation in degrees (-180..180). */
   angle: number
+  /** Whole text-layer opacity, including its box, stroke and shadow. */
+  opacity?: number
+  locked?: boolean
+  hidden?: boolean
+  fadeIn?: number
+  fadeOut?: number
+  positionKeyframes?: PositionKeyframe[]
 }
 
 export type TextAlign = TextOverlay['align']

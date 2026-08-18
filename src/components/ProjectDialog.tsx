@@ -12,6 +12,7 @@ function snapshot(): ProjectState {
   const s = useEditor.getState()
   return {
     clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
+    markers: s.markers,
     aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
   }
 }

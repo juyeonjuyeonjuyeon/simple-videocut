@@ -1,4 +1,4 @@
-import { useRef, useState, useLayoutEffect, useEffect } from 'react'
+import { useRef, useState, useLayoutEffect, useEffect, type ReactNode } from 'react'
 import { useEditor } from '../store'
 import {
   clipTimelineDuration,
@@ -13,7 +13,8 @@ import {
 import { contrastText } from '../utils/color'
 import { packVisualLanes } from '../utils/layers'
 import { startPointerDrag as startDrag } from '../utils/pointer'
-import type { Clip, Selection } from '../types'
+import type { Clip, Selection, PositionKeyframe } from '../types'
+import { AudioWaveform, ClipThumbnailStrip } from './TimelineMedia'
 
 const clipBg = (c: Clip) => (c.kind === 'color' ? c.bgColor ?? '#000000' : c.color)
 
@@ -39,6 +40,7 @@ export default function Timeline() {
   const audios = useEditor((s) => s.audios)
   const texts = useEditor((s) => s.texts)
   const backgrounds = useEditor((s) => s.backgrounds)
+  const markers = useEditor((s) => s.markers)
   const selection = useEditor((s) => s.selection)
   const playhead = useEditor((s) => s.playhead)
   const select = useEditor((s) => s.select)
@@ -60,6 +62,9 @@ export default function Timeline() {
   const raiseText = useEditor((s) => s.raiseText)
   const deleteSelected = useEditor((s) => s.deleteSelected)
   const duplicateSelected = useEditor((s) => s.duplicateSelected)
+  const addMarker = useEditor((s) => s.addMarker)
+  const updateMarker = useEditor((s) => s.updateMarker)
+  const removeMarker = useEditor((s) => s.removeMarker)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [trackW, setTrackW] = useState(0)
@@ -71,10 +76,12 @@ export default function Timeline() {
   const [editing, setEditing] = useState<{ type: 'clip' | FreeKind; id: string } | null>(null)
   const [editVal, setEditVal] = useState('')
   const [menu, setMenu] = useState<{ target: NonNullable<Selection>; x: number; y: number } | null>(null)
+  const [markerMenu, setMarkerMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [transitionMenu, setTransitionMenu] = useState<{ index: number; x: number; y: number } | null>(null)
 
   useEffect(() => {
-    if (!menu) return
-    const close = () => setMenu(null)
+    if (!menu && !markerMenu && !transitionMenu) return
+    const close = () => { setMenu(null); setMarkerMenu(null); setTransitionMenu(null) }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
     window.addEventListener('pointerdown', close)
     window.addEventListener('keydown', onKey)
@@ -84,15 +91,39 @@ export default function Timeline() {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('resize', close)
     }
-  }, [menu])
+  }, [markerMenu, menu, transitionMenu])
 
   const openMenu = (target: NonNullable<Selection>, x: number, y: number) => {
     setPlaying(false)
+    setMarkerMenu(null)
+    setTransitionMenu(null)
     select(target)
     setMenu({
       target,
       x: Math.max(12, Math.min(x, window.innerWidth - 242)),
       y: Math.max(12, Math.min(y, window.innerHeight - 452)),
+    })
+  }
+
+  const openMarkerMenu = (id: string, x: number, y: number) => {
+    setPlaying(false)
+    setMenu(null)
+    setTransitionMenu(null)
+    setMarkerMenu({
+      id,
+      x: Math.max(12, Math.min(x, window.innerWidth - 260)),
+      y: Math.max(12, Math.min(y, window.innerHeight - 220)),
+    })
+  }
+
+  const openTransitionMenu = (index: number, x: number, y: number) => {
+    setPlaying(false)
+    setMenu(null)
+    setMarkerMenu(null)
+    setTransitionMenu({
+      index,
+      x: Math.max(12, Math.min(x, window.innerWidth - 250)),
+      y: Math.max(12, Math.min(y, window.innerHeight - 230)),
     })
   }
 
@@ -241,6 +272,7 @@ export default function Timeline() {
     st.audios.forEach((a) => { if (a.id !== excludeId) targets.push(a.start, a.start + audioLength(a)) })
     st.texts.forEach((x) => { if (x.id !== excludeId) targets.push(x.start, x.end) })
     st.backgrounds.forEach((b) => { if (b.id !== excludeId) targets.push(b.start, b.start + clipTimelineDuration(b)) })
+    st.markers.forEach((marker) => { if (marker.id !== excludeId) targets.push(marker.time) })
     const thresh = SNAP_PX / pxPerSec
     let best = t
     let bd = thresh
@@ -276,6 +308,28 @@ export default function Timeline() {
     setPlaying(false)
     scrub(e.clientX)
     startDrag((ev) => scrub(ev.clientX))
+  }
+
+  const onMarkerDown = (e: React.PointerEvent, id: string) => {
+    e.stopPropagation()
+    if (e.button !== 0) return
+    setPlaying(false)
+    const marker = useEditor.getState().markers.find((item) => item.id === id)
+    if (!marker) return
+    setPlayhead(marker.time)
+    const startX = e.clientX
+    const startTime = marker.time
+    let moved = false
+    startDrag((event) => {
+      if (Math.abs(event.clientX - startX) > DRAG_THRESHOLD) moved = true
+      if (!moved) return
+      updateMarker(id, { time: Math.max(0, snap(startTime + (event.clientX - startX) / pxPerSec, id)) })
+    }, (_, cancelled) => {
+      if (!cancelled) {
+        const current = useEditor.getState().markers.find((item) => item.id === id)
+        if (current) setPlayhead(current.time)
+      }
+    })
   }
 
   // ---- main clip: drag to reorder, right edge to trim ----
@@ -382,6 +436,7 @@ export default function Timeline() {
       : kind === 'background' ? st.backgrounds.find((b) => b.id === id)
       : st.texts.find((t) => t.id === id)
     if (!item) return
+    const locked = 'locked' in item && Boolean(item.locked)
     const len =
       kind === 'overlay' ? overlayLength(item as never)
       : kind === 'audio' ? audioLength(item as never)
@@ -404,6 +459,7 @@ export default function Timeline() {
           moved = true
         }
         if (!moved) return
+        if (locked) return
         // Move freely from 0; the project just grows if dragged past the end.
         const ns = Math.max(0, snap(s0 + (ev.clientX - startX) / pxPerSec, id))
         if (kind === 'overlay') updateOverlay(id, { start: ns })
@@ -420,6 +476,7 @@ export default function Timeline() {
           else select({ type: kind, id })
           return
         }
+        if (locked) return
         // Overlay / background dropped on the main track → move it there.
         if ((kind === 'overlay' || kind === 'background') && trackAt(ev.clientY) === 'main') {
           if (kind === 'overlay') moveOverlayToMain(id)
@@ -522,14 +579,26 @@ export default function Timeline() {
   const ticks: number[] = []
   for (let t = 0; t <= spanSec + 0.001; t += tickStep) ticks.push(Number(t.toFixed(3)))
 
+  const fadeVisual = (fadeIn = 0, fadeOut = 0, len = 0) => {
+    if (len <= 0 || (!fadeIn && !fadeOut)) return null
+    return <>
+      {fadeIn > 0 && <span className="timeline-fade timeline-fade--in" style={{ width: `${Math.min(50, (fadeIn / len) * 100)}%` }} />}
+      {fadeOut > 0 && <span className="timeline-fade timeline-fade--out" style={{ width: `${Math.min(50, (fadeOut / len) * 100)}%` }} />}
+    </>
+  }
+  const keyframeVisual = (frames: PositionKeyframe[] | undefined, len: number) => frames?.map((frame) => (
+    <span key={frame.id} className="timeline-keyframe" style={{ left: `${Math.max(0, Math.min(100, (frame.time / Math.max(0.001, len)) * 100))}%` }} />
+  ))
+
   // Render one free item (overlay/audio/text) as a positioned chip.
   const freeChip = (
     kind: FreeKind, id: string, start: number, len: number, lane: number,
     laneH: number, color: string, label: string, selected: boolean,
+    visual?: ReactNode, flags?: { hidden?: boolean; locked?: boolean },
   ) => (
     <div
       key={id}
-      className={`tlclip${selected ? ' tlclip--selected' : ''}`}
+      className={`tlclip${selected ? ' tlclip--selected' : ''}${flags?.hidden ? ' tlclip--hidden' : ''}${flags?.locked ? ' tlclip--locked' : ''}`}
       style={{
         left: start * pxPerSec,
         width: Math.max(10, len * pxPerSec),
@@ -543,9 +612,10 @@ export default function Timeline() {
       onDoubleClick={() => startEdit(kind, id)}
       title={`${label} · 끌어서 이동${selected ? ', 끝을 끌어서 길이 조절' : ''} · 선택 후 이름 클릭으로 이름변경`}
     >
-      {selected && <span className="tlclip__handle tlclip__handle--l" onPointerDown={(e) => onFreeTrim(e, kind, id, 'start')} />}
+      {selected && !flags?.locked && <span className="tlclip__handle tlclip__handle--l" onPointerDown={(e) => onFreeTrim(e, kind, id, 'start')} />}
+      {visual}
       {editing?.id === id ? renameInput : <span className="tlclip__body">{label}</span>}
-      {selected && <span className="tlclip__handle tlclip__handle--r" onPointerDown={(e) => onFreeTrim(e, kind, id, 'end')} />}
+      {selected && !flags?.locked && <span className="tlclip__handle tlclip__handle--r" onPointerDown={(e) => onFreeTrim(e, kind, id, 'end')} />}
     </div>
   )
 
@@ -555,6 +625,7 @@ export default function Timeline() {
         <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1 / 1.5)} disabled={atMin} title="축소">−</button>
         <button className="btn btn--sm" onClick={fitView} disabled={atFit} title="전체를 한 화면에">전체보기</button>
         <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1.5)} disabled={atMax} title="확대">＋</button>
+        <button className="btn btn--sm timeline__marker-add" onClick={() => addMarker(playhead)} title="현재 위치에 마커 추가 (M)">마커 추가</button>
         <span className="timeline__zoom">{Math.round((pxPerSec / fitPps) * 100)}%</span>
         <span className="timeline__hint">스크롤=확대 · Shift+스크롤=이동</span>
         <div className="timeline__bar-spacer" />
@@ -563,13 +634,30 @@ export default function Timeline() {
 
       <div className="timeline__scroll" ref={scrollRef}>
         <div className="timeline__content" style={{ width: contentW }}>
-          <div className="timeline__ruler" onPointerDown={onRulerDown}>
+          <div className="timeline__ruler" onPointerDown={onRulerDown} onDoubleClick={(event) => addMarker(timeAt(event.clientX))}>
             {ticks.map((t) => (
               <span key={t} className="timeline__tick" style={{ left: t * pxPerSec }}>
                 {tickLabel(t)}
               </span>
             ))}
           </div>
+
+          {markers.map((marker) => (
+            <button
+              key={marker.id}
+              type="button"
+              className="timeline-marker"
+              style={{ left: marker.time * pxPerSec, ['--marker-color' as string]: marker.color }}
+              onPointerDown={(event) => onMarkerDown(event, marker.id)}
+              onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); openMarkerMenu(marker.id, event.clientX, event.clientY) }}
+              onDoubleClick={(event) => { event.stopPropagation(); openMarkerMenu(marker.id, event.clientX, event.clientY) }}
+              onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openMarkerMenu(marker.id, 24, 80) }}
+              aria-label={`${marker.label}, ${formatTimeFine(marker.time)}`}
+              title={`${marker.label} · ${formatTimeFine(marker.time)} · 끌어서 이동`}
+            >
+              <span>{marker.label}</span>
+            </button>
+          ))}
 
           {/* Text is always composited above media overlays. */}
           {nTextLanes > 0 && (
@@ -581,7 +669,9 @@ export default function Timeline() {
               {texts.map((t, i) =>
                 freeChip('text', t.id, t.start, t.end - t.start, textLanes[i], TXT_LANE_H, '#3a4250',
                   `T ${t.text}`,
-                  selection?.type === 'text' && selection.id === t.id),
+                  selection?.type === 'text' && selection.id === t.id,
+                  <>{fadeVisual(t.fadeIn, t.fadeOut, t.end - t.start)}{keyframeVisual(t.positionKeyframes, t.end - t.start)}</>,
+                  { hidden: t.hidden, locked: t.locked }),
               )}
             </div>
           )}
@@ -596,7 +686,9 @@ export default function Timeline() {
               {overlays.map((o, i) =>
                 freeChip('overlay', o.id, o.start, overlayLength(o), overlayLanes[i], OV_LANE_H, o.color,
                   `${o.kind === 'image' ? '이미지' : '오버레이'} · ${o.name}${o.repeat > 1 ? ` · 반복 ${o.repeat}회` : ''}${o.kind === 'video' && o.muted ? ' · 음소거' : ''}`,
-                  selection?.type === 'overlay' && selection.id === o.id),
+                  selection?.type === 'overlay' && selection.id === o.id,
+                  <>{fadeVisual(o.fadeIn, o.fadeOut, overlayLength(o))}{keyframeVisual(o.positionKeyframes, overlayLength(o))}</>,
+                  { hidden: o.hidden, locked: o.locked }),
               )}
             </div>
           )}
@@ -610,13 +702,14 @@ export default function Timeline() {
             {clips.map((c, i) => {
               const isSel = selection?.type === 'clip' && selection.id === c.id
               const isDragging = dragId === c.id
+              const clipWidth = Math.max(2, clipTimelineDuration(c) * pxPerSec)
               return (
                 <div
                   key={c.id}
                   className={`clip${isSel ? ' clip--selected' : ''}${isDragging ? ' clip--dragging' : ''}`}
                   style={{
                     left: isDragging ? dragLeft : offsets[i] * pxPerSec,
-                    width: Math.max(2, clipTimelineDuration(c) * pxPerSec),
+                    width: clipWidth,
                     background: clipBg(c),
                     color: contrastText(clipBg(c)),
                   }}
@@ -625,6 +718,9 @@ export default function Timeline() {
                   onDoubleClick={() => startEdit('clip', c.id)}
                   title={`${c.name} · 끌어서 순서 변경, 오른쪽 끝을 끌어서 트림 · 선택 후 이름 클릭으로 이름변경`}
                 >
+                  <ClipThumbnailStrip clip={c} width={clipWidth} />
+                  {c.kind === 'video' && c.hasAudio && <AudioWaveform media={c} className="timeline-waveform--clip" />}
+                  {fadeVisual(c.fadeIn, c.fadeOut, clipTimelineDuration(c))}
                   {editing?.id === c.id
                     ? renameInput
                     : <span className="clip__label">{c.kind === 'image' ? '이미지 · ' : c.kind === 'color' ? '색상 · ' : '영상 · '}{c.name}</span>}
@@ -636,6 +732,27 @@ export default function Timeline() {
                   {isSel && c.kind !== 'color' && <span className="clip__handle clip__handle--l" onPointerDown={(e) => onClipTrimStart(e, c.id)} />}
                   {isSel && <span className="clip__handle clip__handle--r" onPointerDown={(e) => onClipTrim(e, c.id)} />}
                 </div>
+              )
+            })}
+            {clips.slice(0, -1).map((clip, index) => {
+              const next = clips[index + 1]
+              const active = (clip.fadeOut ?? 0) > 0 || (next.fadeIn ?? 0) > 0
+              const boundary = offsets[index] + clipTimelineDuration(clip)
+              return (
+                <button
+                  key={`transition-${clip.id}-${next.id}`}
+                  type="button"
+                  className={`timeline-transition${active ? ' timeline-transition--active' : ''}`}
+                  style={{ left: boundary * pxPerSec }}
+                  aria-label={`${clip.name}과 ${next.name} 사이 전환`}
+                  title={active ? '검정 페이드 전환 편집' : '클립 사이 전환 추가'}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    const rect = event.currentTarget.getBoundingClientRect()
+                    openTransitionMenu(index, rect.left + rect.width / 2, rect.bottom + 8)
+                  }}
+                />
               )
             })}
           </div>
@@ -650,7 +767,8 @@ export default function Timeline() {
               {audios.map((a, i) =>
                 freeChip('audio', a.id, a.start, audioLength(a), audioLanes[i], AUD_LANE_H, a.color,
                   `음악 · ${a.name}${a.repeat > 1 ? ` · 반복 ${a.repeat}회` : ''}${a.muted ? ' · 음소거' : ''}`,
-                  selection?.type === 'audio' && selection.id === a.id),
+                  selection?.type === 'audio' && selection.id === a.id,
+                  <><AudioWaveform media={a} />{fadeVisual(a.fadeIn, a.fadeOut, audioLength(a))}</>),
               )}
             </div>
           )}
@@ -665,7 +783,9 @@ export default function Timeline() {
               {backgrounds.map((b, i) =>
                 freeChip('background', b.id, b.start, clipTimelineDuration(b), bgLanes[i], AUD_LANE_H, clipBg(b),
                   `배경 · ${b.name}${b.kind === 'video' && b.muted ? ' · 음소거' : ''}`,
-                  selection?.type === 'background' && selection.id === b.id),
+                  selection?.type === 'background' && selection.id === b.id,
+                  fadeVisual(b.fadeIn, b.fadeOut, clipTimelineDuration(b)),
+                  { hidden: b.hidden, locked: b.locked }),
               )}
             </div>
           )}
@@ -681,6 +801,10 @@ export default function Timeline() {
         const item = target.type === 'overlay' ? st.overlays.find((x) => x.id === target.id)
           : target.type === 'audio' ? st.audios.find((x) => x.id === target.id)
           : target.type === 'background' ? st.backgrounds.find((x) => x.id === target.id)
+          : null
+        const visualItem = target.type === 'overlay' ? st.overlays.find((x) => x.id === target.id)
+          : target.type === 'background' ? st.backgrounds.find((x) => x.id === target.id)
+          : target.type === 'text' ? st.texts.find((x) => x.id === target.id)
           : null
         const canMute = target.type === 'audio'
           || (target.type === 'overlay' && st.overlays.find((x) => x.id === target.id)?.kind === 'video')
@@ -715,9 +839,66 @@ export default function Timeline() {
             {target.type === 'background' && <button role="menuitem" onClick={() => withTarget(target, () => moveBackgroundToMain(target.id))}>메인 트랙으로 이동</button>}
             {canMute &&
               <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'audio' ? updateAudio(target.id, { muted: !item?.muted }) : target.type === 'overlay' ? updateOverlay(target.id, { muted: !item?.muted }) : updateBackground(target.id, { muted: !item?.muted }))}>{item?.muted ? '음소거 해제' : '음소거'}</button>}
+            {visualItem && <>
+              <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'overlay'
+                ? updateOverlay(target.id, { hidden: !visualItem.hidden })
+                : target.type === 'background'
+                  ? updateBackground(target.id, { hidden: !visualItem.hidden })
+                  : updateText(target.id, { hidden: !visualItem.hidden }))}>{visualItem.hidden ? '레이어 표시' : '레이어 숨기기'}</button>
+              <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'overlay'
+                ? updateOverlay(target.id, { locked: !visualItem.locked })
+                : target.type === 'background'
+                  ? updateBackground(target.id, { locked: !visualItem.locked })
+                  : updateText(target.id, { locked: !visualItem.locked }))}>{visualItem.locked ? '레이어 잠금 해제' : '레이어 잠그기'}</button>
+            </>}
             <button role="menuitem" onClick={() => withTarget(target, duplicateSelected)}>복제</button>
             <div className="timeline-menu__separator" />
             <button role="menuitem" className="timeline-menu__danger" onClick={() => withTarget(target, deleteSelected)}>삭제</button>
+          </div>
+        )
+      })()}
+      {markerMenu && (() => {
+        const marker = markers.find((item) => item.id === markerMenu.id)
+        if (!marker) return null
+        return (
+          <div className="timeline-menu timeline-marker-menu" style={{ left: markerMenu.x, top: markerMenu.y }}
+            onPointerDown={(event) => event.stopPropagation()}>
+            <label className="timeline-marker-menu__field">
+              <span>마커 이름</span>
+              <input value={marker.label} autoFocus onChange={(event) => updateMarker(marker.id, { label: event.target.value })} />
+            </label>
+            <label className="timeline-marker-menu__field timeline-marker-menu__color">
+              <span>색상</span>
+              <input type="color" value={marker.color} onChange={(event) => updateMarker(marker.id, { color: event.target.value })} />
+              <b>{formatTimeFine(marker.time)}</b>
+            </label>
+            <button onClick={() => { updateMarker(marker.id, { time: playhead }); setMarkerMenu(null) }}>재생 헤드 위치로 이동</button>
+            <div className="timeline-menu__separator" />
+            <button className="timeline-menu__danger" onClick={() => { removeMarker(marker.id); setMarkerMenu(null) }}>마커 삭제</button>
+          </div>
+        )
+      })()}
+      {transitionMenu && (() => {
+        const before = clips[transitionMenu.index]
+        const after = clips[transitionMenu.index + 1]
+        if (!before || !after) return null
+        const current = Math.max(before.fadeOut ?? 0, after.fadeIn ?? 0)
+        const setDuration = (duration: number) => {
+          updateClip(before.id, { fadeOut: duration })
+          updateClip(after.id, { fadeIn: duration })
+          setTransitionMenu(null)
+        }
+        return (
+          <div className="timeline-menu timeline-transition-menu" style={{ left: transitionMenu.x, top: transitionMenu.y }}
+            onPointerDown={(event) => event.stopPropagation()}>
+            <div className="timeline-transition-menu__title">클립 사이 검정 페이드</div>
+            <div className="timeline-transition-menu__hint">앞 장면은 어두워지고 다음 장면은 자연스럽게 나타납니다.</div>
+            <div className="timeline-transition-menu__choices">
+              {[0, 0.3, 0.5, 1, 2].map((duration) => (
+                <button key={duration} className={Math.abs(current - duration) < 0.01 ? 'timeline-transition-menu__on' : ''}
+                  onClick={() => setDuration(duration)}>{duration === 0 ? '없음' : `${duration}초`}</button>
+              ))}
+            </div>
           </div>
         )
       })()}

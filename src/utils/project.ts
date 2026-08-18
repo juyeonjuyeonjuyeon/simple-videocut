@@ -1,4 +1,4 @@
-import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, ExportSettings } from '../types'
+import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, ExportSettings, TimelineMarker } from '../types'
 
 const DB_NAME = 'simplecut-db'
 const STORE = 'projects'
@@ -20,6 +20,7 @@ export interface ProjectState {
   audios: AudioClip[]
   backgrounds: Background[]
   texts: TextOverlay[]
+  markers?: TimelineMarker[]
   aspectRatio: AspectRatio
   exportSettings: ExportSettings
 }
@@ -35,6 +36,7 @@ interface SerializedProject {
   audios: object[]
   backgrounds: object[]
   texts: TextOverlay[]
+  markers?: TimelineMarker[]
   media: MediaBlob[]
 }
 
@@ -84,6 +86,7 @@ function serialize(name: string, s: ProjectState): SerializedProject {
     audios: s.audios.map((a) => strip(a as unknown as WithMedia)),
     backgrounds: s.backgrounds.map((b) => strip(b as unknown as WithMedia)),
     texts: s.texts,
+    markers: s.markers ?? [],
     media,
   }
 }
@@ -131,6 +134,7 @@ function deserialize(p: SerializedProject): ProjectState {
     audios: p.audios.map((a) => restore<AudioClip>(a)),
     backgrounds: p.backgrounds.map((b) => restore<Background>(b)),
     texts: p.texts,
+    markers: p.markers ?? [],
   }
 }
 
@@ -436,6 +440,17 @@ const record = (value: unknown, label: string): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} 정보가 잘못되었습니다.`)
   return value as Record<string, unknown>
 }
+const validatePositionKeyframes = (value: unknown, length: number, label: string) => {
+  if (!Array.isArray(value) || value.length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error(`${label} 위치 키프레임이 잘못되었습니다.`)
+  for (const candidate of value) {
+    const frame = record(candidate, `${label} 위치 키프레임`)
+    text(frame.id, 100, `${label} 키프레임 ID`)
+    finite(frame.time, 0, length, `${label} 키프레임 시간`)
+    finite(frame.x, 0, 1, `${label} 키프레임 가로 위치`)
+    finite(frame.y, 0, 1, `${label} 키프레임 세로 위치`)
+    if (!['linear', 'ease-in-out'].includes(String(frame.easing))) throw new Error(`${label} 키프레임 움직임이 잘못되었습니다.`)
+  }
+}
 const validateItem = (value: unknown, track: string) => {
   const item = record(value, track)
   text(item.id, 100, `${track} ID`)
@@ -463,6 +478,12 @@ const validateItem = (value: unknown, track: string) => {
     if (!['left', 'center', 'right', 'justify'].includes(String(item.align))) throw new Error('텍스트 정렬 값이 잘못되었습니다.')
     // angle was added after the first project format shipped.
     if ('angle' in item) finite(item.angle, -180, 180, '텍스트 회전')
+    if ('opacity' in item) finite(item.opacity, 0, 1, '텍스트 레이어 투명도')
+    if ('locked' in item) bool(item.locked, '텍스트 레이어 잠금')
+    if ('hidden' in item) bool(item.hidden, '텍스트 레이어 표시')
+    if ('fadeIn' in item) finite(item.fadeIn, 0, PROJECT_LIMITS.maxDurationSeconds, '텍스트 시작 페이드')
+    if ('fadeOut' in item) finite(item.fadeOut, 0, PROJECT_LIMITS.maxDurationSeconds, '텍스트 끝 페이드')
+    if ('positionKeyframes' in item) validatePositionKeyframes(item.positionKeyframes, (item.end as number) - (item.start as number), '텍스트')
     return
   }
   const visual = track !== '오디오'
@@ -476,6 +497,8 @@ const validateItem = (value: unknown, track: string) => {
   text(item.color, 64, `${track} 색상`)
   finite(item.repeat, 1, 99, `${track} 반복`)
   if (!Number.isInteger(item.repeat as number)) throw new Error(`${track} 반복 값이 잘못되었습니다.`)
+  if ('fadeIn' in item) finite(item.fadeIn, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 시작 페이드`)
+  if ('fadeOut' in item) finite(item.fadeOut, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 끝 페이드`)
 
   if (visual) {
     finite(item.speed, 0.1, 4, `${track} 속도`)
@@ -501,9 +524,26 @@ const validateItem = (value: unknown, track: string) => {
     finite(item.y, 0, 1, `${track} 세로 위치`)
     finite(item.scale, 0.1, 1, `${track} 크기`)
     if ('angle' in item) finite(item.angle, -180, 180, `${track} 회전`)
+    if ('opacity' in item) finite(item.opacity, 0, 1, `${track} 투명도`)
+    if ('locked' in item) bool(item.locked, `${track} 잠금`)
+    if ('hidden' in item) bool(item.hidden, `${track} 표시`)
+    if ('positionKeyframes' in item) validatePositionKeyframes(item.positionKeyframes, ((item.trimEnd as number) - (item.trimStart as number)) / (item.speed as number) * (item.repeat as number), track)
   } else if (track === '오디오' || track === '배경') {
     finite(item.start, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 시작 위치`)
+    if (track === '배경') {
+      if ('opacity' in item) finite(item.opacity, 0, 1, `${track} 투명도`)
+      if ('locked' in item) bool(item.locked, `${track} 잠금`)
+      if ('hidden' in item) bool(item.hidden, `${track} 표시`)
+    }
   }
+}
+
+const validateMarker = (value: unknown) => {
+  const marker = record(value, '마커')
+  text(marker.id, 100, '마커 ID')
+  finite(marker.time, 0, PROJECT_LIMITS.maxDurationSeconds, '마커 위치')
+  text(marker.label, 120, '마커 이름')
+  text(marker.color, 64, '마커 색상')
 }
 
 function assertBaseProject(value: unknown): Record<string, unknown> {
@@ -520,6 +560,10 @@ function assertBaseProject(value: unknown): Record<string, unknown> {
   for (const key of ['clips', 'overlays', 'audios', 'backgrounds', 'texts', 'media']) {
     if (!Array.isArray(p[key])) throw new Error(`프로젝트의 ${key} 항목이 잘못되었습니다.`)
     if ((p[key] as unknown[]).length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error(`프로젝트의 ${key} 항목 수가 너무 많습니다.`)
+  }
+  if (p.markers !== undefined) {
+    if (!Array.isArray(p.markers) || p.markers.length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error('프로젝트의 markers 항목이 잘못되었습니다.')
+    for (const marker of p.markers) validateMarker(marker)
   }
   for (const item of p.clips as unknown[]) validateItem(item, '클립')
   for (const item of p.overlays as unknown[]) validateItem(item, '오버레이')

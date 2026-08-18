@@ -1,12 +1,15 @@
 import { useState, type ReactNode } from 'react'
 import { useEditor } from '../store'
-import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop } from '../types'
+import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop, PositionKeyframe, KeyframeEasing } from '../types'
 import { NO_CROP, FONT_OPTIONS } from '../types'
 import { formatTime, formatClock, parseClock, clipTimelineDuration, overlayLength, audioLength, totalDuration } from '../utils/time'
 import { rotateBy } from '../utils/transform'
 import Icon from './Icon'
+import { keyframeAt, positionAt } from '../utils/motion'
 
-type Patch = Partial<Pick<Clip & Overlay, 'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat'>>
+type Patch = Partial<Pick<Clip & Overlay,
+  'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
+  'fadeIn' | 'fadeOut' | 'opacity' | 'locked' | 'hidden'>>
 
 const decimalsOf = (step: number) => {
   const s = String(step)
@@ -195,6 +198,78 @@ function VolumeRow({ volume, muted, onPatch, label = '음량' }: { volume: numbe
   )
 }
 
+function FadeRow({ length, fadeIn = 0, fadeOut = 0, onPatch, label = '페이드' }: {
+  length: number; fadeIn?: number; fadeOut?: number; onPatch: (p: Patch) => void; label?: string
+}) {
+  const max = Math.max(0.1, Math.min(10, length / 2))
+  return (
+    <div className="inspector__group">
+      <div className="field__label"><span>{label}</span><b>{fadeIn || fadeOut ? '적용됨' : '없음'}</b></div>
+      <Range label="시작" value={fadeIn} min={0} max={max} step={0.1} unit="초" onChange={(value) => onPatch({ fadeIn: value })} />
+      <Range label="끝" value={fadeOut} min={0} max={max} step={0.1} unit="초" onChange={(value) => onPatch({ fadeOut: value })} />
+    </div>
+  )
+}
+
+function LayerStateRow({ opacity = 1, locked = false, hidden = false, onPatch, onCenter }: {
+  opacity?: number; locked?: boolean; hidden?: boolean; onPatch: (p: Patch) => void
+  onCenter?: (axis: 'x' | 'y' | 'both') => void
+}) {
+  return (
+    <div className="inspector__group">
+      <Range label="레이어 불투명도" value={Math.round(opacity * 100)} min={0} max={100} step={1} unit="%"
+        onChange={(value) => onPatch({ opacity: value / 100 })} />
+      <div className="btnrow">
+        <button className={`btn btn--sm${locked ? ' btn--on' : ''}`} onClick={() => onPatch({ locked: !locked })}>{locked ? '잠금 해제' : '레이어 잠금'}</button>
+        <button className={`btn btn--sm${hidden ? ' btn--on' : ''}`} onClick={() => onPatch({ hidden: !hidden })}>{hidden ? '표시' : '숨기기'}</button>
+      </div>
+      {onCenter && <div className="btnrow">
+        <button className="btn btn--sm" onClick={() => onCenter('x')}>가로 중앙</button>
+        <button className="btn btn--sm" onClick={() => onCenter('y')}>세로 중앙</button>
+        <button className="btn btn--sm" onClick={() => onCenter('both')}>정중앙</button>
+      </div>}
+    </div>
+  )
+}
+
+function PositionKeyframeRow({ frames = [], localTime, onToggle, onClear, onSeek, onEasing }: {
+  frames?: PositionKeyframe[]; localTime: number; onToggle: () => void; onClear: () => void
+  onSeek: (frame: PositionKeyframe) => void
+  onEasing: (id: string, easing: KeyframeEasing) => void
+}) {
+  const ordered = [...frames].sort((a, b) => a.time - b.time)
+  const active = keyframeAt(ordered, localTime)
+  const previous = [...ordered].reverse().find((frame) => frame.time < localTime - 0.04)
+  const next = ordered.find((frame) => frame.time > localTime + 0.04)
+  return (
+    <div className="inspector__group keyframes">
+      <div className="field__label">
+        <span>위치 키프레임</span>
+        <b>{ordered.length ? `${ordered.length}개` : '없음'}</b>
+      </div>
+      <div className="keyframes__controls">
+        <button className="btn btn--sm" disabled={!previous} onClick={() => previous && onSeek(previous)} aria-label="이전 키프레임">←</button>
+        <button className={`btn btn--sm keyframes__toggle${active ? ' btn--on' : ''}`} onClick={onToggle}
+          title={active ? '현재 키프레임 삭제' : '현재 위치에 키프레임 추가'}>
+          <span className="keyframes__diamond" />{active ? '현재 점 삭제' : '현재 점 추가'}
+        </button>
+        <button className="btn btn--sm" disabled={!next} onClick={() => next && onSeek(next)} aria-label="다음 키프레임">→</button>
+      </div>
+      {active && (
+        <label className="keyframes__easing">
+          <span>다음 점까지 움직임</span>
+          <select value={active.easing} onChange={(event) => onEasing(active.id, event.target.value as KeyframeEasing)}>
+            <option value="ease-in-out">부드럽게</option>
+            <option value="linear">일정하게</option>
+          </select>
+        </label>
+      )}
+      {ordered.length > 0 && <button className="linkbtn keyframes__clear" onClick={onClear}>위치 움직임 모두 지우기</button>}
+      <div className="inspector__hint">첫 점을 추가한 뒤 재생 헤드를 옮겨 화면에서 레이어를 움직이면 다음 점이 자동으로 생깁니다.</div>
+    </div>
+  )
+}
+
 // ---- main clip ----
 function ClipInspector({ clip }: { clip: Clip }) {
   const update = useEditor((s) => s.updateClip)
@@ -222,6 +297,7 @@ function ClipInspector({ clip }: { clip: Clip }) {
           <Range label="길이" badge={formatTime(clip.trimEnd)} value={Math.min(clip.trimEnd, 60)} min={0.5} max={60} step={0.5} unit="초"
             onChange={(v) => update(clip.id, { trimEnd: v })} />
         </div>
+        <FadeRow length={clipTimelineDuration(clip)} fadeIn={clip.fadeIn} fadeOut={clip.fadeOut} onPatch={patch} label="화면 페이드" />
         <RepeatRow repeat={clip.repeat} onPatch={patch} />
         <div className="inspector__group btnrow">
           <button className="btn" disabled={idx <= 0} onClick={() => move(clip.id, -1)}>← 앞으로</button>
@@ -250,6 +326,7 @@ function ClipInspector({ clip }: { clip: Clip }) {
       <CropRow crop={clip.crop} onPatch={patch} />
       {clip.kind === 'video' && <SpeedRow speed={clip.speed} onPatch={patch} />}
       {clip.kind === 'video' && <VolumeRow volume={clip.volume} muted={clip.muted} onPatch={patch} />}
+      <FadeRow length={clipTimelineDuration(clip)} fadeIn={clip.fadeIn} fadeOut={clip.fadeOut} onPatch={patch} label="화면·소리 페이드" />
       <RepeatRow repeat={clip.repeat} onPatch={patch} />
       <DurationRow
         seconds={clipTimelineDuration(clip)}
@@ -273,12 +350,20 @@ function ClipInspector({ clip }: { clip: Clip }) {
 // ---- overlay ----
 function OverlayInspector({ ov }: { ov: Overlay }) {
   const update = useEditor((s) => s.updateOverlay)
+  const updatePosition = useEditor((s) => s.updateLayerPosition)
+  const togglePositionKeyframe = useEditor((s) => s.togglePositionKeyframe)
+  const clearPositionKeyframes = useEditor((s) => s.clearPositionKeyframes)
+  const setPositionKeyframeEasing = useEditor((s) => s.setPositionKeyframeEasing)
+  const setPlayhead = useEditor((s) => s.setPlayhead)
+  const playhead = useEditor((s) => s.playhead)
   const raise = useEditor((s) => s.raiseOverlay)
   const remove = useEditor((s) => s.removeOverlay)
   const toMain = useEditor((s) => s.moveOverlayToMain)
   const overlays = useEditor((s) => s.overlays)
   const idx = overlays.findIndex((o) => o.id === ov.id)
   const patch = (p: Patch) => update(ov.id, p)
+  const localTime = Math.max(0, Math.min(playhead - ov.start, overlayLength(ov)))
+  const position = positionAt(ov, localTime)
 
   return (
     <div className="inspector__body">
@@ -288,10 +373,17 @@ function OverlayInspector({ ov }: { ov: Overlay }) {
       </div>
 
       <div className="inspector__group">
-        <Range label="가로 위치" value={Math.round(ov.x * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => update(ov.id, { x: v / 100 })} />
-        <Range label="세로 위치" value={Math.round(ov.y * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => update(ov.id, { y: v / 100 })} />
+        <Range label="가로 위치" value={Math.round(position.x * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('overlay', ov.id, { x: v / 100 })} />
+        <Range label="세로 위치" value={Math.round(position.y * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('overlay', ov.id, { y: v / 100 })} />
         <Range label="크기" value={Math.round(ov.scale * 100)} min={10} max={100} step={1} unit="%" onChange={(v) => update(ov.id, { scale: v / 100 })} />
       </div>
+      <LayerStateRow opacity={ov.opacity} locked={ov.locked} hidden={ov.hidden} onPatch={patch}
+        onCenter={(axis) => updatePosition('overlay', ov.id, { ...(axis !== 'y' ? { x: 0.5 } : {}), ...(axis !== 'x' ? { y: 0.5 } : {}) })} />
+      <PositionKeyframeRow frames={ov.positionKeyframes} localTime={localTime}
+        onToggle={() => togglePositionKeyframe('overlay', ov.id)}
+        onClear={() => clearPositionKeyframes('overlay', ov.id)}
+        onSeek={(frame) => setPlayhead(ov.start + frame.time)}
+        onEasing={(keyframeId, easing) => setPositionKeyframeEasing('overlay', ov.id, keyframeId, easing)} />
 
       <div className="inspector__group">
         <Range label="시작 트림" badge={formatTime(ov.trimStart)} value={ov.trimStart} min={0} max={ov.duration} step={0.1} unit="초"
@@ -307,6 +399,7 @@ function OverlayInspector({ ov }: { ov: Overlay }) {
       <CropRow crop={ov.crop} onPatch={patch} />
       {ov.kind === 'video' && <SpeedRow speed={ov.speed} onPatch={patch} />}
       {ov.kind === 'video' && <VolumeRow volume={ov.volume} muted={ov.muted} onPatch={patch} />}
+      <FadeRow length={overlayLength(ov)} fadeIn={ov.fadeIn} fadeOut={ov.fadeOut} onPatch={patch} label="화면·소리 페이드" />
       <RepeatRow repeat={ov.repeat} onPatch={patch} />
       <DurationRow
         seconds={overlayLength(ov)}
@@ -349,6 +442,7 @@ function AudioInspector({ audio }: { audio: AudioClip }) {
       </div>
 
       <VolumeRow volume={audio.volume} muted={audio.muted} onPatch={(p) => update(audio.id, p)} />
+      <FadeRow length={audioLength(audio)} fadeIn={audio.fadeIn} fadeOut={audio.fadeOut} onPatch={(p) => update(audio.id, p)} label="소리 페이드" />
       <RepeatRow repeat={audio.repeat} onPatch={(p) => update(audio.id, p)} fitTo={fitTo} />
       <DurationRow seconds={audioLength(audio)} onSet={(t) => update(audio.id, { repeat: Math.max(1, Math.round(t / Math.max(0.1, base))) })} />
       <button className="btn btn--danger" onClick={() => remove(audio.id)}>음악 삭제</button>
@@ -360,11 +454,19 @@ function AudioInspector({ audio }: { audio: AudioClip }) {
 const ALIGNS: TextOverlay['align'][] = ['left', 'center', 'right', 'justify']
 function TextInspector({ text }: { text: TextOverlay }) {
   const update = useEditor((s) => s.updateText)
+  const updatePosition = useEditor((s) => s.updateLayerPosition)
+  const togglePositionKeyframe = useEditor((s) => s.togglePositionKeyframe)
+  const clearPositionKeyframes = useEditor((s) => s.clearPositionKeyframes)
+  const setPositionKeyframeEasing = useEditor((s) => s.setPositionKeyframeEasing)
+  const setPlayhead = useEditor((s) => s.setPlayhead)
+  const playhead = useEditor((s) => s.playhead)
   const remove = useEditor((s) => s.removeText)
   const raise = useEditor((s) => s.raiseText)
   const texts = useEditor((s) => s.texts)
   const idx = texts.findIndex((t) => t.id === text.id)
   const set = (p: Partial<TextOverlay>) => update(text.id, p)
+  const localTime = Math.max(0, Math.min(playhead - text.start, text.end - text.start))
+  const position = positionAt(text, localTime)
 
   return (
     <div className="inspector__body">
@@ -394,12 +496,20 @@ function TextInspector({ text }: { text: TextOverlay }) {
       </div>
 
       <div className="inspector__group">
-        <Range label="가로 위치" value={Math.round(text.x * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => set({ x: v / 100 })} />
-        <Range label="세로 위치" value={Math.round(text.y * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => set({ y: v / 100 })} />
+        <Range label="가로 위치" value={Math.round(position.x * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('text', text.id, { x: v / 100 })} />
+        <Range label="세로 위치" value={Math.round(position.y * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('text', text.id, { y: v / 100 })} />
         <Range label="글자 크기" value={Math.round(text.size * 1000)} min={20} max={400} step={5} onChange={(v) => set({ size: v / 1000 })} />
         <Range label="회전" value={text.angle || 0} min={-180} max={180} step={1} unit="°" onChange={(v) => set({ angle: v })} />
         <div className="inspector__hint">미리보기에서 글자를 끌어 이동하고 모서리와 회전 손잡이로 조절합니다.</div>
       </div>
+      <LayerStateRow opacity={text.opacity} locked={text.locked} hidden={text.hidden}
+        onPatch={(patch) => set(patch as Partial<TextOverlay>)}
+        onCenter={(axis) => updatePosition('text', text.id, { ...(axis !== 'y' ? { x: 0.5 } : {}), ...(axis !== 'x' ? { y: 0.5 } : {}) })} />
+      <PositionKeyframeRow frames={text.positionKeyframes} localTime={localTime}
+        onToggle={() => togglePositionKeyframe('text', text.id)}
+        onClear={() => clearPositionKeyframes('text', text.id)}
+        onSeek={(frame) => setPlayhead(text.start + frame.time)}
+        onEasing={(keyframeId, easing) => setPositionKeyframeEasing('text', text.id, keyframeId, easing)} />
 
       <div className="inspector__group">
         <div className="inspector__row">
@@ -448,6 +558,8 @@ function TextInspector({ text }: { text: TextOverlay }) {
       </div>
 
       <DurationRow seconds={text.end - text.start} onSet={(t) => set({ end: text.start + t })} />
+      <FadeRow length={text.end - text.start} fadeIn={text.fadeIn} fadeOut={text.fadeOut}
+        onPatch={(patch) => set(patch as Partial<TextOverlay>)} label="텍스트 페이드" />
 
       <div className="inspector__group btnrow">
         <button className="btn" disabled={idx <= 0} onClick={() => raise(text.id, -1)}>▼ 아래로</button>
@@ -490,6 +602,8 @@ function BackgroundInspector({ bg }: { bg: Background }) {
       )}
 
       {bg.kind === 'video' && <VolumeRow volume={bg.volume} muted={bg.muted} onPatch={patch} />}
+      <LayerStateRow opacity={bg.opacity} locked={bg.locked} hidden={bg.hidden} onPatch={patch} />
+      <FadeRow length={clipTimelineDuration(bg)} fadeIn={bg.fadeIn} fadeOut={bg.fadeOut} onPatch={patch} label="배경 페이드" />
       <RepeatRow repeat={bg.repeat} onPatch={patch} />
       <DurationRow
         seconds={clipTimelineDuration(bg)}

@@ -27,6 +27,7 @@ export default function App() {
   const addBackground = useEditor((s) => s.addBackground)
   const splitAtPlayhead = useEditor((s) => s.splitAtPlayhead)
   const addText = useEditor((s) => s.addText)
+  const addMarker = useEditor((s) => s.addMarker)
   const deleteSelected = useEditor((s) => s.deleteSelected)
   const duplicateSelected = useEditor((s) => s.duplicateSelected)
   const setPlaying = useEditor((s) => s.setPlaying)
@@ -82,7 +83,7 @@ export default function App() {
       const strip = (arr: { file?: File; src?: string }[]) => arr.map(({ file: _f, src: _s, ...r }) => { void _f; void _s; return r })
       return JSON.stringify({
         c: strip(s.clips), o: strip(s.overlays), a: strip(s.audios), b: strip(s.backgrounds),
-        t: s.texts, ar: s.aspectRatio, es: s.exportSettings,
+        t: s.texts, m: s.markers, ar: s.aspectRatio, es: s.exportSettings,
       })
     }
     const saveNow = async () => {
@@ -101,6 +102,7 @@ export default function App() {
       try {
         await saveProject(AUTOSAVE_KEY, {
           clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
+          markers: s.markers,
           aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
         })
         lastSig.current = sig
@@ -182,6 +184,8 @@ export default function App() {
         if (hasContent) setPlaying(!isPlaying)
       } else if (e.key === 's' || e.key === 'S') {
         splitAtPlayhead()
+      } else if (e.key === 'm' || e.key === 'M') {
+        addMarker(playhead)
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         deleteSelected()
       } else if (e.key === 'ArrowLeft') {
