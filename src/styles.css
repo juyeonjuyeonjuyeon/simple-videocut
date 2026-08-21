@@ -344,6 +344,34 @@ button, input, textarea { font-family: inherit; }
 .crophandle--tr { top: -9px; right: -9px; cursor: nesw-resize; }
 .crophandle--bl { bottom: -9px; left: -9px; cursor: nesw-resize; }
 .crophandle--br { bottom: -9px; right: -9px; cursor: nwse-resize; }
+.crophandle--t, .crophandle--b {
+  left: 50%;
+  width: 30px;
+  height: 10px;
+  margin-left: -15px;
+  border-radius: 999px;
+  cursor: ns-resize;
+}
+.crophandle--t { top: -6px; }
+.crophandle--b { bottom: -6px; }
+.crophandle--l, .crophandle--r {
+  top: 50%;
+  width: 10px;
+  height: 30px;
+  margin-top: -15px;
+  border-radius: 999px;
+  cursor: ew-resize;
+}
+.crophandle--l { left: -6px; }
+.crophandle--r { right: -6px; }
+.cropedit__grid { position: absolute; inset: 0; pointer-events: none; }
+.cropedit__grid i { position: absolute; display: block; background: rgba(255, 255, 255, 0.52); }
+.cropedit__grid i:nth-child(1), .cropedit__grid i:nth-child(2) { top: 0; bottom: 0; width: 1px; }
+.cropedit__grid i:nth-child(1) { left: 33.333%; }
+.cropedit__grid i:nth-child(2) { left: 66.666%; }
+.cropedit__grid i:nth-child(3), .cropedit__grid i:nth-child(4) { left: 0; right: 0; height: 1px; }
+.cropedit__grid i:nth-child(3) { top: 33.333%; }
+.cropedit__grid i:nth-child(4) { top: 66.666%; }
 .cropedit__toolbar {
   position: absolute;
   left: 50%;
@@ -352,7 +380,8 @@ button, input, textarea { font-family: inherit; }
   display: flex;
   align-items: center;
   gap: 10px;
-  width: min(94%, 620px);
+  width: min(620px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
   min-height: 44px;
   padding: 7px 9px;
   border: 1px solid rgba(255,255,255,.25);
@@ -370,6 +399,7 @@ button, input, textarea { font-family: inherit; }
   font-size: 11px;
   cursor: pointer;
 }
+.cropedit__toolbar button.is-active { border-color: var(--accent); background: var(--accent); }
 .cropedit__ratios, .cropedit__actions { display: flex; gap: 4px; }
 .cropedit__scale { display: flex; align-items: center; gap: 6px; flex: 1 1 120px; color: #fff; font-size: 11px; }
 .cropedit__scale input { width: 100%; min-width: 80px; }
@@ -377,7 +407,7 @@ button, input, textarea { font-family: inherit; }
 .cropedit__hint {
   position: absolute;
   left: 50%;
-  bottom: 68px;
+  top: 12px;
   transform: translateX(-50%);
   background: rgba(58, 50, 52, 0.8);
   color: #fff;
@@ -390,6 +420,21 @@ button, input, textarea { font-family: inherit; }
 .preview__selection-tools { position: absolute; left: 50%; bottom: 10px; z-index: 4001; transform: translateX(-50%); }
 .preview__selection-tools button { display: flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 10px; border: 1px solid rgba(255,255,255,.35); border-radius: 8px; color: #fff; background: rgba(39,35,42,.88); cursor: pointer; }
 .preview__selection-tools .ui-icon { width: 16px; height: 16px; }
+.preview__rotation-readout {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 4002;
+  transform: translateX(-50%);
+  padding: 5px 9px;
+  border: 1px solid rgba(255,255,255,.3);
+  border-radius: 7px;
+  color: #fff;
+  background: rgba(18,20,23,.86);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
 
 /* ---------- Transport ---------- */
 .transport {
@@ -1614,6 +1659,11 @@ input[type='range']:disabled { opacity: 0.4; }
   .step { width: 44px; height: 40px; }
   .num--step, .num--time { height: 40px; }
   .inspector { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .cropedit__toolbar { bottom: 8px; flex-wrap: wrap; gap: 6px; padding: 7px; }
+  .cropedit__ratios { order: 1; flex: 1 1 auto; overflow-x: auto; }
+  .cropedit__actions { order: 2; }
+  .cropedit__scale { order: 3; flex-basis: 100%; }
+  .cropedit__hint { display: none; }
 }
 
 @media (max-width: 520px) {

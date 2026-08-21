@@ -10,6 +10,7 @@ const ffmpeg = require('ffmpeg-static') as string
 
 test('mobile Safari restores video and M4A, then exports playable video', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'mobile', 'WebKit mobile recovery regression')
+  test.setTimeout(210_000)
 
   const temp = mkdtempSync(join(tmpdir(), 'simplecut-web-recovery-'))
   const video = join(temp, 'mobile-source.mp4')

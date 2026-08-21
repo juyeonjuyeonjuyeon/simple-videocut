@@ -16,10 +16,24 @@ import { hexToRgba } from '../utils/color'
 import { normalizeVisualOrder, PREVIEW_Z, visualPreviewZ } from '../utils/layers'
 import { startPointerDrag } from '../utils/pointer'
 import { positionAt } from '../utils/motion'
+import { cropForAspect, cropSize, moveCrop, resizeCrop, sanitizeCrop, zoomCrop, type CropHandle } from '../utils/crop'
 import Icon from './Icon'
 
 const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
 const DRIFT = 0.35 // seconds before we hard-seek a media element back in sync
+const SNAP_PX = 8
+
+const snapLayerAxis = (center: number, size: number, axisPixels: number) => {
+  const candidates = [
+    { center: size / 2, guide: 0 },
+    { center: 0.5, guide: 0.5 },
+    { center: 1 - size / 2, guide: 1 },
+  ]
+  const match = candidates
+    .map((candidate) => ({ ...candidate, distance: Math.abs(center - candidate.center) * axisPixels }))
+    .sort((a, b) => a.distance - b.distance)[0]
+  return match && match.distance <= SNAP_PX ? match : { center, guide: null }
+}
 
 function fitBox(cw: number, ch: number, r: number): { w: number; h: number } {
   if (cw <= 0 || ch <= 0) return { w: 0, h: 0 }
@@ -68,9 +82,11 @@ export default function Preview() {
   const gainNodes = useRef<Map<HTMLMediaElement, GainNode>>(new Map())
   const [box, setBox] = useState({ w: 0, h: 0 })
   const [cropMode, setCropMode] = useState(false)
+  const [cropAspect, setCropAspect] = useState<number | null>(null)
   const cropOriginal = useRef<{ kind: 'clip' | 'overlay'; id: string; crop: Crop } | null>(null)
   const [overlayControlHeight, setOverlayControlHeight] = useState(0)
-  const [guides, setGuides] = useState({ x: false, y: false })
+  const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null })
+  const [rotationReadout, setRotationReadout] = useState<{ type: 'overlay' | 'text'; id: string; angle: number } | null>(null)
   const selClip = selection?.type === 'clip' ? clips.find((c) => c.id === selection.id) : null
   const selOverlayId = selection?.type === 'overlay' ? selection.id : null
   const selOverlay = selOverlayId ? overlays.find((o) => o.id === selOverlayId) : null
@@ -79,7 +95,7 @@ export default function Preview() {
 
   // Leave crop mode when the selection changes.
   const selectionKey = selection ? `${selection.type}:${selection.id}` : ''
-  useEffect(() => { setCropMode(false); cropOriginal.current = null }, [selectionKey])
+  useEffect(() => { setCropMode(false); setCropAspect(null); cropOriginal.current = null }, [selectionKey])
 
   // Keep editing controls above the content stack without changing the
   // selected overlay's actual compositing order.
@@ -99,29 +115,55 @@ export default function Preview() {
 
   // ---- interactive crop / pan (works for the main clip and PiP overlays) ----
   type CropKind = 'clip' | 'overlay'
-  const cropRectOf = (kind: CropKind, id: string): DOMRect | null => {
+  const cropGeometryOf = (kind: CropKind, id: string) => {
     const el = kind === 'clip' ? frameRef.current : wrapEls.current.get(id)
-    return el ? el.getBoundingClientRect() : null
+    if (!el) return null
+    const bounds = el.getBoundingClientRect()
+    const width = kind === 'overlay' ? el.offsetWidth : bounds.width
+    const height = kind === 'overlay' ? el.offsetHeight : bounds.height
+    const angle = kind === 'overlay'
+      ? (useEditor.getState().overlays.find((overlay) => overlay.id === id)?.angle || 0) * Math.PI / 180
+      : 0
+    const centerX = bounds.left + bounds.width / 2
+    const centerY = bounds.top + bounds.height / 2
+    return {
+      width,
+      height,
+      point(clientX: number, clientY: number) {
+        if (kind === 'clip' || !angle) return { x: clientX - bounds.left, y: clientY - bounds.top }
+        const dx = clientX - centerX
+        const dy = clientY - centerY
+        return {
+          x: dx * Math.cos(angle) + dy * Math.sin(angle) + width / 2,
+          y: -dx * Math.sin(angle) + dy * Math.cos(angle) + height / 2,
+        }
+      },
+    }
   }
   const cropItem = (kind: CropKind, id: string) =>
     kind === 'clip'
       ? useEditor.getState().clips.find((c) => c.id === id)
       : useEditor.getState().overlays.find((o) => o.id === id)
-  const cropUpdate = (kind: CropKind, id: string, crop: { top: number; right: number; bottom: number; left: number }) =>
-    kind === 'clip' ? updateClip(id, { crop }) : updateOverlay(id, { crop })
+  const cropUpdate = (kind: CropKind, id: string, crop: Crop) => {
+    const safeCrop = sanitizeCrop(crop)
+    if (kind === 'clip') updateClip(id, { crop: safeCrop })
+    else updateOverlay(id, { crop: safeCrop })
+  }
 
   const beginCrop = (kind: CropKind, id: string) => {
     const item = cropItem(kind, id)
     if (!item) return
     setPlaying(false)
     cropOriginal.current = { kind, id, crop: { ...item.crop } }
+    setCropAspect(null)
     setCropMode(true)
   }
-  const finishCrop = () => { cropOriginal.current = null; setCropMode(false) }
+  const finishCrop = () => { cropOriginal.current = null; setCropAspect(null); setCropMode(false) }
   const cancelCrop = () => {
     const original = cropOriginal.current
     if (original) cropUpdate(original.kind, original.id, original.crop)
     cropOriginal.current = null
+    setCropAspect(null)
     setCropMode(false)
   }
 
@@ -129,42 +171,32 @@ export default function Preview() {
     startPointerDrag(onMove)
   }
 
-  const cropCorner = (kind: CropKind, id: string, corner: 'tl' | 'tr' | 'bl' | 'br') => (e: React.PointerEvent) => {
+  const cropHandle = (kind: CropKind, id: string, handle: CropHandle) => (e: React.PointerEvent) => {
     e.stopPropagation()
     if (e.button !== 0) return
-    const rect = cropRectOf(kind, id)
-    if (!rect) return
+    const geometry = cropGeometryOf(kind, id)
+    const initial = cropItem(kind, id)?.crop
+    if (!geometry || !initial) return
     withCropDrag((ev) => {
-      const fx = Math.max(0, Math.min((ev.clientX - rect.left) / rect.width, 1))
-      const fy = Math.max(0, Math.min((ev.clientY - rect.top) / rect.height, 1))
-      const cur = cropItem(kind, id)
-      if (!cur) return
-      const crop = { ...cur.crop }
-      if (corner === 'tl' || corner === 'bl') crop.left = fx
-      if (corner === 'tr' || corner === 'br') crop.right = 1 - fx
-      if (corner === 'tl' || corner === 'tr') crop.top = fy
-      if (corner === 'bl' || corner === 'br') crop.bottom = 1 - fy
-      cropUpdate(kind, id, crop)
+      const point = geometry.point(ev.clientX, ev.clientY)
+      const fx = Math.max(0, Math.min(point.x / geometry.width, 1))
+      const fy = Math.max(0, Math.min(point.y / geometry.height, 1))
+      cropUpdate(kind, id, resizeCrop(initial, handle, fx, fy, geometry.width / Math.max(1, geometry.height), cropAspect))
     })
   }
 
   const cropPan = (kind: CropKind, id: string) => (e: React.PointerEvent) => {
     e.stopPropagation()
     if (e.button !== 0) return
-    const rect = cropRectOf(kind, id)
+    const geometry = cropGeometryOf(kind, id)
     const c0 = cropItem(kind, id)?.crop
-    if (!rect || !c0) return
-    const startX = e.clientX
-    const startY = e.clientY
+    if (!geometry || !c0) return
+    const start = geometry.point(e.clientX, e.clientY)
     withCropDrag((ev) => {
-      const dx = (ev.clientX - startX) / rect.width
-      const dy = (ev.clientY - startY) / rect.height
-      let left = c0.left + dx, right = c0.right - dx, top = c0.top + dy, bottom = c0.bottom - dy
-      if (left < 0) { right += left; left = 0 }
-      if (right < 0) { left += right; right = 0 }
-      if (top < 0) { bottom += top; top = 0 }
-      if (bottom < 0) { top += bottom; bottom = 0 }
-      cropUpdate(kind, id, { top, right, bottom, left })
+      const point = geometry.point(ev.clientX, ev.clientY)
+      const dx = (point.x - start.x) / geometry.width
+      const dy = (point.y - start.y) / geometry.height
+      cropUpdate(kind, id, moveCrop(c0, dx, dy))
     })
   }
 
@@ -172,64 +204,52 @@ export default function Preview() {
   const cropZoom = (kind: CropKind, id: string, factor: number) => {
     const cur = cropItem(kind, id)
     if (!cur) return
-    const c = cur.crop
-    const cx = (c.left + (1 - c.right)) / 2
-    const cy = (c.top + (1 - c.bottom)) / 2
-    const kw = Math.max(0.04, Math.min(1, (1 - c.left - c.right) * factor))
-    const kh = Math.max(0.04, Math.min(1, (1 - c.top - c.bottom) * factor))
-    const clamp = (v: number) => Math.max(0, Math.min(v, 0.49))
-    cropUpdate(kind, id, {
-      left: clamp(cx - kw / 2), right: clamp(1 - (cx + kw / 2)),
-      top: clamp(cy - kh / 2), bottom: clamp(1 - (cy + kh / 2)),
-    })
+    cropUpdate(kind, id, zoomCrop(cur.crop, factor))
   }
 
-  const cropRatio = (kind: CropKind, id: string, ratio: number | null) => {
+  const cropRatio = (kind: CropKind, id: string, ratio: number) => {
     const cur = cropItem(kind, id)
-    const rect = cropRectOf(kind, id)
-    if (!cur || !rect) return
-    if (ratio == null) { cropUpdate(kind, id, { top: 0, right: 0, bottom: 0, left: 0 }); return }
-    const containerRatio = rect.width / Math.max(1, rect.height)
-    let keptW = 1
-    let keptH = containerRatio / ratio
-    if (keptH > 1) { keptH = 1; keptW = ratio / containerRatio }
-    const cx = Math.max(keptW / 2, Math.min(1 - keptW / 2, (cur.crop.left + 1 - cur.crop.right) / 2))
-    const cy = Math.max(keptH / 2, Math.min(1 - keptH / 2, (cur.crop.top + 1 - cur.crop.bottom) / 2))
-    cropUpdate(kind, id, {
-      left: cx - keptW / 2, right: 1 - cx - keptW / 2,
-      top: cy - keptH / 2, bottom: 1 - cy - keptH / 2,
-    })
+    const geometry = cropGeometryOf(kind, id)
+    if (!cur || !geometry) return
+    setCropAspect(ratio)
+    cropUpdate(kind, id, cropForAspect(cur.crop, geometry.width / Math.max(1, geometry.height), ratio))
   }
 
   const cropEditor = (kind: CropKind, id: string, crop: { top: number; right: number; bottom: number; left: number }) => (
-    <div className="cropedit" onPointerDown={(e) => e.stopPropagation()}>
+    <div className="cropedit" onPointerDown={(e) => e.stopPropagation()} onWheel={(event) => {
+      event.preventDefault()
+      cropZoom(kind, id, event.deltaY > 0 ? 1.06 : 0.94)
+    }}>
       <div
         className="cropedit__rect"
         style={{ left: `${crop.left * 100}%`, top: `${crop.top * 100}%`, right: `${crop.right * 100}%`, bottom: `${crop.bottom * 100}%` }}
         onPointerDown={cropPan(kind, id)}
       >
-        {(['tl', 'tr', 'bl', 'br'] as const).map((c) => (
-          <span key={c} className={`crophandle crophandle--${c}`} onPointerDown={cropCorner(kind, id, c)} />
+        <span className="cropedit__grid"><i /><i /><i /><i /></span>
+        {(['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'] as const).map((handle) => (
+          <span key={handle} className={`crophandle crophandle--${handle}`} onPointerDown={cropHandle(kind, id, handle)} />
         ))}
       </div>
-      <div className="cropedit__toolbar" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="cropedit__toolbar" style={kind === 'overlay' ? { rotate: `${-(useEditor.getState().overlays.find((overlay) => overlay.id === id)?.angle || 0)}deg` } : undefined} onPointerDown={(e) => e.stopPropagation()}>
         <div className="cropedit__ratios" aria-label="자르기 비율">
-          <button type="button" onClick={() => cropRatio(kind, id, null)}>원본</button>
-          <button type="button" onClick={() => cropRatio(kind, id, 16 / 9)}>16:9</button>
-          <button type="button" onClick={() => cropRatio(kind, id, 1)}>1:1</button>
-          <button type="button" onClick={() => cropRatio(kind, id, 9 / 16)}>9:16</button>
+          <button type="button" className={cropAspect == null ? 'is-active' : ''} onClick={() => setCropAspect(null)}>자유</button>
+          <button type="button" className={cropAspect === 16 / 9 ? 'is-active' : ''} onClick={() => cropRatio(kind, id, 16 / 9)}>16:9</button>
+          <button type="button" className={cropAspect === 1 ? 'is-active' : ''} onClick={() => cropRatio(kind, id, 1)}>1:1</button>
+          <button type="button" className={cropAspect === 9 / 16 ? 'is-active' : ''} onClick={() => cropRatio(kind, id, 9 / 16)}>9:16</button>
         </div>
         <label className="cropedit__scale">
           <span>확대</span>
           <input type="range" min="0" max="90" step="1"
             value={Math.round((1 - Math.min(1 - crop.left - crop.right, 1 - crop.top - crop.bottom)) * 100)}
             onChange={(event) => {
-              const currentKept = Math.max(0.04, Math.min(1 - crop.left - crop.right, 1 - crop.top - crop.bottom))
+              const size = cropSize(crop)
+              const currentKept = Math.max(0.04, Math.min(size.width, size.height))
               const wantedKept = Math.max(0.1, 1 - Number(event.target.value) / 100)
               cropZoom(kind, id, wantedKept / currentKept)
             }} />
         </label>
         <div className="cropedit__actions">
+          <button type="button" onClick={() => { setCropAspect(null); cropUpdate(kind, id, { top: 0, right: 0, bottom: 0, left: 0 }) }}>초기화</button>
           <button type="button" onClick={cancelCrop}>취소</button>
           <button type="button" className="cropedit__done" onClick={finishCrop}>적용</button>
         </div>
@@ -565,14 +585,18 @@ export default function Preview() {
     // Offset from the cursor to the overlay center, kept constant while dragging.
     const grabDx = e.clientX - (rect.left + position.x * rect.width)
     const grabDy = e.clientY - (rect.top + position.y * rect.height)
+    const width = Math.max(0.01, o.scale)
+    const height = Math.max(0.01, o.scaleY != null && !(o.aspectLocked ?? true)
+      ? o.scaleY
+      : (wrapEls.current.get(id)?.offsetHeight || rect.height * 0.2) / rect.height)
     startPointerDrag((ev) => {
       const rawX = (ev.clientX - grabDx - rect.left) / rect.width
       const rawY = (ev.clientY - grabDy - rect.top) / rect.height
-      const snapX = Math.abs(rawX - 0.5) * rect.width <= 8
-      const snapY = Math.abs(rawY - 0.5) * rect.height <= 8
-      setGuides({ x: snapX, y: snapY })
-      updateLayerPosition('overlay', id, { x: snapX ? 0.5 : rawX, y: snapY ? 0.5 : rawY })
-    }, () => setGuides({ x: false, y: false }))
+      const snapX = snapLayerAxis(rawX, width, rect.width)
+      const snapY = snapLayerAxis(rawY, height, rect.height)
+      setGuides({ x: snapX.guide, y: snapY.guide })
+      updateLayerPosition('overlay', id, { x: snapX.center, y: snapY.center })
+    }, () => setGuides({ x: null, y: null }))
   }
 
   // ---- resize a PiP overlay while its opposite edge/corner stays anchored ----
@@ -654,13 +678,16 @@ export default function Preview() {
     const cx = rect.left + position.x * rect.width
     const cy = rect.top + position.y * rect.height
     const base = (item.angle || 0) - (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI
+    setRotationReadout({ type: kind, id, angle: item.angle || 0 })
     startPointerDrag((ev) => {
       let deg = base + (Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180) / Math.PI
       deg = Math.round(((deg + 540) % 360) - 180) // normalize to -180..180
-      if (!ev.shiftKey && Math.abs(deg % 90) <= 4) deg = Math.round(deg / 90) * 90 // snap near right angles
+      const snapped = Math.round(deg / 45) * 45
+      if (!ev.shiftKey && Math.abs(deg - snapped) <= 3) deg = snapped
+      setRotationReadout({ type: kind, id, angle: deg })
       if (kind === 'overlay') updateOverlay(id, { angle: deg })
       else updateText(id, { angle: deg })
-    })
+    }, () => setRotationReadout(null))
   }
 
   // ---- drag a text overlay around the frame (mouse + touch via pointer events) ----
@@ -680,11 +707,11 @@ export default function Preview() {
     startPointerDrag((ev) => {
       const rawX = (ev.clientX - grabDx - rect.left) / rect.width
       const rawY = (ev.clientY - grabDy - rect.top) / rect.height
-      const snapX = Math.abs(rawX - 0.5) * rect.width <= 8
-      const snapY = Math.abs(rawY - 0.5) * rect.height <= 8
-      setGuides({ x: snapX, y: snapY })
+      const snapX = Math.abs(rawX - 0.5) * rect.width <= SNAP_PX
+      const snapY = Math.abs(rawY - 0.5) * rect.height <= SNAP_PX
+      setGuides({ x: snapX ? 0.5 : null, y: snapY ? 0.5 : null })
       updateLayerPosition('text', id, { x: snapX ? 0.5 : rawX, y: snapY ? 0.5 : rawY })
-    }, () => setGuides({ x: false, y: false }))
+    }, () => setGuides({ x: null, y: null }))
   }
 
   // ---- drag the corner handle to resize text (distance-from-center based) ----
@@ -852,17 +879,18 @@ export default function Preview() {
           )
         })}
 
-        {guides.x && <div className="preview-guide preview-guide--x" />}
-        {guides.y && <div className="preview-guide preview-guide--y" />}
+        {guides.x != null && <div className="preview-guide preview-guide--x" style={{ left: `${guides.x * 100}%` }} />}
+        {guides.y != null && <div className="preview-guide preview-guide--y" style={{ top: `${guides.y * 100}%` }} />}
+        {rotationReadout && <div className="preview__rotation-readout">{rotationReadout.angle}°</div>}
 
         {cropMode && selClip && (
           <>
             {cropEditor('clip', selClip.id, selClip.crop)}
-            <div className="cropedit__hint">모서리로 영역 조절 · 안쪽을 끌어 위치 이동</div>
+            <div className="cropedit__hint">테두리로 영역 조절 · 안쪽 드래그로 이동 · 스크롤로 확대</div>
           </>
         )}
         {cropMode && selOverlayId && (
-          <div className="cropedit__hint">모서리로 영역 조절 · 안쪽을 끌어 위치 이동</div>
+          <div className="cropedit__hint">테두리로 영역 조절 · 안쪽 드래그로 이동 · 스크롤로 확대</div>
         )}
 
         {!cropMode && (selClip || selOverlay) && !(selOverlay?.locked) && (
