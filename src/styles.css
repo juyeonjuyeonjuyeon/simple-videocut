@@ -897,6 +897,7 @@ button, input, textarea { font-family: inherit; }
 
 .iconbtn {
   appearance: none;
+  position: relative;
   border: 1px solid var(--line);
   background: var(--bg-2);
   color: var(--text);
@@ -915,6 +916,80 @@ button, input, textarea { font-family: inherit; }
 .iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
 .iconbtn--play { background: var(--accent); border-color: var(--accent); color: #fff; }
 .iconbtn--on { background: var(--accent); border-color: var(--accent); }
+
+/* Icon-only controls expose their accessible name as a quick, consistent tooltip. */
+@media (hover: hover) and (pointer: fine) {
+  .iconbtn[aria-label]::after,
+  .timeline__track-action[aria-label]::after,
+  .chip--icon[aria-label]::after {
+    content: attr(aria-label);
+    position: absolute;
+    top: calc(100% + 7px);
+    left: 50%;
+    z-index: 4200;
+    width: max-content;
+    max-width: min(240px, calc(100vw - 24px));
+    padding: 6px 8px;
+    color: var(--text);
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+    background: var(--bg-1);
+    box-shadow: 0 8px 24px var(--popover-shadow);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.25;
+    text-align: center;
+    white-space: normal;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translate(-50%, -2px);
+    transition: opacity .1s ease, transform .1s ease, visibility 0s linear .1s;
+  }
+  .iconbtn[aria-label]:hover::after,
+  .iconbtn[aria-label]:focus-visible::after,
+  .timeline__track-action[aria-label]:hover::after,
+  .timeline__track-action[aria-label]:focus-visible::after,
+  .chip--icon[aria-label]:hover::after,
+  .chip--icon[aria-label]:focus-visible::after {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, 0);
+    transition-delay: .14s;
+  }
+
+  .topbar__actions .iconbtn[aria-label]::after,
+  .media-panel__head .iconbtn[aria-label]::after,
+  .modal__head .iconbtn[aria-label]::after,
+  .crop-dialog__head .iconbtn[aria-label]::after,
+  .project-home__head .iconbtn[aria-label]::after,
+  .timeline__zoom-control .iconbtn[aria-label]::after {
+    right: 0;
+    left: auto;
+    transform: translateY(-2px);
+  }
+  .topbar__actions .iconbtn[aria-label]:is(:hover, :focus-visible)::after,
+  .media-panel__head .iconbtn[aria-label]:is(:hover, :focus-visible)::after,
+  .modal__head .iconbtn[aria-label]:is(:hover, :focus-visible)::after,
+  .crop-dialog__head .iconbtn[aria-label]:is(:hover, :focus-visible)::after,
+  .project-home__head .iconbtn[aria-label]:is(:hover, :focus-visible)::after,
+  .timeline__zoom-control .iconbtn[aria-label]:is(:hover, :focus-visible)::after {
+    transform: translateY(0);
+  }
+  .timeline__bar > .iconbtn[aria-label]::after {
+    right: auto;
+    left: 0;
+    transform: translateY(-2px);
+  }
+  .timeline__bar > .iconbtn[aria-label]:is(:hover, :focus-visible)::after { transform: translateY(0); }
+  .project-card__delete[aria-label]::after {
+    top: 50%;
+    right: calc(100% + 7px);
+    left: auto;
+    transform: translate(2px, -50%);
+  }
+  .project-card__delete[aria-label]:is(:hover, :focus-visible)::after { transform: translate(0, -50%); }
+}
 
 /* Drag-and-drop overlay */
 .dropzone {
@@ -1541,6 +1616,7 @@ html[data-language='en'] .timeline__ruler::before { content: 'Track'; }
   cursor: pointer;
 }
 .timeline__track-action {
+  position: relative;
   flex: 0 0 auto;
   width: 22px;
   height: 22px;

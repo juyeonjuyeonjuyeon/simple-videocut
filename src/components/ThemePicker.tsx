@@ -45,7 +45,6 @@ export default function ThemePicker() {
         aria-label={`${t('설정', 'Settings')}: ${current.label}, ${language === 'ko' ? '한국어' : 'English'}`}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={`${t('설정', 'Settings')} · ${current.label} · ${language === 'ko' ? '한국어' : 'English'}`}
         onClick={() => setOpen((visible) => !visible)}
       >
         <Icon name="settings" />

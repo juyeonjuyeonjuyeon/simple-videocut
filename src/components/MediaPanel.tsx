@@ -98,7 +98,7 @@ export default function MediaPanel({ onClose, onImport }: Props) {
           ))}
         </div>
         <button className="iconbtn iconbtn--xs" onClick={() => setView((current) => current === 'grid' ? 'list' : 'grid')}
-          title={view === 'grid' ? t('목록으로 보기', 'List view') : t('격자로 보기', 'Grid view')} aria-label={view === 'grid' ? t('목록으로 보기', 'List view') : t('격자로 보기', 'Grid view')}>
+          aria-label={view === 'grid' ? t('목록으로 보기', 'List view') : t('격자로 보기', 'Grid view')}>
           <Icon name={view === 'grid' ? 'list' : 'grid'} />
         </button>
       </div>

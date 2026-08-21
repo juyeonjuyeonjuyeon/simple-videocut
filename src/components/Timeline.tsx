@@ -715,14 +715,14 @@ export default function Timeline() {
     <div className="timeline__track-header" onPointerDown={(event) => event.stopPropagation()}>
       <button type="button" className="timeline__track-name" title={label} onClick={() => target && select(target)}>{label}</button>
       {target && (target.type === 'overlay' || target.type === 'text' || target.type === 'background') && (
-        <button type="button" className="timeline__track-action" title={state?.hidden ? translate('레이어 표시', 'Show layer') : translate('레이어 숨기기', 'Hide layer')} onClick={() => {
+        <button type="button" className="timeline__track-action" aria-label={state?.hidden ? translate('레이어 표시', 'Show layer') : translate('레이어 숨기기', 'Hide layer')} onClick={() => {
           if (target.type === 'overlay') updateOverlay(target.id, { hidden: !state?.hidden })
           else if (target.type === 'text') updateText(target.id, { hidden: !state?.hidden })
           else updateBackground(target.id, { hidden: !state?.hidden })
         }}><Icon name={state?.hidden ? 'eyeOff' : 'eye'} /></button>
       )}
       {target && target.type !== 'clip' && target.type !== 'audio' && (
-        <button type="button" className="timeline__track-action" title={state?.locked ? translate('잠금 해제', 'Unlock') : translate('레이어 잠금', 'Lock layer')} onClick={() => {
+        <button type="button" className="timeline__track-action" aria-label={state?.locked ? translate('잠금 해제', 'Unlock') : translate('레이어 잠금', 'Lock layer')} onClick={() => {
           if (target.type === 'overlay') updateOverlay(target.id, { locked: !state?.locked })
           else if (target.type === 'text') updateText(target.id, { locked: !state?.locked })
           else updateBackground(target.id, { locked: !state?.locked })
@@ -738,7 +738,7 @@ export default function Timeline() {
   return (
     <div className="timeline">
       <div className="timeline__bar">
-        <button className="iconbtn iconbtn--xs" onClick={() => addMarker(playhead)} title={translate('현재 위치에 마커 추가 (M)', 'Add marker here (M)')} aria-label={translate('마커 추가', 'Add marker')}><Icon name="marker" /></button>
+        <button className="iconbtn iconbtn--xs" onClick={() => addMarker(playhead)} aria-label={translate('현재 위치에 마커 추가 (M)', 'Add marker here (M)')}><Icon name="marker" /></button>
         <button className={`btn btn--sm timeline__multi-select${multiSelectMode ? ' timeline__multi-select--on' : ''}`} aria-pressed={multiSelectMode} onClick={() => setMultiSelectMode((active) => !active)} title={translate('터치에서는 이 버튼을 켠 뒤 항목을 차례로 누르세요', 'On touch screens, turn this on and tap items one by one')}><Icon name="layers" />{multiSelectMode ? translate('선택 종료', 'Done selecting') : translate('여러 항목', 'Multi-select')}</button>
         {selectedItems.length > 1 && !selectedIsActiveGroup && <button className="btn btn--sm" onClick={() => { groupSelected(); setMultiSelectMode(false) }}>{translate('그룹 만들기', 'Group')} ({selectedItems.length})</button>}
         {activeGroup && <span className="timeline__group-summary" title={translate(`${activeGroup.members.length}개 항목이 연결되어 있습니다.`, `${activeGroup.members.length} items are linked.`)}>{activeGroup.name} · {translate(`${activeGroup.members.length}개`, `${activeGroup.members.length}`)}</span>}
@@ -758,10 +758,10 @@ export default function Timeline() {
           <button type="button" onClick={() => stepPlayhead(1 / 30)} disabled={playhead >= total} aria-label={translate('다음 프레임', 'Next frame')} title={translate('다음 프레임', 'Next frame')}>+1f</button>
         </div>
         <div className="timeline__zoom-control" aria-label={translate('타임라인 확대 및 축소', 'Timeline zoom')}>
-          <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1 / 1.35)} disabled={atMin} title={translate('축소', 'Zoom out')}><Icon name="zoomOut" /></button>
+          <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1 / 1.35)} disabled={atMin} aria-label={translate('타임라인 축소', 'Zoom out timeline')}><Icon name="zoomOut" /></button>
           <input type="range" min={0} max={1000} step={1} value={zoomValue} onChange={(event) => setZoomValue(Number(event.target.value))} aria-label={translate('타임라인 확대 비율', 'Timeline zoom level')} />
-          <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1.35)} disabled={atMax} title={translate('확대', 'Zoom in')}><Icon name="zoomIn" /></button>
-          <button className={`iconbtn iconbtn--xs${atFit ? ' iconbtn--on' : ''}`} onClick={fitView} title={translate('전체 타임라인 맞춤', 'Fit entire timeline')} aria-label={translate('전체 타임라인 맞춤', 'Fit entire timeline')}><Icon name="fit" /></button>
+          <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1.35)} disabled={atMax} aria-label={translate('타임라인 확대', 'Zoom in timeline')}><Icon name="zoomIn" /></button>
+          <button className={`iconbtn iconbtn--xs${atFit ? ' iconbtn--on' : ''}`} onClick={fitView} aria-label={translate('전체 타임라인 맞춤', 'Fit entire timeline')}><Icon name="fit" /></button>
         </div>
       </div>
 

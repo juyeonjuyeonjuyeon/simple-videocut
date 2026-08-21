@@ -655,7 +655,7 @@ function TextInspector({ text, tab }: { text: TextOverlay; tab: InspectorTab }) 
         </InspectorBlock>
         <InspectorBlock title={translate('정렬', 'Alignment')}>
           <div className="inspector__group"><div className="chips">{ALIGNS.map((align) => (
-            <button key={align} className={`chip chip--icon${text.align === align ? ' chip--on' : ''}`} aria-label={align} onClick={() => set({ align })}><AlignIcon a={align} /></button>
+            <button key={align} className={`chip chip--icon${text.align === align ? ' chip--on' : ''}`} aria-label={{ left: translate('왼쪽 정렬', 'Align left'), center: translate('가운데 정렬', 'Align center'), right: translate('오른쪽 정렬', 'Align right'), justify: translate('양쪽 정렬', 'Justify') }[align]} onClick={() => set({ align })}><AlignIcon a={align} /></button>
           ))}</div></div>
         </InspectorBlock>
         <button className="btn btn--danger" onClick={() => remove(text.id)}>{translate('텍스트 삭제', 'Delete text')}</button>

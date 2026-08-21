@@ -143,7 +143,7 @@ export default function ProjectHome({
                       {project.name === lastProjectName && <em>{t('마지막으로 연 프로젝트', 'Last opened')}</em>}
                     </span>
                   </button>
-                  <button className="iconbtn iconbtn--sm project-card__delete" onClick={() => void remove(project.name)} disabled={!!busy} aria-label={t(`${project.name} 삭제`, `Delete ${project.name}`)} title={t('프로젝트 삭제', 'Delete project')}><Icon name="trash" /></button>
+                  <button className="iconbtn iconbtn--sm project-card__delete" onClick={() => void remove(project.name)} disabled={!!busy} aria-label={t(`${project.name} 삭제`, `Delete ${project.name}`)}><Icon name="trash" /></button>
                 </article>
               ))}
             </div>

@@ -420,11 +420,11 @@ export default function App() {
           <span className={`save-status save-status--${saveStatus}`} role="status">
             {manualSaveStatus === 'saving' ? t('프로젝트 저장 중…', 'Saving project…') : manualSaveStatus === 'saved' ? t('프로젝트 저장됨', 'Project saved') : manualSaveStatus === 'error' ? t('저장 실패', 'Save failed') : saveStatus === 'saving' ? t('자동 저장 중…', 'Autosaving…') : saveStatus === 'saved' && lastSavedAt ? `${t('자동 저장됨', 'Autosaved')} · ${new Date(lastSavedAt).toLocaleTimeString(language === 'ko' ? 'ko-KR' : 'en-US', { hour: '2-digit', minute: '2-digit' })}` : saveStatus === 'error' ? t('자동 저장 실패', 'Autosave failed') : ''}
           </span>
-          <button className={`iconbtn iconbtn--sm${mediaPanelOpen ? ' iconbtn--on' : ''}`} onClick={toggleMediaPanel} title={t('왼쪽 미디어 패널 열기·닫기', 'Toggle left media panel')} aria-label={t('왼쪽 미디어 패널 열기·닫기', 'Toggle left media panel')}><Icon name="library" /></button>
+          <button className={`iconbtn iconbtn--sm${mediaPanelOpen ? ' iconbtn--on' : ''}`} onClick={toggleMediaPanel} aria-label={t('왼쪽 미디어 패널 열기·닫기', 'Toggle left media panel')}><Icon name="library" /></button>
           <button className="btn btn--sm topbar__project-menu" onClick={() => setShowProjectHome(true)} title={t('프로젝트 홈·저장·열기', 'Project home, save, and open')} aria-label={t('프로젝트 홈 열기', 'Open project home')}><Icon name="project" /><span>{t('프로젝트', 'Project')}</span></button>
-          <button className={`iconbtn iconbtn--sm${inspectorOpen ? ' iconbtn--on' : ''}`} onClick={toggleInspector} title={t('오른쪽 편집 패널 열기·닫기', 'Toggle right inspector')} aria-label={t('오른쪽 편집 패널 열기·닫기', 'Toggle right inspector')}><Icon name="panel" /></button>
+          <button className={`iconbtn iconbtn--sm${inspectorOpen ? ' iconbtn--on' : ''}`} onClick={toggleInspector} aria-label={t('오른쪽 편집 패널 열기·닫기', 'Toggle right inspector')}><Icon name="panel" /></button>
           <ThemePicker />
-          <button className="iconbtn iconbtn--sm topbar__help" onClick={() => setShowHelp(true)} title={t('도움말과 단축키 (?)', 'Help and shortcuts (?)')} aria-label={t('도움말 열기', 'Open help')}><Icon name="help" /></button>
+          <button className="iconbtn iconbtn--sm topbar__help" onClick={() => setShowHelp(true)} aria-label={t('도움말 열기', 'Open help')}><Icon name="help" /></button>
           <button className="btn btn--primary" onClick={() => setShowExport(true)} disabled={!hasClips}>
             {t('내보내기', 'Export')}
           </button>
@@ -458,7 +458,6 @@ export default function App() {
             <button
               className={`iconbtn${loop ? ' iconbtn--on' : ''}`}
               onClick={() => setLoop(!loop)}
-              title={t('반복 재생', 'Loop playback')}
               aria-label={t('반복 재생', 'Loop playback')}
             >
               <Icon name="repeat" />
@@ -471,8 +470,8 @@ export default function App() {
             <button className="btn btn--sm" onClick={addBackground}><Icon name="palette" />{t('배경', 'Background')}</button>
             <button className="btn btn--sm" onClick={addText}><Icon name="text" />{t('텍스트', 'Text')}</button>
             <button className="btn btn--sm" onClick={() => setShowShapes(true)}><Icon name="shape" />{t('도형', 'Shape')}</button>
-            <button className="iconbtn" onClick={undo} disabled={!canUndo} title={t('실행 취소', 'Undo')} aria-label={t('실행 취소', 'Undo')}><Icon name="undo" /></button>
-            <button className="iconbtn" onClick={redo} disabled={!canRedo} title={t('다시 실행', 'Redo')} aria-label={t('다시 실행', 'Redo')}><Icon name="redo" /></button>
+            <button className="iconbtn" onClick={undo} disabled={!canUndo} aria-label={t('실행 취소', 'Undo')}><Icon name="undo" /></button>
+            <button className="iconbtn" onClick={redo} disabled={!canRedo} aria-label={t('다시 실행', 'Redo')}><Icon name="redo" /></button>
             <button className="btn btn--sm" onClick={duplicateSelected} disabled={!selection} title={t('단축키: ⌘D', 'Shortcut: ⌘D')}><Icon name="copy" />{t('복제', 'Duplicate')}</button>
             <button className="btn btn--sm btn--danger" onClick={deleteSelected} disabled={!selection} title={t('단축키: Delete', 'Shortcut: Delete')}><Icon name="trash" />{t('삭제', 'Delete')}</button>
           </div>
