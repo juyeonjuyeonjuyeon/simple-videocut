@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { FONT_OPTIONS } from '../types'
 import { canListLocalFonts, cssFontFamily, firstFontFamily, listLocalFontFamilies } from '../utils/fonts'
 import Icon from './Icon'
+import { useLanguage } from '../i18n'
 
 interface Props {
   value: string
@@ -13,6 +14,7 @@ type LocalStatus = 'idle' | 'loading' | 'loaded' | 'unsupported' | 'error'
 const matches = (query: string, ...values: string[]) => values.some((value) => value.toLocaleLowerCase().includes(query))
 
 export default function FontPicker({ value, onChange }: Props) {
+  const { language, t } = useLanguage()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [localFonts, setLocalFonts] = useState<string[]>([])
@@ -22,9 +24,9 @@ export default function FontPicker({ value, onChange }: Props) {
 
   const selected = FONT_OPTIONS.find((font) => font.value === value)
   const selectedFamily = selected?.family ?? firstFontFamily(value)
-  const selectedLabel = selected?.label ?? selectedFamily
+  const selectedLabel = selected ? (language === 'ko' ? selected.label : selected.labelEn) : selectedFamily
   const normalizedQuery = query.trim().toLocaleLowerCase()
-  const freeFonts = useMemo(() => FONT_OPTIONS.filter((font) => !normalizedQuery || matches(normalizedQuery, font.label, font.family, font.note)), [normalizedQuery])
+  const freeFonts = useMemo(() => FONT_OPTIONS.filter((font) => !normalizedQuery || matches(normalizedQuery, font.label, font.labelEn, font.family, font.note, font.noteEn)), [normalizedQuery])
   const freeFamilies = useMemo(() => new Set(FONT_OPTIONS.map((font) => font.family.toLocaleLowerCase())), [])
   const visibleLocal = useMemo(() => localFonts.filter((family) =>
     !freeFamilies.has(family.toLocaleLowerCase()) && (!normalizedQuery || matches(normalizedQuery, family))), [freeFamilies, localFonts, normalizedQuery])
@@ -76,7 +78,7 @@ export default function FontPicker({ value, onChange }: Props) {
 
   return (
     <div className="font-picker" ref={rootRef}>
-      <button type="button" className="font-picker__toggle" onClick={toggle} aria-label={`글꼴 선택: ${selectedLabel}`} aria-expanded={open} aria-haspopup="listbox">
+      <button type="button" className="font-picker__toggle" onClick={toggle} aria-label={t(`글꼴 선택: ${selectedLabel}`, `Choose font: ${selectedLabel}`)} aria-expanded={open} aria-haspopup="listbox">
         <span className="font-picker__sample" style={{ fontFamily: value }}>가나다 ABC</span>
         <span className="font-picker__current"><b>{selectedLabel}</b><small>{selectedFamily}</small></span>
         <Icon name={open ? 'close' : 'search'} />
@@ -86,35 +88,35 @@ export default function FontPicker({ value, onChange }: Props) {
         <div className="font-picker__catalog">
           <label className="font-picker__search">
             <Icon name="search" />
-            <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="글꼴 이름 검색" aria-label="글꼴 이름 검색" />
+            <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('글꼴 이름 검색', 'Search fonts')} aria-label={t('글꼴 이름 검색', 'Search fonts')} />
           </label>
-          <div className="font-picker__list" role="listbox" aria-label="사용 가능한 글꼴">
-            <div className="font-picker__section-title"><b>무료 한글 글꼴</b><span>{freeFonts.length}개</span></div>
+          <div className="font-picker__list" role="listbox" aria-label={t('사용 가능한 글꼴', 'Available fonts')}>
+            <div className="font-picker__section-title"><b>{t('무료 한글 글꼴', 'Free Korean fonts')}</b><span>{t(`${freeFonts.length}개`, `${freeFonts.length}`)}</span></div>
             {freeFonts.map((font) => (
               <button type="button" role="option" aria-selected={value === font.value} key={font.family}
                 className={`font-option${value === font.value ? ' font-option--selected' : ''}`} onClick={() => choose(font.value)}>
                 <span className="font-option__preview" style={{ fontFamily: font.value }}>가나다 ABC 123</span>
-                <span><b>{font.label}</b><small>{font.note} · {font.family}</small></span>
+                <span><b>{language === 'ko' ? font.label : font.labelEn}</b><small>{language === 'ko' ? font.note : font.noteEn} · {font.family}</small></span>
               </button>
             ))}
 
-            <div className="font-picker__section-title font-picker__section-title--local"><b>내 컴퓨터</b><span>{localStatus === 'loaded' ? `${visibleLocal.length}개` : ''}</span></div>
-            {localStatus === 'loading' && <div className="font-picker__message"><span className="spinner spinner--sm" />설치된 글꼴을 불러오는 중…</div>}
-            {localStatus === 'unsupported' && <div className="font-picker__message">이 브라우저에서는 로컬 글꼴 목록을 열 수 없습니다. 위 무료 글꼴은 그대로 사용할 수 있습니다.</div>}
-            {localStatus === 'error' && <div className="font-picker__message">로컬 글꼴 권한이 허용되지 않았습니다.</div>}
+            <div className="font-picker__section-title font-picker__section-title--local"><b>{t('내 컴퓨터', 'My computer')}</b><span>{localStatus === 'loaded' ? t(`${visibleLocal.length}개`, `${visibleLocal.length}`) : ''}</span></div>
+            {localStatus === 'loading' && <div className="font-picker__message"><span className="spinner spinner--sm" />{t('설치된 글꼴을 불러오는 중…', 'Loading installed fonts…')}</div>}
+            {localStatus === 'unsupported' && <div className="font-picker__message">{t('이 브라우저에서는 로컬 글꼴 목록을 열 수 없습니다. 위 무료 글꼴은 그대로 사용할 수 있습니다.', 'This browser cannot list local fonts. You can still use the free fonts above.')}</div>}
+            {localStatus === 'error' && <div className="font-picker__message">{t('로컬 글꼴 권한이 허용되지 않았습니다.', 'Permission to access local fonts was not granted.')}</div>}
             {localStatus === 'loaded' && visibleLocal.map((family) => {
               const fontValue = cssFontFamily(family)
               return (
                 <button type="button" role="option" aria-selected={firstFontFamily(value) === family} key={family}
                   className={`font-option${firstFontFamily(value) === family ? ' font-option--selected' : ''}`} onClick={() => choose(fontValue)}>
                   <span className="font-option__preview" style={{ fontFamily: fontValue }}>가나다 ABC 123</span>
-                  <span><b>{family}</b><small>이 컴퓨터에 설치됨</small></span>
+                  <span><b>{family}</b><small>{t('이 컴퓨터에 설치됨', 'Installed on this computer')}</small></span>
                 </button>
               )
             })}
-            {!freeFonts.length && !visibleLocal.length && localStatus !== 'loading' && <div className="font-picker__message">검색 결과가 없습니다.</div>}
+            {!freeFonts.length && !visibleLocal.length && localStatus !== 'loading' && <div className="font-picker__message">{t('검색 결과가 없습니다.', 'No search results.')}</div>}
           </div>
-          <div className="font-picker__foot">무료 글꼴은 인터넷 연결 시 불러오며, 로컬 글꼴은 설치된 컴퓨터에서 사용됩니다.</div>
+          <div className="font-picker__foot">{t('무료 글꼴은 인터넷 연결 시 불러오며, 로컬 글꼴은 설치된 컴퓨터에서 사용됩니다.', 'Free fonts load when online; local fonts are available on the computer where they are installed.')}</div>
         </div>
       )}
     </div>

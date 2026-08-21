@@ -21,6 +21,7 @@ import { timelineWheelZoomFactor } from '../utils/timeline-zoom'
 import type { Clip, Selection, PositionKeyframe, TimelineItemRef } from '../types'
 import { AudioWaveform, ClipThumbnailStrip } from './TimelineMedia'
 import Icon from './Icon'
+import { translate, useLanguage } from '../i18n'
 
 const clipBg = (c: Clip) => (c.kind === 'color' ? c.bgColor ?? '#000000' : c.color)
 
@@ -41,6 +42,7 @@ type FreeKind = 'overlay' | 'audio' | 'text' | 'background'
 const clampPps = (p: number) => Math.max(MIN_PX_PER_SEC, Math.min(p, MAX_PX_PER_SEC))
 
 export default function Timeline() {
+  useLanguage()
   const clips = useEditor((s) => s.clips)
   const overlays = useEditor((s) => s.overlays)
   const audios = useEditor((s) => s.audios)
@@ -174,7 +176,7 @@ export default function Timeline() {
   }
   const commitEdit = () => {
     if (!editing) return
-    const v = editVal.trim() || (editing.type === 'text' ? '텍스트' : '이름 없음')
+    const v = editVal.trim() || (editing.type === 'text' ? translate('텍스트', 'Text') : translate('이름 없음', 'Untitled'))
     if (editing.type === 'clip') updateClip(editing.id, { name: v })
     else if (editing.type === 'overlay') updateOverlay(editing.id, { name: v })
     else if (editing.type === 'audio') updateAudio(editing.id, { name: v })
@@ -689,12 +691,12 @@ export default function Timeline() {
       onPointerDown={(e) => onFreeDown(e, kind, id)}
       onContextMenu={(e) => onItemContextMenu(e, { type: kind, id })}
       onDoubleClick={() => startEdit(kind, id)}
-      title={`${label} · 끌어서 이동${selected ? ', 끝을 끌어서 길이 조절' : ''} · 선택 후 이름 클릭으로 이름변경`}
+      title={translate(`${label} · 끌어서 이동${selected ? ', 끝을 끌어서 길이 조절' : ''} · 선택 후 이름 클릭으로 이름변경`, `${label} · Drag to move${selected ? ', drag an edge to resize' : ''} · Select, then click the name to rename`)}
     >
       {selected && !flags?.locked && <span className="tlclip__handle tlclip__handle--l" onPointerDown={(e) => onFreeTrim(e, kind, id, 'start')} />}
       {visual}
       {editing?.id === id ? renameInput : <span className="tlclip__body">{label}</span>}
-      {linkedGroup && <span className="timeline-group-badge" title={`${linkedGroup.name} · ${linkedGroup.members.length}개 연결`}>{linkedGroup.members.length}</span>}
+      {linkedGroup && <span className="timeline-group-badge" title={translate(`${linkedGroup.name} · ${linkedGroup.members.length}개 연결`, `${linkedGroup.name} · ${linkedGroup.members.length} linked`)}>{linkedGroup.members.length}</span>}
       {selected && !flags?.locked && <span className="tlclip__handle tlclip__handle--r" onPointerDown={(e) => onFreeTrim(e, kind, id, 'end')} />}
     </div>
   }
@@ -713,14 +715,14 @@ export default function Timeline() {
     <div className="timeline__track-header" onPointerDown={(event) => event.stopPropagation()}>
       <button type="button" className="timeline__track-name" title={label} onClick={() => target && select(target)}>{label}</button>
       {target && (target.type === 'overlay' || target.type === 'text' || target.type === 'background') && (
-        <button type="button" className="timeline__track-action" title={state?.hidden ? '레이어 표시' : '레이어 숨기기'} onClick={() => {
+        <button type="button" className="timeline__track-action" title={state?.hidden ? translate('레이어 표시', 'Show layer') : translate('레이어 숨기기', 'Hide layer')} onClick={() => {
           if (target.type === 'overlay') updateOverlay(target.id, { hidden: !state?.hidden })
           else if (target.type === 'text') updateText(target.id, { hidden: !state?.hidden })
           else updateBackground(target.id, { hidden: !state?.hidden })
         }}><Icon name={state?.hidden ? 'eyeOff' : 'eye'} /></button>
       )}
       {target && target.type !== 'clip' && target.type !== 'audio' && (
-        <button type="button" className="timeline__track-action" title={state?.locked ? '잠금 해제' : '레이어 잠금'} onClick={() => {
+        <button type="button" className="timeline__track-action" title={state?.locked ? translate('잠금 해제', 'Unlock') : translate('레이어 잠금', 'Lock layer')} onClick={() => {
           if (target.type === 'overlay') updateOverlay(target.id, { locked: !state?.locked })
           else if (target.type === 'text') updateText(target.id, { locked: !state?.locked })
           else updateBackground(target.id, { locked: !state?.locked })
@@ -736,30 +738,30 @@ export default function Timeline() {
   return (
     <div className="timeline">
       <div className="timeline__bar">
-        <button className="iconbtn iconbtn--xs" onClick={() => addMarker(playhead)} title="현재 위치에 마커 추가 (M)" aria-label="마커 추가"><Icon name="marker" /></button>
-        <button className={`btn btn--sm timeline__multi-select${multiSelectMode ? ' timeline__multi-select--on' : ''}`} aria-pressed={multiSelectMode} onClick={() => setMultiSelectMode((active) => !active)} title="터치에서는 이 버튼을 켠 뒤 항목을 차례로 누르세요"><Icon name="layers" />{multiSelectMode ? '선택 종료' : '여러 항목'}</button>
-        {selectedItems.length > 1 && !selectedIsActiveGroup && <button className="btn btn--sm" onClick={() => { groupSelected(); setMultiSelectMode(false) }}>그룹 만들기 ({selectedItems.length})</button>}
-        {activeGroup && <span className="timeline__group-summary" title={`${activeGroup.members.length}개 항목이 연결되어 있습니다.`}>{activeGroup.name} · {activeGroup.members.length}개</span>}
-        {activeGroup && selectedItems.length < activeGroup.members.length && <button className="btn btn--sm" onClick={() => selectGroup(activeGroup.id)}>그룹 전체 선택</button>}
-        {selectedItems.some((item) => Boolean(groupFor(item))) && <button className="btn btn--sm" onClick={ungroupSelected}>그룹 해제</button>}
-        <span className="timeline__hint">스크롤=확대 · Shift+스크롤=이동</span>
+        <button className="iconbtn iconbtn--xs" onClick={() => addMarker(playhead)} title={translate('현재 위치에 마커 추가 (M)', 'Add marker here (M)')} aria-label={translate('마커 추가', 'Add marker')}><Icon name="marker" /></button>
+        <button className={`btn btn--sm timeline__multi-select${multiSelectMode ? ' timeline__multi-select--on' : ''}`} aria-pressed={multiSelectMode} onClick={() => setMultiSelectMode((active) => !active)} title={translate('터치에서는 이 버튼을 켠 뒤 항목을 차례로 누르세요', 'On touch screens, turn this on and tap items one by one')}><Icon name="layers" />{multiSelectMode ? translate('선택 종료', 'Done selecting') : translate('여러 항목', 'Multi-select')}</button>
+        {selectedItems.length > 1 && !selectedIsActiveGroup && <button className="btn btn--sm" onClick={() => { groupSelected(); setMultiSelectMode(false) }}>{translate('그룹 만들기', 'Group')} ({selectedItems.length})</button>}
+        {activeGroup && <span className="timeline__group-summary" title={translate(`${activeGroup.members.length}개 항목이 연결되어 있습니다.`, `${activeGroup.members.length} items are linked.`)}>{activeGroup.name} · {translate(`${activeGroup.members.length}개`, `${activeGroup.members.length}`)}</span>}
+        {activeGroup && selectedItems.length < activeGroup.members.length && <button className="btn btn--sm" onClick={() => selectGroup(activeGroup.id)}>{translate('그룹 전체 선택', 'Select full group')}</button>}
+        {selectedItems.some((item) => Boolean(groupFor(item))) && <button className="btn btn--sm" onClick={ungroupSelected}>{translate('그룹 해제', 'Ungroup')}</button>}
+        <span className="timeline__hint">{translate('스크롤=확대 · Shift+스크롤=이동', 'Scroll=zoom · Shift+scroll=pan')}</span>
         <div className="timeline__bar-spacer" />
-        <div className="timeline__seek-control" aria-label="재생 헤드 위치">
-          <button type="button" onClick={() => stepPlayhead(-1 / 30)} disabled={playhead <= 0} aria-label="이전 프레임" title="이전 프레임">−1f</button>
-          <input value={timeDraft ?? formatClock(playhead)} aria-label="재생 헤드 시간" spellCheck={false}
+        <div className="timeline__seek-control" aria-label={translate('재생 헤드 위치', 'Playhead position')}>
+          <button type="button" onClick={() => stepPlayhead(-1 / 30)} disabled={playhead <= 0} aria-label={translate('이전 프레임', 'Previous frame')} title={translate('이전 프레임', 'Previous frame')}>−1f</button>
+          <input value={timeDraft ?? formatClock(playhead)} aria-label={translate('재생 헤드 시간', 'Playhead time')} spellCheck={false}
             onChange={(event) => setTimeDraft(event.target.value)} onFocus={(event) => event.currentTarget.select()}
             onBlur={commitTimeDraft} onKeyDown={(event) => {
               if (event.key === 'Enter') event.currentTarget.blur()
               else if (event.key === 'Escape') setTimeDraft(null)
             }} />
           <span>/ {formatTime(total)}</span>
-          <button type="button" onClick={() => stepPlayhead(1 / 30)} disabled={playhead >= total} aria-label="다음 프레임" title="다음 프레임">+1f</button>
+          <button type="button" onClick={() => stepPlayhead(1 / 30)} disabled={playhead >= total} aria-label={translate('다음 프레임', 'Next frame')} title={translate('다음 프레임', 'Next frame')}>+1f</button>
         </div>
-        <div className="timeline__zoom-control" aria-label="타임라인 확대 및 축소">
-          <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1 / 1.35)} disabled={atMin} title="축소"><Icon name="zoomOut" /></button>
-          <input type="range" min={0} max={1000} step={1} value={zoomValue} onChange={(event) => setZoomValue(Number(event.target.value))} aria-label="타임라인 확대 비율" />
-          <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1.35)} disabled={atMax} title="확대"><Icon name="zoomIn" /></button>
-          <button className={`iconbtn iconbtn--xs${atFit ? ' iconbtn--on' : ''}`} onClick={fitView} title="전체 타임라인 맞춤" aria-label="전체 타임라인 맞춤"><Icon name="fit" /></button>
+        <div className="timeline__zoom-control" aria-label={translate('타임라인 확대 및 축소', 'Timeline zoom')}>
+          <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1 / 1.35)} disabled={atMin} title={translate('축소', 'Zoom out')}><Icon name="zoomOut" /></button>
+          <input type="range" min={0} max={1000} step={1} value={zoomValue} onChange={(event) => setZoomValue(Number(event.target.value))} aria-label={translate('타임라인 확대 비율', 'Timeline zoom level')} />
+          <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1.35)} disabled={atMax} title={translate('확대', 'Zoom in')}><Icon name="zoomIn" /></button>
+          <button className={`iconbtn iconbtn--xs${atFit ? ' iconbtn--on' : ''}`} onClick={fitView} title={translate('전체 타임라인 맞춤', 'Fit entire timeline')} aria-label={translate('전체 타임라인 맞춤', 'Fit entire timeline')}><Icon name="fit" /></button>
         </div>
       </div>
 
@@ -784,7 +786,7 @@ export default function Timeline() {
               onDoubleClick={(event) => { event.stopPropagation(); openMarkerMenu(marker.id, event.clientX, event.clientY) }}
               onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openMarkerMenu(marker.id, 24, 80) }}
               aria-label={`${marker.label}, ${formatTimeFine(marker.time)}`}
-              title={`${marker.label} · ${formatTimeFine(marker.time)} · 끌어서 이동`}
+              title={translate(`${marker.label} · ${formatTimeFine(marker.time)} · 끌어서 이동`, `${marker.label} · ${formatTimeFine(marker.time)} · Drag to move`)}
             >
               <span>{marker.label}</span>
             </button>
@@ -800,7 +802,7 @@ export default function Timeline() {
                   onPointerDown={onTimelineBackgroundDown}>
                   {trackHeader(o.name, ref, { hidden: o.hidden, locked: o.locked })}
                   {freeChip('overlay', o.id, o.start, overlayLength(o), 0, OV_LANE_H, o.shape?.fillColor ?? o.color,
-                    `${o.shape ? '도형' : o.kind === 'image' ? '이미지' : '영상'} · ${o.name}${!o.shape && o.repeat > 1 ? ` · 반복 ${o.repeat}회` : ''}${o.kind === 'video' && o.muted ? ' · 음소거' : ''}`,
+                    `${o.shape ? translate('도형', 'Shape') : o.kind === 'image' ? translate('이미지', 'Image') : translate('영상', 'Video')} · ${o.name}${!o.shape && o.repeat > 1 ? translate(` · 반복 ${o.repeat}회`, ` · Repeated ${o.repeat}×`) : ''}${o.kind === 'video' && o.muted ? translate(' · 음소거', ' · Muted') : ''}`,
                     isSelected(ref),
                     <>{fadeVisual(o.fadeIn, o.fadeOut, overlayLength(o))}{keyframeVisual(o.positionKeyframes, overlayLength(o))}</>,
                     { hidden: o.hidden, locked: o.locked })}
@@ -812,9 +814,9 @@ export default function Timeline() {
             return (
               <div key={`visual:${ref.type}:${ref.id}`} className="timeline__lane timeline__lane--visual timeline__lane--text" style={{ height: OV_LANE_H }}
                 onPointerDown={onTimelineBackgroundDown}>
-                {trackHeader(t.text || '텍스트', ref, { hidden: t.hidden, locked: t.locked })}
+                {trackHeader(t.text || translate('텍스트', 'Text'), ref, { hidden: t.hidden, locked: t.locked })}
                 {freeChip('text', t.id, t.start, t.end - t.start, 0, OV_LANE_H, '#3a4250',
-                  `텍스트 · ${t.text}`,
+                  `${translate('텍스트', 'Text')} · ${t.text}`,
                   isSelected(ref),
                   <>{fadeVisual(t.fadeIn, t.fadeOut, t.end - t.start)}{keyframeVisual(t.positionKeyframes, t.end - t.start)}</>,
                   { hidden: t.hidden, locked: t.locked })}
@@ -827,8 +829,8 @@ export default function Timeline() {
             className={`timeline__track${dragId ? ' timeline__track--reordering' : ''}`}
             onPointerDown={onTimelineBackgroundDown}
           >
-            {trackHeader('메인 트랙')}
-            {clips.length === 0 && <div className="timeline__placeholder">＋ 동영상·사진을 추가하세요</div>}
+            {trackHeader(translate('메인 트랙', 'Main track'))}
+            {clips.length === 0 && <div className="timeline__placeholder">＋ {translate('동영상·사진을 추가하세요', 'Add videos or photos')}</div>}
             {clips.map((c, i) => {
               const isSel = isSelected({ type: 'clip', id: c.id })
               const linkedGroup = groupFor({ type: 'clip', id: c.id })
@@ -847,19 +849,19 @@ export default function Timeline() {
                   onPointerDown={(e) => onClipDown(e, c.id)}
                   onContextMenu={(e) => onItemContextMenu(e, { type: 'clip', id: c.id })}
                   onDoubleClick={() => startEdit('clip', c.id)}
-                  title={`${c.name} · 끌어서 순서 변경, 오른쪽 끝을 끌어서 트림 · 선택 후 이름 클릭으로 이름변경`}
+                  title={translate(`${c.name} · 끌어서 순서 변경, 오른쪽 끝을 끌어서 트림 · 선택 후 이름 클릭으로 이름변경`, `${c.name} · Drag to reorder, drag the right edge to trim · Select, then click the name to rename`)}
                 >
                   <ClipThumbnailStrip clip={c} width={clipWidth} />
                   {c.kind === 'video' && c.hasAudio && <AudioWaveform media={c} className="timeline-waveform--clip" />}
                   {fadeVisual(c.fadeIn, c.fadeOut, clipTimelineDuration(c))}
                   {editing?.id === c.id
                     ? renameInput
-                    : <span className="clip__label">{c.kind === 'image' ? '이미지 · ' : c.kind === 'color' ? '색상 · ' : '영상 · '}{c.name}</span>}
-                  {linkedGroup && <span className="timeline-group-badge" title={`${linkedGroup.name} · ${linkedGroup.members.length}개 연결`}>{linkedGroup.members.length}</span>}
+                    : <span className="clip__label">{c.kind === 'image' ? translate('이미지 · ', 'Image · ') : c.kind === 'color' ? translate('색상 · ', 'Color · ') : translate('영상 · ', 'Video · ')}{c.name}</span>}
+                  {linkedGroup && <span className="timeline-group-badge" title={translate(`${linkedGroup.name} · ${linkedGroup.members.length}개 연결`, `${linkedGroup.name} · ${linkedGroup.members.length} linked`)}>{linkedGroup.members.length}</span>}
                   <span className="clip__meta">
                     {c.speed !== 1 && `${c.speed}× `}
                     {c.repeat > 1 && `⟳${c.repeat} `}
-                    {c.muted && <span className="clip__muted">음소거</span>}
+                    {c.muted && <span className="clip__muted">{translate('음소거', 'Muted')}</span>}
                   </span>
                   {isSel && c.kind !== 'color' && <span className="clip__handle clip__handle--l" onPointerDown={(e) => onClipTrimStart(e, c.id)} />}
                   {isSel && <span className="clip__handle clip__handle--r" onPointerDown={(e) => onClipTrim(e, c.id)} />}
@@ -876,8 +878,8 @@ export default function Timeline() {
                   type="button"
                   className={`timeline-transition${active ? ' timeline-transition--active' : ''}`}
                   style={{ left: timelineX(boundary) }}
-                  aria-label={`${clip.name}과 ${next.name} 사이 전환`}
-                  title={active ? '검정 페이드 전환 편집' : '클립 사이 전환 추가'}
+                  aria-label={translate(`${clip.name}과 ${next.name} 사이 전환`, `Transition between ${clip.name} and ${next.name}`)}
+                  title={active ? translate('검정 페이드 전환 편집', 'Edit fade-to-black transition') : translate('클립 사이 전환 추가', 'Add transition between clips')}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.stopPropagation()
@@ -896,10 +898,10 @@ export default function Timeline() {
               style={{ height: nAudioLanes * AUD_LANE_H }}
               onPointerDown={onTimelineBackgroundDown}
             >
-              {trackHeader('오디오')}
+              {trackHeader(translate('오디오', 'Audio'))}
               {audios.map((a, i) =>
                 freeChip('audio', a.id, a.start, audioLength(a), audioLanes[i], AUD_LANE_H, a.color,
-                  `음악 · ${a.name}${a.repeat > 1 ? ` · 반복 ${a.repeat}회` : ''}${a.muted ? ' · 음소거' : ''}`,
+                  `${translate('음악', 'Music')} · ${a.name}${a.repeat > 1 ? translate(` · 반복 ${a.repeat}회`, ` · Repeated ${a.repeat}×`) : ''}${a.muted ? translate(' · 음소거', ' · Muted') : ''}`,
                   isSelected({ type: 'audio', id: a.id }),
                   <><AudioWaveform media={a} />{fadeVisual(a.fadeIn, a.fadeOut, audioLength(a))}</>),
               )}
@@ -913,10 +915,10 @@ export default function Timeline() {
               style={{ height: nBgLanes * AUD_LANE_H }}
               onPointerDown={onTimelineBackgroundDown}
             >
-              {trackHeader('배경')}
+              {trackHeader(translate('배경', 'Background'))}
               {backgrounds.map((b, i) =>
                 freeChip('background', b.id, b.start, clipTimelineDuration(b), bgLanes[i], AUD_LANE_H, clipBg(b),
-                  `배경 · ${b.name}${b.kind === 'video' && b.muted ? ' · 음소거' : ''}`,
+                  `${translate('배경', 'Background')} · ${b.name}${b.kind === 'video' && b.muted ? translate(' · 음소거', ' · Muted') : ''}`,
                   isSelected({ type: 'background', id: b.id }),
                   fadeVisual(b.fadeIn, b.fadeOut, clipTimelineDuration(b)),
                   { hidden: b.hidden, locked: b.locked }),
@@ -931,8 +933,8 @@ export default function Timeline() {
               else if (event.key === 'Home') { event.preventDefault(); setPlayhead(0) }
               else if (event.key === 'End') { event.preventDefault(); setPlayhead(total) }
             }}
-            role="slider" tabIndex={0} aria-label="타임라인 재생 헤드" aria-valuemin={0} aria-valuemax={total} aria-valuenow={playhead} aria-valuetext={formatClock(playhead)}
-            title={`${formatTimeFine(playhead)} · 넓은 영역을 끌어서 이동`}>
+            role="slider" tabIndex={0} aria-label={translate('타임라인 재생 헤드', 'Timeline playhead')} aria-valuemin={0} aria-valuemax={total} aria-valuenow={playhead} aria-valuetext={formatClock(playhead)}
+            title={translate(`${formatTimeFine(playhead)} · 넓은 영역을 끌어서 이동`, `${formatTimeFine(playhead)} · Drag the wide handle to move`)}>
             <span className="timeline__playhead-time">{formatTimeFine(playhead)}</span>
             <span className="timeline__playhead-grab" />
           </div>
@@ -1029,81 +1031,81 @@ export default function Timeline() {
         return (
           <div className="timeline-menu" role="menu" style={{ left: menu.x, top: menu.y }}
             onPointerDown={(e) => e.stopPropagation()}>
-            {(selectedItems.length > 1 || targetGroup) && <div className="timeline-menu__label">그룹</div>}
-            {selectedItems.length > 1 && !selectedIsActiveGroup && <button role="menuitem" onClick={() => { groupSelected(); setMenu(null) }}>선택 항목 그룹 만들기 ({selectedItems.length})</button>}
+            {(selectedItems.length > 1 || targetGroup) && <div className="timeline-menu__label">{translate('그룹', 'Group')}</div>}
+            {selectedItems.length > 1 && !selectedIsActiveGroup && <button role="menuitem" onClick={() => { groupSelected(); setMenu(null) }}>{translate('선택 항목 그룹 만들기', 'Group selected items')} ({selectedItems.length})</button>}
             {targetGroup && <>
-              <button role="menuitem" onClick={() => { selectGroup(targetGroup.id); setMenu(null) }}>그룹 전체 선택 ({targetGroup.members.length})</button>
+              <button role="menuitem" onClick={() => { selectGroup(targetGroup.id); setMenu(null) }}>{translate('그룹 전체 선택', 'Select full group')} ({targetGroup.members.length})</button>
               {groupFreeSpans.length > 0 && <button role="menuitem" onClick={() => {
                 const start = Math.min(...groupFreeSpans.map((span) => span.start))
                 moveTimelineItems(targetGroup.members, useEditor.getState().playhead - start)
                 selectGroup(targetGroup.id)
                 setMenu(null)
-              }}>그룹 시작을 재생 헤드로 이동</button>}
+              }}>{translate('그룹 시작을 재생 헤드로 이동', 'Move group start to playhead')}</button>}
               <button role="menuitem" onClick={() => {
-                const name = window.prompt('그룹 이름', targetGroup.name)
+                const name = window.prompt(translate('그룹 이름', 'Group name'), targetGroup.name)
                 if (name != null) renameGroup(targetGroup.id, name)
                 setMenu(null)
-              }}>그룹 이름 바꾸기…</button>
-              <button role="menuitem" onClick={() => withTarget(target, ungroupSelected)}>그룹 해제</button>
+              }}>{translate('그룹 이름 바꾸기…', 'Rename group…')}</button>
+              <button role="menuitem" onClick={() => withTarget(target, ungroupSelected)}>{translate('그룹 해제', 'Ungroup')}</button>
             </>}
 
-            <div className="timeline-menu__label">위치</div>
+            <div className="timeline-menu__label">{translate('위치', 'Position')}</div>
             {target.type === 'clip' ? <>
-              <button role="menuitem" disabled={st.clips[0]?.id === target.id} onClick={() => withTarget(target, () => reorderClip(target.id, 0))}>맨 앞으로 이동</button>
-              <button role="menuitem" onClick={() => withTarget(target, () => moveClip(target.id, -1))}>한 칸 앞으로 이동</button>
-              <button role="menuitem" onClick={() => withTarget(target, () => moveClip(target.id, 1))}>한 칸 뒤로 이동</button>
-              <button role="menuitem" disabled={st.clips[st.clips.length - 1]?.id === target.id} onClick={() => withTarget(target, () => reorderClip(target.id, st.clips.length - 1))}>맨 뒤로 이동</button>
-            </> : <button role="menuitem" onClick={() => withTarget(target, moveToPlayhead)}>재생 헤드 위치로 이동</button>}
+              <button role="menuitem" disabled={st.clips[0]?.id === target.id} onClick={() => withTarget(target, () => reorderClip(target.id, 0))}>{translate('맨 앞으로 이동', 'Move to start')}</button>
+              <button role="menuitem" onClick={() => withTarget(target, () => moveClip(target.id, -1))}>{translate('한 칸 앞으로 이동', 'Move one earlier')}</button>
+              <button role="menuitem" onClick={() => withTarget(target, () => moveClip(target.id, 1))}>{translate('한 칸 뒤로 이동', 'Move one later')}</button>
+              <button role="menuitem" disabled={st.clips[st.clips.length - 1]?.id === target.id} onClick={() => withTarget(target, () => reorderClip(target.id, st.clips.length - 1))}>{translate('맨 뒤로 이동', 'Move to end')}</button>
+            </> : <button role="menuitem" onClick={() => withTarget(target, moveToPlayhead)}>{translate('재생 헤드 위치로 이동', 'Move to playhead')}</button>}
 
             {target.type !== 'clip' && (mainLength > 0 || groupReference) && <>
-              <div className="timeline-menu__label">길이 맞춤</div>
+              <div className="timeline-menu__label">{translate('길이 맞춤', 'Fit duration')}</div>
               {groupReference && <button role="menuitem" onClick={() => withTarget(target, () => fitSpan(groupReference.start, groupReference.length))}>
-                그룹 기준 항목 구간에 맞춤{groupReference.type === 'clip' ? ' (메인 클립)' : ''}
+                {translate('그룹 기준 항목 구간에 맞춤', 'Fit to group reference item')}{groupReference.type === 'clip' ? translate(' (메인 클립)', ' (main clip)') : ''}
               </button>}
               {mainLength > 0 && <>
-                <button role="menuitem" onClick={() => withTarget(target, () => fitSpan(0, mainLength))}>메인 트랙 전체 길이에 맞춤</button>
+                <button role="menuitem" onClick={() => withTarget(target, () => fitSpan(0, mainLength))}>{translate('메인 트랙 전체 길이에 맞춤', 'Fit to full main track')}</button>
                 <button role="menuitem" disabled={!playheadClipSpan()} onClick={() => withTarget(target, () => {
                   const span = playheadClipSpan()
                   if (span) fitSpan(span.start, span.length)
-                })}>재생 헤드의 클립 구간에 맞춤</button>
-                <button role="menuitem" disabled={itemStart >= mainLength} onClick={() => withTarget(target, () => fitSpan(itemStart, mainLength - itemStart))}>현재 위치부터 메인 끝까지</button>
+                })}>{translate('재생 헤드의 클립 구간에 맞춤', 'Fit to clip at playhead')}</button>
+                <button role="menuitem" disabled={itemStart >= mainLength} onClick={() => withTarget(target, () => fitSpan(itemStart, mainLength - itemStart))}>{translate('현재 위치부터 메인 끝까지', 'From current position to main end')}</button>
               </>}
             </>}
 
             {(target.type === 'overlay' || target.type === 'background' || target.type === 'text') && <>
-              <div className="timeline-menu__label">레이어 순서</div>
-              <button role="menuitem" disabled={layerIndex < 0 || layerIndex >= layerCount - 1} onClick={() => withTarget(target, () => moveLayerToEdge(1))}>맨 위로 올리기</button>
-              <button role="menuitem" disabled={layerIndex < 0 || layerIndex >= layerCount - 1} onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, 1) : target.type === 'background' ? raiseBackground(target.id, 1) : raiseText(target.id, 1))}>레이어 한 단계 위로</button>
-              <button role="menuitem" disabled={layerIndex <= 0} onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, -1) : target.type === 'background' ? raiseBackground(target.id, -1) : raiseText(target.id, -1))}>레이어 한 단계 아래로</button>
-              <button role="menuitem" disabled={layerIndex <= 0} onClick={() => withTarget(target, () => moveLayerToEdge(-1))}>맨 아래로 내리기</button>
+              <div className="timeline-menu__label">{translate('레이어 순서', 'Layer order')}</div>
+              <button role="menuitem" disabled={layerIndex < 0 || layerIndex >= layerCount - 1} onClick={() => withTarget(target, () => moveLayerToEdge(1))}>{translate('맨 위로 올리기', 'Bring to front')}</button>
+              <button role="menuitem" disabled={layerIndex < 0 || layerIndex >= layerCount - 1} onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, 1) : target.type === 'background' ? raiseBackground(target.id, 1) : raiseText(target.id, 1))}>{translate('레이어 한 단계 위로', 'Move layer up')}</button>
+              <button role="menuitem" disabled={layerIndex <= 0} onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, -1) : target.type === 'background' ? raiseBackground(target.id, -1) : raiseText(target.id, -1))}>{translate('레이어 한 단계 아래로', 'Move layer down')}</button>
+              <button role="menuitem" disabled={layerIndex <= 0} onClick={() => withTarget(target, () => moveLayerToEdge(-1))}>{translate('맨 아래로 내리기', 'Send to back')}</button>
             </>}
 
-            {(target.type === 'clip' || (target.type === 'overlay' && !targetIsShape) || target.type === 'background') && <div className="timeline-menu__label">트랙 이동</div>}
+            {(target.type === 'clip' || (target.type === 'overlay' && !targetIsShape) || target.type === 'background') && <div className="timeline-menu__label">{translate('트랙 이동', 'Move track')}</div>}
             {target.type === 'clip' && <>
-              <button role="menuitem" onClick={() => withTarget(target, () => moveClipToOverlay(target.id))}>오버레이 레이어로 이동</button>
-              <button role="menuitem" onClick={() => withTarget(target, () => moveClipToBackground(target.id))}>배경 레이어로 이동</button>
+              <button role="menuitem" onClick={() => withTarget(target, () => moveClipToOverlay(target.id))}>{translate('오버레이 레이어로 이동', 'Move to overlay layer')}</button>
+              <button role="menuitem" onClick={() => withTarget(target, () => moveClipToBackground(target.id))}>{translate('배경 레이어로 이동', 'Move to background layer')}</button>
             </>}
-            {target.type === 'overlay' && !targetIsShape && <button role="menuitem" onClick={() => withTarget(target, () => moveOverlayToMain(target.id))}>메인 트랙으로 이동</button>}
-            {target.type === 'background' && <button role="menuitem" onClick={() => withTarget(target, () => moveBackgroundToMain(target.id))}>메인 트랙으로 이동</button>}
+            {target.type === 'overlay' && !targetIsShape && <button role="menuitem" onClick={() => withTarget(target, () => moveOverlayToMain(target.id))}>{translate('메인 트랙으로 이동', 'Move to main track')}</button>}
+            {target.type === 'background' && <button role="menuitem" onClick={() => withTarget(target, () => moveBackgroundToMain(target.id))}>{translate('메인 트랙으로 이동', 'Move to main track')}</button>}
 
-            <div className="timeline-menu__label">편집</div>
+            <div className="timeline-menu__label">{translate('편집', 'Edit')}</div>
             {canMute &&
-              <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'audio' ? updateAudio(target.id, { muted: !item?.muted }) : target.type === 'overlay' ? updateOverlay(target.id, { muted: !item?.muted }) : updateBackground(target.id, { muted: !item?.muted }))}>{item?.muted ? '음소거 해제' : '음소거'}</button>}
+              <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'audio' ? updateAudio(target.id, { muted: !item?.muted }) : target.type === 'overlay' ? updateOverlay(target.id, { muted: !item?.muted }) : updateBackground(target.id, { muted: !item?.muted }))}>{item?.muted ? translate('음소거 해제', 'Unmute') : translate('음소거', 'Mute')}</button>}
             {visualItem && <>
               <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'overlay'
                 ? updateOverlay(target.id, { hidden: !visualItem.hidden })
                 : target.type === 'background'
                   ? updateBackground(target.id, { hidden: !visualItem.hidden })
-                  : updateText(target.id, { hidden: !visualItem.hidden }))}>{visualItem.hidden ? '레이어 표시' : '레이어 숨기기'}</button>
+                  : updateText(target.id, { hidden: !visualItem.hidden }))}>{visualItem.hidden ? translate('레이어 표시', 'Show layer') : translate('레이어 숨기기', 'Hide layer')}</button>
               <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'overlay'
                 ? updateOverlay(target.id, { locked: !visualItem.locked })
                 : target.type === 'background'
                   ? updateBackground(target.id, { locked: !visualItem.locked })
-                  : updateText(target.id, { locked: !visualItem.locked }))}>{visualItem.locked ? '레이어 잠금 해제' : '레이어 잠그기'}</button>
+                  : updateText(target.id, { locked: !visualItem.locked }))}>{visualItem.locked ? translate('레이어 잠금 해제', 'Unlock layer') : translate('레이어 잠그기', 'Lock layer')}</button>
             </>}
-            <button role="menuitem" onClick={() => withTarget(target, duplicateSelected)}>복제</button>
+            <button role="menuitem" onClick={() => withTarget(target, duplicateSelected)}>{translate('복제', 'Duplicate')}</button>
             <div className="timeline-menu__separator" />
-            <button role="menuitem" className="timeline-menu__danger" onClick={() => withTarget(target, deleteSelected)}>삭제</button>
+            <button role="menuitem" className="timeline-menu__danger" onClick={() => withTarget(target, deleteSelected)}>{translate('삭제', 'Delete')}</button>
           </div>
         )
       })()}
@@ -1114,17 +1116,17 @@ export default function Timeline() {
           <div className="timeline-menu timeline-marker-menu" style={{ left: markerMenu.x, top: markerMenu.y }}
             onPointerDown={(event) => event.stopPropagation()}>
             <label className="timeline-marker-menu__field">
-              <span>마커 이름</span>
+              <span>{translate('마커 이름', 'Marker name')}</span>
               <input value={marker.label} autoFocus onChange={(event) => updateMarker(marker.id, { label: event.target.value })} />
             </label>
             <label className="timeline-marker-menu__field timeline-marker-menu__color">
-              <span>색상</span>
+              <span>{translate('색상', 'Color')}</span>
               <input type="color" value={marker.color} onChange={(event) => updateMarker(marker.id, { color: event.target.value })} />
               <b>{formatTimeFine(marker.time)}</b>
             </label>
-            <button onClick={() => { updateMarker(marker.id, { time: playhead }); setMarkerMenu(null) }}>재생 헤드 위치로 이동</button>
+            <button onClick={() => { updateMarker(marker.id, { time: playhead }); setMarkerMenu(null) }}>{translate('재생 헤드 위치로 이동', 'Move to playhead')}</button>
             <div className="timeline-menu__separator" />
-            <button className="timeline-menu__danger" onClick={() => { removeMarker(marker.id); setMarkerMenu(null) }}>마커 삭제</button>
+            <button className="timeline-menu__danger" onClick={() => { removeMarker(marker.id); setMarkerMenu(null) }}>{translate('마커 삭제', 'Delete marker')}</button>
           </div>
         )
       })()}
@@ -1141,12 +1143,12 @@ export default function Timeline() {
         return (
           <div className="timeline-menu timeline-transition-menu" style={{ left: transitionMenu.x, top: transitionMenu.y }}
             onPointerDown={(event) => event.stopPropagation()}>
-            <div className="timeline-transition-menu__title">클립 사이 검정 페이드</div>
-            <div className="timeline-transition-menu__hint">앞 장면은 어두워지고 다음 장면은 자연스럽게 나타납니다.</div>
+            <div className="timeline-transition-menu__title">{translate('클립 사이 검정 페이드', 'Fade to black between clips')}</div>
+            <div className="timeline-transition-menu__hint">{translate('앞 장면은 어두워지고 다음 장면은 자연스럽게 나타납니다.', 'The first scene darkens, then the next scene fades in smoothly.')}</div>
             <div className="timeline-transition-menu__choices">
               {[0, 0.3, 0.5, 1, 2].map((duration) => (
                 <button key={duration} className={Math.abs(current - duration) < 0.01 ? 'timeline-transition-menu__on' : ''}
-                  onClick={() => setDuration(duration)}>{duration === 0 ? '없음' : `${duration}초`}</button>
+                  onClick={() => setDuration(duration)}>{duration === 0 ? translate('없음', 'None') : translate(`${duration}초`, `${duration}s`)}</button>
               ))}
             </div>
           </div>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Clip } from '../types'
+import { translate } from '../i18n'
 
 const THUMB_WIDTH = 96
 const MAX_THUMBNAILS = 10
@@ -30,8 +31,8 @@ function waitForMedia(el: HTMLMediaElement, event: 'loadedmetadata' | 'seeked', 
       else resolve()
     }
     const ready = () => finish()
-    const failed = () => finish(new Error('미디어 미리보기를 읽을 수 없습니다.'))
-    const timer = window.setTimeout(() => finish(new Error('미디어 미리보기 시간이 초과됐습니다.')), timeout)
+    const failed = () => finish(new Error(translate('미디어 미리보기를 읽을 수 없습니다.', 'Could not load the media preview.')))
+    const timer = window.setTimeout(() => finish(new Error(translate('미디어 미리보기 시간이 초과됐습니다.', 'The media preview timed out.'))), timeout)
     el.addEventListener(event, ready, { once: true })
     el.addEventListener('error', failed, { once: true })
   })

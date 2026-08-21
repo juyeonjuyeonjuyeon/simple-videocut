@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { useEditor } from './store'
+import { LanguageProvider } from './i18n'
 import './styles.css'
 
 // Dev-only: expose the editor store for debugging in the browser console.
@@ -11,7 +12,7 @@ if (import.meta.env.DEV) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <LanguageProvider><App /></LanguageProvider>
   </StrictMode>,
 )
 

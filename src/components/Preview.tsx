@@ -19,6 +19,7 @@ import { positionAt } from '../utils/motion'
 import Icon from './Icon'
 import { maskClipPath, maskPathData, resolveOverlayStyle } from '../utils/overlay-style'
 import { resolveShapeStyle, shapePathData } from '../utils/shape'
+import { useLanguage } from '../i18n'
 
 const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
 const DRIFT = 0.35 // seconds before we hard-seek a media element back in sync
@@ -117,6 +118,7 @@ function ShapeOverlayGraphic({ overlay, frameHeight }: { overlay: Overlay; frame
 }
 
 export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
+  const { t: tr } = useLanguage()
   const clips = useEditor((s) => s.clips)
   const overlays = useEditor((s) => s.overlays)
   const audios = useEditor((s) => s.audios)
@@ -695,7 +697,7 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
             <div
               key={o.id}
               data-layer-name={o.name}
-              aria-label={`오버레이 ${o.name}`}
+              aria-label={tr(`오버레이 ${o.name}`, `Overlay ${o.name}`)}
               ref={(el) => { if (el) wrapEls.current.set(o.id, el); else wrapEls.current.delete(o.id) }}
               className="preview__overlay"
               style={{
@@ -751,7 +753,7 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
               <span key={handle} className={`preview__resize preview__resize--${handle}`} onPointerDown={(event) => onResizeDown(event, selOverlay.id, handle)} />
             ))}
             {!selOverlay.locked && (
-              <span className="preview__rotate" title="끌어서 회전" onPointerDown={onRotateDown('overlay', selOverlay.id)}><Icon name="rotate" /></span>
+              <span className="preview__rotate" title={tr('끌어서 회전', 'Drag to rotate')} onPointerDown={onRotateDown('overlay', selOverlay.id)}><Icon name="rotate" /></span>
             )}
           </div>
         )}
@@ -759,7 +761,7 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
         {!hasContent && (
           <div className="preview__empty">
             <span><Icon name="video" /></span>
-            <p>동영상·사진을 추가해 편집을 시작하세요</p>
+            <p>{tr('동영상·사진을 추가해 편집을 시작하세요', 'Add a video or photo to start editing')}</p>
           </div>
         )}
 
@@ -792,7 +794,7 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
             >
               {t.text}
               {sel && !t.locked && <span className="preview__resize preview__resize--text" onPointerDown={(e) => onTextResize(e, t.id)} />}
-              {sel && !t.locked && <span className="preview__rotate preview__rotate--text" title="끌어서 회전" onPointerDown={onRotateDown('text', t.id)}><Icon name="rotate" /></span>}
+              {sel && !t.locked && <span className="preview__rotate preview__rotate--text" title={tr('끌어서 회전', 'Drag to rotate')} onPointerDown={onRotateDown('text', t.id)}><Icon name="rotate" /></span>}
             </div>
           )
         })}
@@ -803,7 +805,7 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
 
         {((selClip && selClip.kind !== 'color') || (selOverlay && !selOverlay.shape)) && !(selOverlay?.locked) && (
           <div className="preview__selection-tools" onPointerDown={(event) => event.stopPropagation()}>
-            <button type="button" onClick={onOpenCrop}><Icon name="crop" />자르기</button>
+            <button type="button" onClick={onOpenCrop}><Icon name="crop" />{tr('자르기', 'Crop')}</button>
           </div>
         )}
       </div>

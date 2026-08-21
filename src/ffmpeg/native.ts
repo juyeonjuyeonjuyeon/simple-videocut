@@ -1,4 +1,5 @@
 export interface DesktopFFmpegBridge {
+  setLanguage?(language: 'ko' | 'en'): void
   available(): Promise<boolean>
   videoEncoder(): Promise<'h264_videotoolbox' | null>
   listFonts(): Promise<string[]>

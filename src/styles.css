@@ -140,6 +140,13 @@ button, input, textarea { font-family: inherit; }
   box-shadow: 0 16px 44px var(--popover-shadow);
 }
 .theme-picker__title { padding: 4px 6px 8px; color: var(--text-dim); font-size: 10px; font-weight: 800; letter-spacing: .06em; }
+.theme-picker__title--section { margin-top: 7px; padding-top: 10px; border-top: 1px solid var(--line); }
+.settings-language { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.settings-language button { min-width: 0; min-height: 48px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; padding: 8px 10px; color: var(--text); border: 1px solid var(--line); border-radius: 9px; background: var(--bg-2); text-align: left; cursor: pointer; }
+.settings-language button:hover, .settings-language button:focus-visible { border-color: var(--line-strong); outline: none; }
+.settings-language button.is-active { color: #fff; border-color: var(--accent); background: var(--accent); }
+.settings-language b { font-size: 12px; }
+.settings-language small { color: inherit; opacity: .72; font-size: 9px; }
 .theme-picker__options { display: grid; gap: 4px; }
 .theme-picker__options > button {
   width: 100%;
@@ -1475,6 +1482,7 @@ input[type='range']:disabled { opacity: 0.4; }
   color: var(--text-dim);
   font-size: 10px;
 }
+html[data-language='en'] .timeline__ruler::before { content: 'Track'; }
 .timeline__tick {
   position: absolute;
   top: 6px;

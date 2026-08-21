@@ -1,17 +1,18 @@
 import type { Overlay, OverlayBorderStyle, ShapeKind, ShapeStyle } from '../types'
 import { hexToRgba } from './color'
 import { overlayEffectPadding, resolveOverlayStyle } from './overlay-style'
+import { translate } from '../i18n'
 
-export const SHAPE_OPTIONS: ReadonlyArray<{ value: ShapeKind; label: string }> = [
-  { value: 'rectangle', label: '사각형' },
-  { value: 'circle', label: '원' },
-  { value: 'triangle', label: '삼각형' },
-  { value: 'diamond', label: '마름모' },
-  { value: 'star', label: '별' },
-  { value: 'heart', label: '하트' },
-  { value: 'hexagon', label: '육각형' },
-  { value: 'arrow', label: '화살표' },
-  { value: 'line', label: '선' },
+export const SHAPE_OPTIONS: ReadonlyArray<{ value: ShapeKind; label: string; labelEn: string }> = [
+  { value: 'rectangle', label: '사각형', labelEn: 'Rectangle' },
+  { value: 'circle', label: '원', labelEn: 'Circle' },
+  { value: 'triangle', label: '삼각형', labelEn: 'Triangle' },
+  { value: 'diamond', label: '마름모', labelEn: 'Diamond' },
+  { value: 'star', label: '별', labelEn: 'Star' },
+  { value: 'heart', label: '하트', labelEn: 'Heart' },
+  { value: 'hexagon', label: '육각형', labelEn: 'Hexagon' },
+  { value: 'arrow', label: '화살표', labelEn: 'Arrow' },
+  { value: 'line', label: '선', labelEn: 'Line' },
 ]
 
 export const SHAPE_STYLE_DEFAULTS: ShapeStyle = {
@@ -25,7 +26,10 @@ const SHAPE_KINDS = new Set<ShapeKind>(SHAPE_OPTIONS.map((option) => option.valu
 
 export const isShapeKind = (value: unknown): value is ShapeKind => typeof value === 'string' && SHAPE_KINDS.has(value as ShapeKind)
 
-export const shapeLabel = (kind: ShapeKind) => SHAPE_OPTIONS.find((option) => option.value === kind)?.label ?? '도형'
+export const shapeLabel = (kind: ShapeKind) => {
+  const option = SHAPE_OPTIONS.find((candidate) => candidate.value === kind)
+  return option ? translate(option.label, option.labelEn) : translate('도형', 'Shape')
+}
 
 export function resolveShapeStyle(style?: Partial<ShapeStyle>): ShapeStyle {
   return {

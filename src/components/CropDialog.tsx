@@ -5,6 +5,7 @@ import { clipStartOffsets, clipTimelineDuration, overlayLength } from '../utils/
 import { cropForAspect, cropSize, moveCrop, resizeCrop, sanitizeCrop, zoomCrop, type CropHandle } from '../utils/crop'
 import { startPointerDrag } from '../utils/pointer'
 import Icon from './Icon'
+import { useLanguage } from '../i18n'
 
 interface Props {
   onClose: () => void
@@ -32,6 +33,7 @@ const rememberSourceAspect = (src: string, aspect: number) => {
 }
 
 export default function CropDialog({ onClose }: Props) {
+  const { t } = useLanguage()
   const selection = useEditor((state) => state.selection)
   const clips = useEditor((state) => state.clips)
   const overlays = useEditor((state) => state.overlays)
@@ -153,7 +155,7 @@ export default function CropDialog({ onClose }: Props) {
   const size = cropSize(draft)
   const zoomValue = Math.round((1 - Math.min(size.width, size.height)) * 100)
   const ratios = [
-    { label: '원본', value: sourceAspect ?? 1 },
+    { label: t('원본', 'Original'), value: sourceAspect ?? 1 },
     { label: '16:9', value: 16 / 9 },
     { label: '4:3', value: 4 / 3 },
     { label: '1:1', value: 1 },
@@ -165,17 +167,17 @@ export default function CropDialog({ onClose }: Props) {
       <section className="crop-dialog__panel" role="dialog" aria-modal="true" aria-labelledby="crop-dialog-title">
         <header className="crop-dialog__head">
           <div>
-            <h2 id="crop-dialog-title">자르기</h2>
-            <p>{item.name} · 테두리로 영역 조절, 안쪽 드래그로 위치 이동</p>
+            <h2 id="crop-dialog-title">{t('자르기', 'Crop')}</h2>
+            <p>{item.name} · {t('테두리로 영역 조절, 안쪽 드래그로 위치 이동', 'Drag edges to resize the area and drag inside to reposition it')}</p>
           </div>
-          <button ref={closeRef} className="iconbtn" onClick={onClose} aria-label="자르기 취소하고 닫기"><Icon name="close" /></button>
+          <button ref={closeRef} className="iconbtn" onClick={onClose} aria-label={t('자르기 취소하고 닫기', 'Cancel crop and close')}><Icon name="close" /></button>
         </header>
 
         <div className="crop-dialog__workspace" ref={workspaceRef}>
           <div className="crop-dialog__stage" ref={stageRef} style={{ width: stageBox.width, height: stageBox.height }}
             onWheel={(event) => { event.preventDefault(); setZoom(Math.max(0, Math.min(90, zoomValue + (event.deltaY > 0 ? 2 : -2)))) }}>
             {item.kind === 'image' ? (
-              <img src={item.src} alt="자르기 원본" draggable={false} onLoad={(event) => {
+              <img src={item.src} alt={t('자르기 원본', 'Crop source')} draggable={false} onLoad={(event) => {
                 const image = event.currentTarget
                 if (image.naturalWidth && image.naturalHeight) setMeasuredSourceAspect(image.naturalWidth / image.naturalHeight)
               }} />
@@ -196,26 +198,26 @@ export default function CropDialog({ onClose }: Props) {
         </div>
 
         <div className="crop-dialog__controls">
-          <div className="crop-dialog__ratios" role="group" aria-label="자르기 비율">
-            <button type="button" disabled={sourceAspect == null} className={cropAspect == null ? 'is-active' : ''} onClick={() => selectRatio(null)}>자유</button>
+          <div className="crop-dialog__ratios" role="group" aria-label={t('자르기 비율', 'Crop ratio')}>
+            <button type="button" disabled={sourceAspect == null} className={cropAspect == null ? 'is-active' : ''} onClick={() => selectRatio(null)}>{t('자유', 'Free')}</button>
             {ratios.map((ratio) => (
               <button type="button" disabled={sourceAspect == null} key={ratio.label} className={cropAspect === ratio.value ? 'is-active' : ''} onClick={() => selectRatio(ratio.value)}>{ratio.label}</button>
             ))}
           </div>
           <label className="crop-dialog__zoom">
             <Icon name="zoomOut" />
-            <span>확대</span>
-            <input type="range" min="0" max="90" step="1" value={zoomValue} onChange={(event) => setZoom(Number(event.target.value))} aria-label="자르기 확대" />
+            <span>{t('확대', 'Zoom')}</span>
+            <input type="range" min="0" max="90" step="1" value={zoomValue} onChange={(event) => setZoom(Number(event.target.value))} aria-label={t('자르기 확대', 'Crop zoom')} />
             <b>{zoomValue}%</b>
             <Icon name="zoomIn" />
           </label>
-          <button type="button" className="btn btn--sm" onClick={() => { setCropAspect(null); setDraft({ ...NO_CROP }) }}>초기화</button>
+          <button type="button" className="btn btn--sm" onClick={() => { setCropAspect(null); setDraft({ ...NO_CROP }) }}>{t('초기화', 'Reset')}</button>
         </div>
 
         <footer className="crop-dialog__actions">
-          <span>원본 파일은 변경되지 않습니다.</span>
-          <button type="button" className="btn" onClick={onClose}>취소</button>
-          <button type="button" className="btn btn--primary" onClick={apply}>적용</button>
+          <span>{t('원본 파일은 변경되지 않습니다.', 'The original file will not be changed.')}</span>
+          <button type="button" className="btn" onClick={onClose}>{t('취소', 'Cancel')}</button>
+          <button type="button" className="btn btn--primary" onClick={apply}>{t('적용', 'Apply')}</button>
         </footer>
       </section>
     </div>

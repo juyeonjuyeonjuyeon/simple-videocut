@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 contextBridge.exposeInMainWorld('simplecutDesktop', {
+  setLanguage: (language) => ipcRenderer.send('app:language', language),
   available: () => ipcRenderer.invoke('native-ffmpeg:available'),
   videoEncoder: () => ipcRenderer.invoke('native-ffmpeg:video-encoder'),
   listFonts: () => ipcRenderer.invoke('native-fonts:list'),

@@ -8,6 +8,7 @@ import { keyframeAt, positionAt } from './utils/motion'
 import { normalizeVisualOrder } from './utils/layers'
 import { OVERLAY_STYLE_DEFAULTS } from './utils/overlay-style'
 import { createShapePlaceholderFile, resolveShapeStyle, shapeLabel, SHAPE_STYLE_DEFAULTS } from './utils/shape'
+import { translate } from './i18n'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
 const registerNativeMedia = async (file: File) => {
@@ -482,7 +483,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   // ---------- background layer ----------
   addBackground: () => {
     const bg: Background = {
-      id: uid(), kind: 'color', name: '단색 배경', src: '', file: new File([], 'bg'),
+      id: uid(), kind: 'color', name: translate('단색 배경', 'Solid background'), src: '', file: new File([], 'bg'),
       sourceSize: 0,
       duration: IMAGE_NOMINAL_MAX, trimStart: 0, trimEnd: DEFAULT_IMAGE_DUR,
       speed: 1, volume: 1, muted: false, hasAudio: false, color: '#3a4250',
@@ -548,7 +549,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const file = createShapePlaceholderFile(kind)
     const id = uid()
     const overlay: Overlay = {
-      id, kind: 'image', name: `${shapeLabel(kind)} 도형`, src: URL.createObjectURL(file), file,
+      id, kind: 'image', name: translate(`${shapeLabel(kind)} 도형`, `${shapeLabel(kind)} shape`), src: URL.createObjectURL(file), file,
       sourceSize: file.size, duration: IMAGE_NOMINAL_MAX, trimStart: 0, trimEnd: DEFAULT_IMAGE_DUR,
       hasAudio: false, color: nextClipColor(), start: get().playhead,
       x: .5, y: .5, scale: .28, scaleY: undefined, aspectLocked: true, angle: 0,
@@ -735,7 +736,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const dur = projectDuration(s.clips, s.overlays, s.audios, s.texts, s.backgrounds)
     const start = Math.min(s.playhead, Math.max(0, dur - 2))
     const text: TextOverlay = {
-      id: uid(), text: '텍스트 입력', start, end: Math.min(start + 3, dur || start + 3),
+      id: uid(), text: translate('텍스트 입력', 'Enter text'), start, end: Math.min(start + 3, dur || start + 3),
       x: 0.5, y: 0.85, size: 0.07, color: '#ffffff', colorAlpha: 1,
       box: true, boxColor: '#000000', boxAlpha: 0.55,
       font: FONT_OPTIONS[0].value, strokeWidth: 0, strokeColor: '#000000',
@@ -791,7 +792,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const marker: TimelineMarker = {
       id: uid(),
       time: Math.max(0, time ?? get().playhead),
-      label: `마커 ${get().markers.length + 1}`,
+      label: translate(`마커 ${get().markers.length + 1}`, `Marker ${get().markers.length + 1}`),
       color: '#f2a65a',
     }
     set((s) => ({ markers: [...s.markers, marker].sort((a, b) => a.time - b.time) }))
@@ -898,7 +899,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const groups = s.groups.filter((group) => !touching.includes(group))
     const previous = touching[0]
     return {
-      groups: [...groups, { id: previous?.id ?? uid(), name: previous?.name ?? `그룹 ${groups.length + 1}`, members: merged }],
+      groups: [...groups, { id: previous?.id ?? uid(), name: previous?.name ?? translate(`그룹 ${groups.length + 1}`, `Group ${groups.length + 1}`), members: merged }],
       selectedItems: merged,
       selection: merged[merged.length - 1] ?? null,
     }

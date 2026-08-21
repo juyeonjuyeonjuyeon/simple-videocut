@@ -18,6 +18,7 @@ import HelpDialog from './components/HelpDialog'
 import CropDialog from './components/CropDialog'
 import ThemePicker from './components/ThemePicker'
 import ShapePicker from './components/ShapePicker'
+import { localizedErrorMessage, useLanguage } from './i18n'
 
 const ACTIVE_PROJECT_KEY = 'simplecut-active-project-name'
 
@@ -33,6 +34,7 @@ function snapshotProject() {
 }
 
 export default function App() {
+  const { language, t } = useLanguage()
   const mediaLibrary = useEditor((s) => s.mediaLibrary)
   const clips = useEditor((s) => s.clips)
   const overlays = useEditor((s) => s.overlays)
@@ -145,7 +147,7 @@ export default function App() {
       window.setTimeout(() => setManualSaveStatus('idle'), 1800)
     } catch (error) {
       setManualSaveStatus('error')
-      alert('프로젝트 저장 실패: ' + (error as Error).message)
+      alert(t('프로젝트 저장 실패: ', 'Project save failed: ') + localizedErrorMessage(error, '알 수 없는 오류', 'Unknown error'))
     }
   }
 
@@ -260,7 +262,7 @@ export default function App() {
       setSaveStatus('saved')
     } catch (error) {
       setSaveStatus('error')
-      alert('복원 실패: ' + (error as Error).message)
+      alert(t('복원 실패: ', 'Restore failed: ') + localizedErrorMessage(error, '알 수 없는 오류', 'Unknown error'))
     }
   }
 
@@ -271,7 +273,7 @@ export default function App() {
 
   const openProject = async (name: string) => {
     const project = await loadProject(name)
-    if (!project) throw new Error(`'${name}' 프로젝트를 찾을 수 없습니다.`)
+    if (!project) throw new Error(t(`'${name}' 프로젝트를 찾을 수 없습니다.`, `Project '${name}' was not found.`))
     replaceProject(project)
     setActiveProjectName(name)
     setRestorable(null)
@@ -281,7 +283,7 @@ export default function App() {
   }
 
   const startNewProject = () => {
-    if (hasContent && !confirm('새 프로젝트를 시작할까요? 현재 작업은 자동 저장 복구본으로 남아 있습니다.')) return
+    if (hasContent && !confirm(t('새 프로젝트를 시작할까요? 현재 작업은 자동 저장 복구본으로 남아 있습니다.', 'Start a new project? Your current work will remain in the autosave recovery copy.'))) return
     const discardRecovery = !hasContent && !!restorable
     resetProject()
     setActiveProjectName(null)
@@ -392,14 +394,14 @@ export default function App() {
     try {
       const files = await filesFromDrop(e.dataTransfer)
       if (!files.length) {
-        alert('파일을 읽지 못했습니다. 사진이나 녹음을 파일 앱에 저장한 뒤 다시 끌어 놓아 주세요.')
+        alert(t('파일을 읽지 못했습니다. 사진이나 녹음을 파일 앱에 저장한 뒤 다시 끌어 놓아 주세요.', 'The files could not be read. Save the photo or recording in Files, then drag it here again.'))
         return
       }
       const supported = files.filter((file) => isVideoFile(file) || isImageFile(file) || isAudioFile(file))
       const unsupported = files.filter((file) => !supported.includes(file))
       if (supported.length) await addCategorizedFiles(supported)
       if (unsupported.length) {
-        alert(`지원하지 않는 파일 ${unsupported.length}개는 추가하지 않았습니다:\n${unsupported.map((file) => file.name).join('\n')}`)
+        alert(t(`지원하지 않는 파일 ${unsupported.length}개는 추가하지 않았습니다:\n${unsupported.map((file) => file.name).join('\n')}`, `${unsupported.length} unsupported file(s) were not added:\n${unsupported.map((file) => file.name).join('\n')}`))
       }
     } finally {
       setDropImporting(false)
@@ -412,19 +414,19 @@ export default function App() {
         <div className="topbar__brand">
           <span className="topbar__logo"><Icon name="brand" /></span>
           <span className="topbar__name">SimpleCut</span>
-          <span className="topbar__project" title={activeProjectName || '저장되지 않은 프로젝트'}>{activeProjectName || '저장되지 않음'}</span>
+          <span className="topbar__project" title={activeProjectName || t('저장되지 않은 프로젝트', 'Unsaved project')}>{activeProjectName || t('저장되지 않음', 'Unsaved')}</span>
         </div>
         <div className="topbar__actions">
           <span className={`save-status save-status--${saveStatus}`} role="status">
-            {manualSaveStatus === 'saving' ? '프로젝트 저장 중…' : manualSaveStatus === 'saved' ? '프로젝트 저장됨' : manualSaveStatus === 'error' ? '저장 실패' : saveStatus === 'saving' ? '자동 저장 중…' : saveStatus === 'saved' && lastSavedAt ? `자동 저장됨 · ${new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : saveStatus === 'error' ? '자동 저장 실패' : ''}
+            {manualSaveStatus === 'saving' ? t('프로젝트 저장 중…', 'Saving project…') : manualSaveStatus === 'saved' ? t('프로젝트 저장됨', 'Project saved') : manualSaveStatus === 'error' ? t('저장 실패', 'Save failed') : saveStatus === 'saving' ? t('자동 저장 중…', 'Autosaving…') : saveStatus === 'saved' && lastSavedAt ? `${t('자동 저장됨', 'Autosaved')} · ${new Date(lastSavedAt).toLocaleTimeString(language === 'ko' ? 'ko-KR' : 'en-US', { hour: '2-digit', minute: '2-digit' })}` : saveStatus === 'error' ? t('자동 저장 실패', 'Autosave failed') : ''}
           </span>
-          <button className={`iconbtn iconbtn--sm${mediaPanelOpen ? ' iconbtn--on' : ''}`} onClick={toggleMediaPanel} title="왼쪽 미디어 패널 열기·닫기" aria-label="왼쪽 미디어 패널 열기·닫기"><Icon name="library" /></button>
-          <button className="btn btn--sm topbar__project-menu" onClick={() => setShowProjectHome(true)} title="프로젝트 홈·저장·열기" aria-label="프로젝트 홈 열기"><Icon name="project" /><span>프로젝트</span></button>
-          <button className={`iconbtn iconbtn--sm${inspectorOpen ? ' iconbtn--on' : ''}`} onClick={toggleInspector} title="오른쪽 편집 패널 열기·닫기" aria-label="오른쪽 편집 패널 열기·닫기"><Icon name="panel" /></button>
+          <button className={`iconbtn iconbtn--sm${mediaPanelOpen ? ' iconbtn--on' : ''}`} onClick={toggleMediaPanel} title={t('왼쪽 미디어 패널 열기·닫기', 'Toggle left media panel')} aria-label={t('왼쪽 미디어 패널 열기·닫기', 'Toggle left media panel')}><Icon name="library" /></button>
+          <button className="btn btn--sm topbar__project-menu" onClick={() => setShowProjectHome(true)} title={t('프로젝트 홈·저장·열기', 'Project home, save, and open')} aria-label={t('프로젝트 홈 열기', 'Open project home')}><Icon name="project" /><span>{t('프로젝트', 'Project')}</span></button>
+          <button className={`iconbtn iconbtn--sm${inspectorOpen ? ' iconbtn--on' : ''}`} onClick={toggleInspector} title={t('오른쪽 편집 패널 열기·닫기', 'Toggle right inspector')} aria-label={t('오른쪽 편집 패널 열기·닫기', 'Toggle right inspector')}><Icon name="panel" /></button>
           <ThemePicker />
-          <button className="iconbtn iconbtn--sm topbar__help" onClick={() => setShowHelp(true)} title="도움말과 단축키 (?)" aria-label="도움말 열기"><Icon name="help" /></button>
+          <button className="iconbtn iconbtn--sm topbar__help" onClick={() => setShowHelp(true)} title={t('도움말과 단축키 (?)', 'Help and shortcuts (?)')} aria-label={t('도움말 열기', 'Open help')}><Icon name="help" /></button>
           <button className="btn btn--primary" onClick={() => setShowExport(true)} disabled={!hasClips}>
-            내보내기
+            {t('내보내기', 'Export')}
           </button>
         </div>
         <input ref={fileRef} type="file" accept={MEDIA_ACCEPT} multiple hidden
@@ -449,15 +451,15 @@ export default function App() {
               className="iconbtn iconbtn--play"
               onClick={() => setPlaying(!isPlaying)}
               disabled={!hasContent}
-              aria-label={isPlaying ? '일시정지' : '재생'}
+              aria-label={isPlaying ? t('일시정지', 'Pause') : t('재생', 'Play')}
             >
               <Icon name={isPlaying ? 'pause' : 'play'} />
             </button>
             <button
               className={`iconbtn${loop ? ' iconbtn--on' : ''}`}
               onClick={() => setLoop(!loop)}
-              title="반복 재생"
-              aria-label="반복 재생"
+              title={t('반복 재생', 'Loop playback')}
+              aria-label={t('반복 재생', 'Loop playback')}
             >
               <Icon name="repeat" />
             </button>
@@ -465,21 +467,21 @@ export default function App() {
               {formatTimeFine(playhead)} <span>/ {formatTime(total)}</span>
             </div>
             <div className="transport__spacer" />
-            <button className="btn btn--sm" onClick={splitAtPlayhead} disabled={!hasClips} title="단축키: S"><Icon name="split" />분할</button>
-            <button className="btn btn--sm" onClick={addBackground}><Icon name="palette" />배경</button>
-            <button className="btn btn--sm" onClick={addText}><Icon name="text" />텍스트</button>
-            <button className="btn btn--sm" onClick={() => setShowShapes(true)}><Icon name="shape" />도형</button>
-            <button className="iconbtn" onClick={undo} disabled={!canUndo} title="실행 취소" aria-label="실행 취소"><Icon name="undo" /></button>
-            <button className="iconbtn" onClick={redo} disabled={!canRedo} title="다시 실행" aria-label="다시 실행"><Icon name="redo" /></button>
-            <button className="btn btn--sm" onClick={duplicateSelected} disabled={!selection} title="단축키: ⌘D"><Icon name="copy" />복제</button>
-            <button className="btn btn--sm btn--danger" onClick={deleteSelected} disabled={!selection} title="단축키: Delete"><Icon name="trash" />삭제</button>
+            <button className="btn btn--sm" onClick={splitAtPlayhead} disabled={!hasClips} title={t('단축키: S', 'Shortcut: S')}><Icon name="split" />{t('분할', 'Split')}</button>
+            <button className="btn btn--sm" onClick={addBackground}><Icon name="palette" />{t('배경', 'Background')}</button>
+            <button className="btn btn--sm" onClick={addText}><Icon name="text" />{t('텍스트', 'Text')}</button>
+            <button className="btn btn--sm" onClick={() => setShowShapes(true)}><Icon name="shape" />{t('도형', 'Shape')}</button>
+            <button className="iconbtn" onClick={undo} disabled={!canUndo} title={t('실행 취소', 'Undo')} aria-label={t('실행 취소', 'Undo')}><Icon name="undo" /></button>
+            <button className="iconbtn" onClick={redo} disabled={!canRedo} title={t('다시 실행', 'Redo')} aria-label={t('다시 실행', 'Redo')}><Icon name="redo" /></button>
+            <button className="btn btn--sm" onClick={duplicateSelected} disabled={!selection} title={t('단축키: ⌘D', 'Shortcut: ⌘D')}><Icon name="copy" />{t('복제', 'Duplicate')}</button>
+            <button className="btn btn--sm btn--danger" onClick={deleteSelected} disabled={!selection} title={t('단축키: Delete', 'Shortcut: Delete')}><Icon name="trash" />{t('삭제', 'Delete')}</button>
           </div>
         </section>
         {inspectorOpen && <Inspector onOpenCrop={() => { setPlaying(false); setShowCropEditor(true) }} />}
-        {inspectorOpen && <div className="resizer resizer--v" onPointerDown={startResize('w')} title="패널 너비 조절" />}
+        {inspectorOpen && <div className="resizer resizer--v" onPointerDown={startResize('w')} title={t('패널 너비 조절', 'Resize panel')} />}
       </main>
 
-      <div className="resizer resizer--h" onPointerDown={startResize('h')} title="타임라인 높이 조절" />
+      <div className="resizer resizer--h" onPointerDown={startResize('h')} title={t('타임라인 높이 조절', 'Resize timeline')} />
       <Timeline />
 
       {showExport && <ExportDialog onClose={() => setShowExport(false)} />}
@@ -518,9 +520,9 @@ export default function App() {
 
       {restorable && !hasContent && !showProjectHome && (
         <div className="restore-banner">
-          <span>이전에 작업하던 프로젝트가 있어요. 복원할까요?</span>
-          <button className="btn btn--sm btn--primary" onClick={restore}>복원</button>
-          <button className="btn btn--sm" onClick={() => setRestorable(null)}>새로 시작</button>
+          <span>{t('이전에 작업하던 프로젝트가 있어요. 복원할까요?', 'A previous autosave is available. Restore it?')}</span>
+          <button className="btn btn--sm btn--primary" onClick={restore}>{t('복원', 'Restore')}</button>
+          <button className="btn btn--sm" onClick={() => setRestorable(null)}>{t('새로 시작', 'Start new')}</button>
         </div>
       )}
 
@@ -528,8 +530,8 @@ export default function App() {
         <div className="dropzone" role="status" aria-live="polite">
           <div className="dropzone__inner">
             <Icon name="download" />
-            <p>{dropImporting ? '파일을 가져오는 중…' : '사진·영상·음성을 놓으세요'}</p>
-            <small>{dropImporting ? '파일을 안전하게 읽고 있습니다' : '사진 앱·음성 메모·파일 앱·Finder에서 바로 추가할 수 있습니다'}</small>
+            <p>{dropImporting ? t('파일을 가져오는 중…', 'Importing files…') : t('사진·영상·음성을 놓으세요', 'Drop photos, videos, or audio')}</p>
+            <small>{dropImporting ? t('파일을 안전하게 읽고 있습니다', 'Reading files safely') : t('사진 앱·음성 메모·파일 앱·Finder에서 바로 추가할 수 있습니다', 'Add directly from Photos, Voice Memos, Files, or Finder')}</small>
           </div>
         </div>
       )}

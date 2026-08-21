@@ -1,3 +1,5 @@
+import { translate } from '../i18n'
+
 const extension = (file: File) => file.name.toLowerCase().match(/\.[^.]+$/)?.[0] ?? ''
 
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.webm', '.ogv'])
@@ -15,14 +17,14 @@ type FileSize = Pick<File, 'name' | 'size'>
 /** Reject resource-exhausting batches before browser media parsers see them. */
 export function assertMediaCapacity(incoming: FileSize[], existing: FileSize[]): void {
   if (existing.length + incoming.length > MEDIA_LIMITS.maxItems) {
-    throw new Error(`미디어는 프로젝트당 최대 ${MEDIA_LIMITS.maxItems}개까지 추가할 수 있습니다.`)
+    throw new Error(translate(`미디어는 프로젝트당 최대 ${MEDIA_LIMITS.maxItems}개까지 추가할 수 있습니다.`, `You can add up to ${MEDIA_LIMITS.maxItems} media files per project.`))
   }
   for (const file of incoming) {
-    if (file.size <= 0) throw new Error(`비어 있는 파일은 추가할 수 없습니다: ${file.name}`)
-    if (file.size > MEDIA_LIMITS.maxFileBytes) throw new Error(`파일 크기는 1GB 이하여야 합니다: ${file.name}`)
+    if (file.size <= 0) throw new Error(translate(`비어 있는 파일은 추가할 수 없습니다: ${file.name}`, `Empty files cannot be added: ${file.name}`))
+    if (file.size > MEDIA_LIMITS.maxFileBytes) throw new Error(translate(`파일 크기는 1GB 이하여야 합니다: ${file.name}`, `Files must be 1 GB or smaller: ${file.name}`))
   }
   const total = [...existing, ...incoming].reduce((sum, file) => sum + file.size, 0)
-  if (total > MEDIA_LIMITS.maxProjectBytes) throw new Error('프로젝트 전체 미디어 용량은 1.5GB 이하여야 합니다.')
+  if (total > MEDIA_LIMITS.maxProjectBytes) throw new Error(translate('프로젝트 전체 미디어 용량은 1.5GB 이하여야 합니다.', 'Total project media must be 1.5 GB or less.'))
 }
 
 // Mobile file pickers may omit File.type, especially for Voice Memos.
@@ -68,7 +70,7 @@ export function probeVideo(file: File): Promise<{ duration: number; hasAudio: bo
     video.onerror = () => {
       cleanup()
       URL.revokeObjectURL(src)
-      reject(new Error(`동영상을 읽을 수 없습니다: ${file.name}`))
+      reject(new Error(translate(`동영상을 읽을 수 없습니다: ${file.name}`, `Could not read the video: ${file.name}`)))
     }
   })
 }
@@ -79,7 +81,7 @@ export function probeImage(file: File): Promise<{ width: number; height: number;
     const src = URL.createObjectURL(file)
     const img = new Image()
     img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight, src })
-    img.onerror = () => { URL.revokeObjectURL(src); reject(new Error(`이미지를 읽을 수 없습니다: ${file.name}`)) }
+    img.onerror = () => { URL.revokeObjectURL(src); reject(new Error(translate(`이미지를 읽을 수 없습니다: ${file.name}`, `Could not read the image: ${file.name}`))) }
     img.src = src
   })
 }
@@ -92,7 +94,7 @@ export function probeAudio(file: File): Promise<{ duration: number; src: string 
     audio.preload = 'metadata'
     audio.src = src
     audio.onloadedmetadata = () => resolve({ duration: audio.duration || 0, src })
-    audio.onerror = () => { URL.revokeObjectURL(src); reject(new Error(`오디오를 읽을 수 없습니다: ${file.name}`)) }
+    audio.onerror = () => { URL.revokeObjectURL(src); reject(new Error(translate(`오디오를 읽을 수 없습니다: ${file.name}`, `Could not read the audio: ${file.name}`))) }
   })
 }
 
