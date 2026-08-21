@@ -23,6 +23,11 @@ import ShowcasePreviewDialog from './components/ShowcasePreviewDialog'
 import { localizedErrorMessage, useLanguage } from './i18n'
 
 const ACTIVE_PROJECT_KEY = 'simplecut-active-project-name'
+const COMPACT_PANEL_QUERY = '(max-width: 1100px), (max-height: 520px)'
+
+function compactPanelLayout() {
+  return typeof window !== 'undefined' && window.matchMedia(COMPACT_PANEL_QUERY).matches
+}
 
 function snapshotProject() {
   const s = useEditor.getState()
@@ -95,22 +100,45 @@ export default function App() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [manualSaveStatus, setManualSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
-  const [inspectorOpen, setInspectorOpen] = useState(() => window.innerWidth > 860)
-  const [mediaPanelOpen, setMediaPanelOpen] = useState(() => window.innerWidth > 1000)
+  const [compactPanels, setCompactPanels] = useState(compactPanelLayout)
+  const [inspectorOpen, setInspectorOpen] = useState(() => !compactPanelLayout() && window.innerWidth > 860)
+  const [inspectorExpanded, setInspectorExpanded] = useState(false)
+  const [mediaPanelOpen, setMediaPanelOpen] = useState(() => window.innerWidth > 1180 && window.innerHeight > 520)
   // Resizable panels (desktop).
   const [inspectorW, setInspectorW] = useState(320)
   const [timelineH, setTimelineH] = useState<number | null>(null)
 
   const toggleMediaPanel = () => setMediaPanelOpen((open) => {
     const next = !open
-    if (next && window.innerWidth <= 860) setInspectorOpen(false)
+    if (next && compactPanels) {
+      setInspectorOpen(false)
+      setInspectorExpanded(false)
+    }
     return next
   })
   const toggleInspector = () => setInspectorOpen((open) => {
     const next = !open
-    if (next && window.innerWidth <= 860) setMediaPanelOpen(false)
+    if (next && compactPanels) setMediaPanelOpen(false)
+    if (!next) setInspectorExpanded(false)
     return next
   })
+  const closeInspector = () => {
+    setInspectorOpen(false)
+    setInspectorExpanded(false)
+  }
+
+  useEffect(() => {
+    const media = window.matchMedia(COMPACT_PANEL_QUERY)
+    const sync = () => setCompactPanels(media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
+
+  useEffect(() => {
+    if (!compactPanels || !mediaPanelOpen || !inspectorOpen) return
+    setMediaPanelOpen(false)
+  }, [compactPanels, inspectorOpen, mediaPanelOpen])
 
   const startResize = (axis: 'w' | 'h') => (e: React.PointerEvent) => {
     e.preventDefault()
@@ -415,7 +443,7 @@ export default function App() {
   }
 
   return (
-    <div className="app" style={appStyle} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+    <div className={`app${compactPanels ? ' app--compact-panels' : ''}`} style={appStyle} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <header className="topbar">
         <div className="topbar__brand">
           <span className="topbar__logo"><Icon name="brand" /></span>
@@ -454,11 +482,17 @@ export default function App() {
           onClose={() => setMediaPanelOpen(false)}
           onImport={() => libraryRef.current?.click()}
         />}
+        {compactPanels && mediaPanelOpen && <button
+          type="button"
+          className="panel-scrim"
+          onClick={() => setMediaPanelOpen(false)}
+          aria-label={t('미디어 패널 바깥 영역 닫기', 'Close media panel from outside')}
+        />}
         <section className="stage__preview">
           {!showShowcasePreview
             ? <Preview onOpenCrop={() => { setPlaying(false); setShowCropEditor(true) }} />
             : <div className="preview preview--suspended" aria-hidden="true" />}
-          <div className="transport">
+          <div className={`transport${selection ? ' transport--selection' : ''}`}>
             <button
               className="iconbtn iconbtn--play"
               onClick={() => setPlaying(!isPlaying)}
@@ -479,17 +513,27 @@ export default function App() {
             </div>
             <div className="transport__spacer" />
             <button className="btn btn--sm" onClick={splitAtPlayhead} disabled={!hasClips} title={t('단축키: S', 'Shortcut: S')}><Icon name="split" />{t('분할', 'Split')}</button>
-            <button className="btn btn--sm" onClick={addBackground}><Icon name="palette" />{t('배경', 'Background')}</button>
-            <button className="btn btn--sm" onClick={addText}><Icon name="text" />{t('텍스트', 'Text')}</button>
-            <button className="btn btn--sm" onClick={() => setShowStickers(true)}><Icon name="heart" />{t('스티커', 'Sticker')}</button>
-            <button className="btn btn--sm" onClick={() => setShowShapes(true)}><Icon name="shape" />{t('도형', 'Shape')}</button>
+            {selection && <button className="btn btn--sm transport__inspector-action" onClick={() => {
+              setMediaPanelOpen(false)
+              setInspectorExpanded(false)
+              setInspectorOpen(true)
+            }}><Icon name="panel" />{t('편집', 'Edit')}</button>}
+            <button className="btn btn--sm transport__insert-action" onClick={addBackground}><Icon name="palette" />{t('배경', 'Background')}</button>
+            <button className="btn btn--sm transport__insert-action" onClick={addText}><Icon name="text" />{t('텍스트', 'Text')}</button>
+            <button className="btn btn--sm transport__insert-action" onClick={() => setShowStickers(true)}><Icon name="heart" />{t('스티커', 'Sticker')}</button>
+            <button className="btn btn--sm transport__insert-action" onClick={() => setShowShapes(true)}><Icon name="shape" />{t('도형', 'Shape')}</button>
             <button className="iconbtn" onClick={undo} disabled={!canUndo} aria-label={t('실행 취소', 'Undo')}><Icon name="undo" /></button>
             <button className="iconbtn" onClick={redo} disabled={!canRedo} aria-label={t('다시 실행', 'Redo')}><Icon name="redo" /></button>
-            <button className="btn btn--sm" onClick={duplicateSelected} disabled={!selection} title={t('단축키: ⌘D', 'Shortcut: ⌘D')}><Icon name="copy" />{t('복제', 'Duplicate')}</button>
-            <button className="btn btn--sm btn--danger" onClick={deleteSelected} disabled={!selection} title={t('단축키: Delete', 'Shortcut: Delete')}><Icon name="trash" />{t('삭제', 'Delete')}</button>
+            <button className="btn btn--sm transport__selection-action" onClick={duplicateSelected} disabled={!selection} title={t('단축키: ⌘D', 'Shortcut: ⌘D')}><Icon name="copy" />{t('복제', 'Duplicate')}</button>
+            <button className="btn btn--sm btn--danger transport__selection-action" onClick={deleteSelected} disabled={!selection} title={t('단축키: Delete', 'Shortcut: Delete')}><Icon name="trash" />{t('삭제', 'Delete')}</button>
           </div>
         </section>
-        {inspectorOpen && <Inspector onOpenCrop={() => { setPlaying(false); setShowCropEditor(true) }} />}
+        {inspectorOpen && <Inspector
+          onOpenCrop={() => { setPlaying(false); setShowCropEditor(true) }}
+          onClose={closeInspector}
+          expanded={inspectorExpanded}
+          onToggleExpanded={() => setInspectorExpanded((expanded) => !expanded)}
+        />}
         {inspectorOpen && <div className="resizer resizer--v" onPointerDown={startResize('w')} title={t('패널 너비 조절', 'Resize panel')} />}
       </main>
 
@@ -503,13 +547,13 @@ export default function App() {
         addShape(kind)
         setShowShapes(false)
         setInspectorOpen(true)
-        if (window.innerWidth <= 860) setMediaPanelOpen(false)
+        if (compactPanels) setMediaPanelOpen(false)
       }} />}
       {showStickers && <StickerPicker onClose={() => setShowStickers(false)} onSelect={(kind) => {
         addSticker(kind)
         setShowStickers(false)
         setInspectorOpen(true)
-        if (window.innerWidth <= 860) setMediaPanelOpen(false)
+        if (compactPanels) setMediaPanelOpen(false)
       }} />}
       {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
       {showProjectHome && <ProjectHome

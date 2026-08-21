@@ -881,7 +881,12 @@ function BackgroundInspector({ bg, tab }: { bg: Background; tab: InspectorTab })
   )
 }
 
-export default function Inspector({ onOpenCrop }: { onOpenCrop: () => void }) {
+export default function Inspector({ onOpenCrop, onClose, expanded, onToggleExpanded }: {
+  onOpenCrop: () => void
+  onClose?: () => void
+  expanded?: boolean
+  onToggleExpanded?: () => void
+}) {
   const { t } = useLanguage()
   const selection = useEditor((s) => s.selection)
   const selectedItems = useEditor((s) => s.selectedItems)
@@ -926,7 +931,15 @@ export default function Inspector({ onOpenCrop }: { onOpenCrop: () => void }) {
   }, [activeTab, inspectorTabs])
 
   return (
-    <aside className="inspector">
+    <aside className={`inspector${expanded ? ' inspector--expanded' : ''}`} aria-label={translate('편집 속성', 'Editing properties')}>
+      <div className="inspector__sheet-bar">
+        <span className="inspector__sheet-grabber" aria-hidden="true" />
+        {onToggleExpanded && <button type="button" className="iconbtn" onClick={onToggleExpanded}
+          aria-label={expanded ? translate('속성 패널 작게 보기', 'Collapse properties') : translate('속성 패널 크게 보기', 'Expand properties')}
+          aria-expanded={Boolean(expanded)}><Icon name="fit" /></button>}
+        {onClose && <button type="button" className="iconbtn" onClick={onClose}
+          aria-label={translate('속성 패널 닫기', 'Close properties')}><Icon name="close" /></button>}
+      </div>
       <div className="inspector__context">
         <small>{selection ? translate('선택 항목 편집', 'Edit selection') : translate('프로젝트 설정', 'Project settings')}</small>
         <b title={contextTitle}>{contextTitle}</b>
