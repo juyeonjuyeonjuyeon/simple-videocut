@@ -17,6 +17,7 @@ import { translate, useLanguage } from '../i18n'
 import { DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-removal'
 import { BASIC_MOTION_OPTIONS } from '../utils/basic-motion'
 import { resolveVisualFilter, VISUAL_FILTER_OPTIONS } from '../utils/color-filter'
+import { inferTextStylePreset, TEXT_STYLE_OPTIONS, textStylePatch, type TextStylePreset } from '../utils/text-style'
 
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
@@ -335,6 +336,33 @@ function ColorFilterRow({ preset, amount, onPatch }: {
       {resolved.filterPreset !== 'none' && <Range label={translate('필터 강도', 'Filter strength')} value={resolved.filterAmount} min={0} max={100} step={1} unit="%"
         onChange={(value) => onPatch({ filterAmount: value })} />}
       <div className="inspector__hint">{translate('색만 바꾸며 원본 파일은 그대로 유지됩니다. 강도 0%는 원본과 같습니다.', 'Only the color changes; the source stays untouched. Zero strength is identical to the original.')}</div>
+    </div>
+  )
+}
+
+function TextStylePresetRow({ text, onApply }: { text: TextOverlay; onApply: (preset: TextStylePreset) => void }) {
+  const active = inferTextStylePreset(text)
+  return (
+    <div className="inspector__group">
+      <div className="text-style-presets" role="radiogroup" aria-label={translate('글자 스타일 프리셋', 'Text style presets')}>
+        {TEXT_STYLE_OPTIONS.map((option) => {
+          const style = option.patch
+          return (
+            <button type="button" role="radio" aria-checked={active === option.value} key={option.value}
+              className={active === option.value ? 'is-active' : ''} onClick={() => onApply(option.value)}>
+              <span className="text-style-presets__sample" style={{
+                color: style.color,
+                background: style.box ? style.boxColor : 'transparent',
+                WebkitTextStroke: style.strokeWidth ? `${Math.max(1, style.strokeWidth * 25)}px ${style.strokeColor}` : undefined,
+                textShadow: style.shadow ? `0 ${Math.max(1, style.shadowDist * 35)}px ${Math.max(1, style.shadowBlur * 30)}px ${style.shadowColor}` : undefined,
+              }}>가Aa</span>
+              <span>{translate(option.label, option.labelEn)}</span>
+            </button>
+          )
+        })}
+      </div>
+      <div className="inspector__hint">{translate('내용·글꼴·크기·위치·시간은 바꾸지 않고 색상·배경·외곽선·그림자만 적용합니다.', 'Applies only color, box, outline, and shadow without changing content, font, size, position, or timing.')}</div>
+      <button type="button" className="btn btn--sm" onClick={() => onApply('default')}>{translate('기본 스타일로 복원', 'Restore default style')}</button>
     </div>
   )
 }
@@ -753,6 +781,8 @@ function TextInspector({ text, tab }: { text: TextOverlay; tab: InspectorTab }) 
   const visualOrder = normalizeVisualOrder(overlays, texts, storedVisualOrder)
   const idx = visualOrder.findIndex((item) => item.type === 'text' && item.id === text.id)
   const set = (p: Partial<TextOverlay>) => update(text.id, p)
+  const setStyle = (p: Partial<TextOverlay>) => update(text.id, p)
+  const applyTextStyle = (preset: TextStylePreset) => update(text.id, textStylePatch(preset))
   const localTime = Math.max(0, Math.min(playhead - text.start, text.end - text.start))
   const position = positionAt(text, localTime)
 
@@ -793,17 +823,18 @@ function TextInspector({ text, tab }: { text: TextOverlay; tab: InspectorTab }) 
         </InspectorBlock>
       </>}
       {tab === 'style' && <>
+        <InspectorBlock title={translate('스타일 프리셋', 'Style presets')}><TextStylePresetRow text={text} onApply={applyTextStyle} /></InspectorBlock>
         <InspectorBlock title={translate('글자색', 'Text color')}>
-          <div className="inspector__group"><div className="inspector__row"><label className="field__label"><span>{translate('색상', 'Color')}</span></label><input type="color" value={text.color} onChange={(e) => set({ color: e.target.value })} /></div><Range label={translate('불투명도', 'Opacity')} value={Math.round(text.colorAlpha * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => set({ colorAlpha: v / 100 })} /></div>
+          <div className="inspector__group"><div className="inspector__row"><label className="field__label"><span>{translate('색상', 'Color')}</span></label><input type="color" value={text.color} onChange={(e) => setStyle({ color: e.target.value })} /></div><Range label={translate('불투명도', 'Opacity')} value={Math.round(text.colorAlpha * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => setStyle({ colorAlpha: v / 100 })} /></div>
         </InspectorBlock>
         <InspectorBlock title={translate('배경 박스', 'Background box')}>
-          <div className="inspector__group"><label className="switch"><input type="checkbox" checked={text.box} onChange={(e) => set({ box: e.target.checked })} /><span>{translate('배경 박스 사용', 'Use background box')}</span></label>{text.box && <><div className="inspector__row"><label className="field__label"><span>{translate('배경색', 'Background color')}</span></label><input type="color" value={text.boxColor} onChange={(e) => set({ boxColor: e.target.value })} /></div><Range label={translate('불투명도', 'Opacity')} value={Math.round(text.boxAlpha * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => set({ boxAlpha: v / 100 })} /></>}</div>
+          <div className="inspector__group"><label className="switch"><input type="checkbox" checked={text.box} onChange={(e) => setStyle({ box: e.target.checked })} /><span>{translate('배경 박스 사용', 'Use background box')}</span></label>{text.box && <><div className="inspector__row"><label className="field__label"><span>{translate('배경색', 'Background color')}</span></label><input type="color" value={text.boxColor} onChange={(e) => setStyle({ boxColor: e.target.value })} /></div><Range label={translate('불투명도', 'Opacity')} value={Math.round(text.boxAlpha * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => setStyle({ boxAlpha: v / 100 })} /></>}</div>
         </InspectorBlock>
         <InspectorBlock title={translate('테두리', 'Outline')}>
-          <div className="inspector__group"><Range label={translate('두께', 'Width')} value={Number((text.strokeWidth * 100).toFixed(1))} min={0} max={15} step={0.1} onChange={(v) => set({ strokeWidth: v / 100 })} />{text.strokeWidth > 0 && <div className="inspector__row"><label className="field__label"><span>{translate('색상', 'Color')}</span></label><input type="color" value={text.strokeColor} onChange={(e) => set({ strokeColor: e.target.value })} /></div>}</div>
+          <div className="inspector__group"><Range label={translate('두께', 'Width')} value={Number((text.strokeWidth * 100).toFixed(1))} min={0} max={15} step={0.1} onChange={(v) => setStyle({ strokeWidth: v / 100 })} />{text.strokeWidth > 0 && <div className="inspector__row"><label className="field__label"><span>{translate('색상', 'Color')}</span></label><input type="color" value={text.strokeColor} onChange={(e) => setStyle({ strokeColor: e.target.value })} /></div>}</div>
         </InspectorBlock>
         <InspectorBlock title={translate('그림자', 'Shadow')}>
-          <div className="inspector__group"><label className="switch"><input type="checkbox" checked={text.shadow} onChange={(e) => set({ shadow: e.target.checked })} /><span>{translate('그림자 사용', 'Enable shadow')}</span></label>{text.shadow && <><div className="inspector__row"><label className="field__label"><span>{translate('색상', 'Color')}</span></label><input type="color" value={text.shadowColor} onChange={(e) => set({ shadowColor: e.target.value })} /></div><Range label={translate('번짐', 'Blur')} value={Math.round(text.shadowBlur * 100)} min={0} max={40} step={1} unit="%" onChange={(v) => set({ shadowBlur: v / 100 })} /><Range label={translate('거리', 'Distance')} value={Math.round(text.shadowDist * 100)} min={0} max={30} step={1} unit="%" onChange={(v) => set({ shadowDist: v / 100 })} /></>}</div>
+          <div className="inspector__group"><label className="switch"><input type="checkbox" checked={text.shadow} onChange={(e) => setStyle({ shadow: e.target.checked })} /><span>{translate('그림자 사용', 'Enable shadow')}</span></label>{text.shadow && <><div className="inspector__row"><label className="field__label"><span>{translate('색상', 'Color')}</span></label><input type="color" value={text.shadowColor} onChange={(e) => setStyle({ shadowColor: e.target.value })} /></div><Range label={translate('번짐', 'Blur')} value={Math.round(text.shadowBlur * 100)} min={0} max={40} step={1} unit="%" onChange={(v) => setStyle({ shadowBlur: v / 100 })} /><Range label={translate('거리', 'Distance')} value={Math.round(text.shadowDist * 100)} min={0} max={30} step={1} unit="%" onChange={(v) => setStyle({ shadowDist: v / 100 })} /></>}</div>
         </InspectorBlock>
       </>}
       {tab === 'time' && <>
