@@ -216,6 +216,61 @@ describe('timeline splitting', () => {
     expect(useEditor.getState().selection).toBeNull()
   })
 
+  it('keeps automatically bound captions aligned through main-track edits', () => {
+    const first = clip(1)
+    const second = { ...clip(1), id: 'clip-2', name: 'second.mp4' }
+    useEditor.setState({ clips: [first, second], audios: [], captionTracks: [] })
+    const trackId = useEditor.getState().addCaptionTrack('연결 자막')
+    const cueId = useEditor.getState().addCaptionCue(trackId, 2.25)!
+    useEditor.getState().updateCaptionCue(trackId, cueId, { end: 3 })
+
+    expect(useEditor.getState().captionTracks[0].cues[0]).toMatchObject({
+      start: 2.25, end: 3, source: { type: 'clip', id: 'clip-2', offsetStart: 0.25, offsetEnd: 1 },
+    })
+
+    useEditor.getState().updateClip('clip-1', { trimEnd: 1 })
+    expect(useEditor.getState().captionTracks[0].cues[0]).toMatchObject({ start: 1.25, end: 2 })
+
+    useEditor.getState().reorderClip('clip-2', 0)
+    expect(useEditor.getState().captionTracks[0].cues[0]).toMatchObject({ start: 0.25, end: 1 })
+
+    useEditor.getState().removeClip('clip-2')
+    expect(useEditor.getState().captionTracks[0].cues[0]).toMatchObject({ start: 0.25, end: 1 })
+    expect(useEditor.getState().captionTracks[0].cues[0].source).toBeUndefined()
+  })
+
+  it('can bind a caption to an audio source and follows its timeline move', () => {
+    const audio = {
+      id: 'audio-1', name: 'voice.m4a', src: '', file: new File([], 'voice.m4a'), sourceSize: 0,
+      duration: 4, trimStart: 0, trimEnd: 4, volume: 1, muted: false, color: '#000', start: 0, repeat: 1,
+    }
+    useEditor.setState({ clips: [clip(1)], audios: [audio], captionTracks: [] })
+    const trackId = useEditor.getState().addCaptionTrack('음성 자막')
+    const cueId = useEditor.getState().addCaptionCue(trackId, 0.5)!
+
+    expect(useEditor.getState().setCaptionCueSource(trackId, cueId, { type: 'audio', id: audio.id })).toBe(true)
+    useEditor.getState().updateAudio(audio.id, { start: 2 })
+
+    expect(useEditor.getState().captionTracks[0].cues[0]).toMatchObject({
+      start: 2.5, end: 4, source: { type: 'audio', id: audio.id, offsetStart: 0.5, offsetEnd: 2 },
+    })
+  })
+
+  it('rebinds a contained caption to the correct main-track piece after a split', () => {
+    useEditor.setState({ clips: [clip(1)], audios: [], captionTracks: [], playhead: 1 })
+    const trackId = useEditor.getState().addCaptionTrack('분할 자막')
+    const cueId = useEditor.getState().addCaptionCue(trackId, 0.2)!
+    useEditor.getState().updateCaptionCue(trackId, cueId, { end: 0.8 })
+
+    useEditor.getState().splitAtPlayhead()
+
+    const state = useEditor.getState()
+    expect(state.clips).toHaveLength(2)
+    expect(state.captionTracks[0].cues[0]).toMatchObject({
+      start: 0.2, end: 0.8, source: { type: 'clip', id: state.clips[0].id, offsetStart: 0.2, offsetEnd: 0.8 },
+    })
+  })
+
   it('migrates older projects to an empty dedicated caption collection', () => {
     const legacyProject: ProjectState = {
       clips: [clip(1)], overlays: [], audios: [], backgrounds: [], texts: [],

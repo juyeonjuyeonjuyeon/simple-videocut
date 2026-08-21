@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { CaptionTrack } from '../types'
-import { CAPTION_STYLE_DEFAULTS, captionStyleForCue, normalizeCaptionTrack, resolveCaptionStyle, wrapCaptionLines } from './captions'
+import type { AudioClip, CaptionTrack, Clip } from '../types'
+import { CAPTION_STYLE_DEFAULTS, captionSourceBinding, captionStyleForCue, normalizeCaptionTrack, resolveCaptionStyle, syncCaptionTracksToSources, wrapCaptionLines } from './captions'
+
+const sourceClip = (id: string, duration = 2): Clip => ({
+  id, kind: 'video', name: `${id}.mp4`, src: '', file: new File([], `${id}.mp4`), sourceSize: 0,
+  duration, trimStart: 0, trimEnd: duration, speed: 1, volume: 1, muted: true,
+  hasAudio: false, color: '#000', rotate: 0, flipH: false, flipV: false,
+  crop: { top: 0, right: 0, bottom: 0, left: 0 }, repeat: 1,
+})
 
 describe('dedicated caption model', () => {
   it('normalizes unsafe style values without changing the shared defaults', () => {
@@ -33,5 +40,26 @@ describe('dedicated caption model', () => {
     expect(wrapCaptionLines('짧은 자막 문장입니다', 6, 2, measure)).toEqual(['짧은 자막', '문장입니다'])
     expect(wrapCaptionLines('one two three four', 7, 2, measure)).toEqual(['one two', 'three…'])
     expect(wrapCaptionLines('ABCDEFGHIJ', 4, 2, measure)).toEqual(['ABCD', 'EFG…'])
+  })
+
+  it('keeps cue offsets stable when its source clip or audio moves', () => {
+    const clips = [sourceClip('clip-a'), sourceClip('clip-b')]
+    const audio: AudioClip = {
+      id: 'voice', name: 'voice.m4a', src: '', file: new File([], 'voice.m4a'), sourceSize: 0,
+      duration: 4, trimStart: 0, trimEnd: 4, volume: 1, muted: false, color: '#000', start: 1, repeat: 1,
+    }
+    const source = captionSourceBinding(2.25, 3, clips, [audio], { type: 'clip', id: 'clip-b' })
+    const track: CaptionTrack = {
+      id: 'track', name: 'linked', language: 'ko', hidden: false, locked: false,
+      style: { ...CAPTION_STYLE_DEFAULTS },
+      cues: [{ id: 'cue', text: '연결', start: 2.25, end: 3, origin: 'manual', source }],
+    }
+
+    const moved = syncCaptionTracksToSources([track], [sourceClip('clip-a', 3), sourceClip('clip-b')], [audio])
+    expect(moved[0].cues[0]).toMatchObject({ start: 3.25, end: 4, source: { id: 'clip-b', offsetStart: 0.25, offsetEnd: 1 } })
+
+    const missing = syncCaptionTracksToSources(moved, [sourceClip('clip-a', 3)], [audio])
+    expect(missing[0].cues[0]).toMatchObject({ start: 3.25, end: 4 })
+    expect(missing[0].cues[0].source).toBeUndefined()
   })
 })

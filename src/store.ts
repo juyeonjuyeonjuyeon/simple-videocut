@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup, VisualLayerRef, MediaAsset, ShapeKind, CaptionTrack, CaptionCue, CaptionStyle } from './types'
+import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup, VisualLayerRef, MediaAsset, ShapeKind, CaptionTrack, CaptionCue, CaptionSourceBinding, CaptionStyle } from './types'
 import { NO_CROP, FONT_OPTIONS } from './types'
 import type { ProjectState } from './utils/project'
 import { assertMediaCapacity, probeVideo, probeImage, probeAudio, nextClipColor, isVideoFile, isImageFile, isAudioFile } from './utils/media'
@@ -8,7 +8,7 @@ import { keyframeAt, positionAt } from './utils/motion'
 import { normalizeVisualOrder } from './utils/layers'
 import { OVERLAY_STYLE_DEFAULTS } from './utils/overlay-style'
 import { createShapePlaceholderFile, resolveShapeStyle, shapeLabel, SHAPE_STYLE_DEFAULTS } from './utils/shape'
-import { CAPTION_STYLE_DEFAULTS, normalizeCaptionCue, normalizeCaptionTrack, resolveCaptionStyle } from './utils/captions'
+import { CAPTION_STYLE_DEFAULTS, captionSourceBinding, normalizeCaptionCue, normalizeCaptionTrack, refreshCaptionCueSource, resolveCaptionStyle, syncCaptionTracksToSources } from './utils/captions'
 import { translate } from './i18n'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
@@ -88,6 +88,7 @@ interface EditorState {
   removeCaptionTrack: (id: string) => void
   addCaptionCue: (trackId: string, at?: number) => string | null
   importCaptionCues: (trackId: string, cues: Array<Pick<CaptionCue, 'text' | 'start' | 'end'>>, replace?: boolean) => number
+  setCaptionCueSource: (trackId: string, cueId: string, source: Pick<CaptionSourceBinding, 'type' | 'id'> | null) => boolean
   updateCaptionCue: (trackId: string, cueId: string, patch: Partial<Omit<CaptionCue, 'id'>>) => void
   removeCaptionCue: (trackId: string, cueId: string) => void
 
@@ -339,10 +340,14 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   removeClip: (id) => {
-    set((s) => ({
-      clips: s.clips.filter((c) => c.id !== id),
-      selection: s.selection?.type === 'clip' && s.selection.id === id ? null : s.selection,
-    }))
+    set((s) => {
+      const clips = s.clips.filter((c) => c.id !== id)
+      return {
+        clips,
+        captionTracks: syncCaptionTracksToSources(s.captionTracks, clips, s.audios),
+        selection: s.selection?.type === 'clip' && s.selection.id === id ? null : s.selection,
+      }
+    })
   },
 
   updateClip: (id, patch) =>
@@ -373,8 +378,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       const anchorAfter = clips[anchorIndex]
       const afterLength = anchorAfter ? clipTimelineDuration(anchorAfter) : beforeLength
       const ratio = beforeLength > 0 ? afterLength / beforeLength : 1
+      const syncedCaptionTracks = syncCaptionTracksToSources(s.captionTracks, clips, s.audios)
       const anchoredGroups = s.groups.filter((group) => group.members.some((member) => member.type === 'clip' && member.id === id))
-      if (!anchoredGroups.length || Math.abs(ratio - 1) < 1e-6) return { clips }
+      if (!anchoredGroups.length || Math.abs(ratio - 1) < 1e-6) return { clips, captionTracks: syncedCaptionTracks }
       const grouped = (type: TimelineItemRef['type'], itemId: string) => anchoredGroups.some((group) => group.members.some((member) => member.type === type && member.id === itemId))
       const scaleStart = (start: number) => Math.max(0, anchorStart + (start - anchorStart) * ratio)
       return {
@@ -399,6 +405,14 @@ export const useEditor = create<EditorState>((set, get) => ({
           const start = scaleStart(item.start)
           return { ...item, start, end: start + (item.end - item.start) * ratio }
         }),
+        captionTracks: syncedCaptionTracks.map((track) => track.locked ? track : {
+          ...track,
+          cues: track.cues.map((cue) => {
+            if (cue.source || !grouped('caption', cue.id)) return cue
+            const start = scaleStart(cue.start)
+            return { ...cue, start, end: start + (cue.end - cue.start) * ratio }
+          }),
+        }),
       }
     }),
 
@@ -409,7 +423,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (i < 0 || j < 0 || j >= s.clips.length) return s
       const clips = s.clips.slice()
       ;[clips[i], clips[j]] = [clips[j], clips[i]]
-      return { clips }
+      return { clips, captionTracks: syncCaptionTracksToSources(s.captionTracks, clips, s.audios) }
     }),
 
   reorderClip: (id, toIndex) =>
@@ -421,7 +435,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       const idx = Math.max(0, Math.min(toIndex, clips.length))
       if (idx === from) return s
       clips.splice(idx, 0, item)
-      return { clips }
+      return { clips, captionTracks: syncCaptionTracksToSources(s.captionTracks, clips, s.audios) }
     }),
 
   splitAtPlayhead: () => {
@@ -446,7 +460,12 @@ export const useEditor = create<EditorState>((set, get) => ({
             const left: Clip = { ...c, id: uid(), repeat: boundary }
             const right: Clip = { ...c, id: uid(), repeat: c.repeat - boundary }
             const nextClips = [...clips.slice(0, i), left, right, ...clips.slice(i + 1)]
-            set({ clips: nextClips, selection: { type: 'clip', id: right.id } })
+            const state = get()
+            set({
+              clips: nextClips,
+              captionTracks: syncCaptionTracksToSources(state.captionTracks, nextClips, state.audios, { rebindMissing: true }),
+              selection: { type: 'clip', id: right.id },
+            })
             return
           }
         }
@@ -460,7 +479,12 @@ export const useEditor = create<EditorState>((set, get) => ({
         const remaining = c.repeat - cycleIndex - 1
         if (remaining > 0) pieces.push({ ...c, id: uid(), repeat: remaining })
         const nextClips = [...clips.slice(0, i), ...pieces, ...clips.slice(i + 1)]
-        set({ clips: nextClips, selection: { type: 'clip', id: right.id } })
+        const state = get()
+        set({
+          clips: nextClips,
+          captionTracks: syncCaptionTracksToSources(state.captionTracks, nextClips, state.audios, { rebindMissing: true }),
+          selection: { type: 'clip', id: right.id },
+        })
         return
       }
     }
@@ -481,6 +505,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({
       clips: s.clips.filter((x) => x.id !== id),
       overlays: [...s.overlays, ov],
+      captionTracks: syncCaptionTracksToSources(s.captionTracks, s.clips.filter((x) => x.id !== id), s.audios),
       visualOrder: [...normalizeVisualOrder(s.overlays, s.texts, s.visualOrder), { type: 'overlay', id: ov.id }],
       selection: { type: 'overlay', id: ov.id },
     })
@@ -495,6 +520,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({
       clips: s.clips.filter((x) => x.id !== id),
       backgrounds: [...s.backgrounds, bg],
+      captionTracks: syncCaptionTracksToSources(s.captionTracks, s.clips.filter((x) => x.id !== id), s.audios),
       selection: { type: 'background', id: bg.id },
     })
   },
@@ -557,9 +583,11 @@ export const useEditor = create<EditorState>((set, get) => ({
       const offsets = clipStartOffsets(s.clips)
       const insertAt = offsets.findIndex((offset) => offset >= b.start - 1e-6)
       const index = insertAt < 0 ? s.clips.length : insertAt
+      const clips = [...s.clips.slice(0, index), clip as Clip, ...s.clips.slice(index)]
       return {
         backgrounds: s.backgrounds.filter((x) => x.id !== id),
-        clips: [...s.clips.slice(0, index), clip as Clip, ...s.clips.slice(index)],
+        clips,
+        captionTracks: syncCaptionTracksToSources(s.captionTracks, clips, s.audios),
         selection: { type: 'clip', id: clip.id },
       }
     }),
@@ -692,10 +720,12 @@ export const useEditor = create<EditorState>((set, get) => ({
       const offsets = clipStartOffsets(s.clips)
       const insertAt = offsets.findIndex((offset) => offset >= o.start - 1e-6)
       const index = insertAt < 0 ? s.clips.length : insertAt
+      const clips = [...s.clips.slice(0, index), clip as Clip, ...s.clips.slice(index)]
       return {
         overlays: s.overlays.filter((x) => x.id !== id),
         visualOrder: s.visualOrder.filter((item) => item.type !== 'overlay' || item.id !== id),
-        clips: [...s.clips.slice(0, index), clip as Clip, ...s.clips.slice(index)],
+        clips,
+        captionTracks: syncCaptionTracksToSources(s.captionTracks, clips, s.audios),
         selection: { type: 'clip', id: clip.id },
       }
     }),
@@ -730,8 +760,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   updateAudio: (id, patch) =>
-    set((s) => ({
-      audios: s.audios.map((a) => {
+    set((s) => {
+      const audios = s.audios.map((a) => {
         if (a.id !== id) return a
         const next = { ...a, ...patch }
         clampTrim(next)
@@ -741,14 +771,19 @@ export const useEditor = create<EditorState>((set, get) => ({
         normalizeExactDuration(next, patch, next.trimEnd - next.trimStart)
         clampFades(next, audioLength(next))
         return next
-      }),
-    })),
+      })
+      return { audios, captionTracks: syncCaptionTracksToSources(s.captionTracks, s.clips, audios) }
+    }),
 
   removeAudio: (id) => {
-    set((s) => ({
-      audios: s.audios.filter((a) => a.id !== id),
-      selection: s.selection?.type === 'audio' && s.selection.id === id ? null : s.selection,
-    }))
+    set((s) => {
+      const audios = s.audios.filter((a) => a.id !== id)
+      return {
+        audios,
+        captionTracks: syncCaptionTracksToSources(s.captionTracks, s.clips, audios),
+        selection: s.selection?.type === 'audio' && s.selection.id === id ? null : s.selection,
+      }
+    })
   },
 
   // ---------- text ----------
@@ -853,13 +888,20 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!track || track.locked) return null
     const total = projectDuration(state.clips, state.overlays, state.audios, state.texts, state.backgrounds)
     const start = Math.max(0, Math.min(at ?? state.playhead, Math.max(0, total - 0.05)))
-    const cue = normalizeCaptionCue({
+    const offsets = clipStartOffsets(state.clips)
+    const sourceClipIndex = state.clips.findIndex((clip, index) => (
+      start >= offsets[index] - 1e-6 && start < offsets[index] + clipTimelineDuration(clip) - 1e-6
+    ))
+    const clipEnd = sourceClipIndex >= 0 ? offsets[sourceClipIndex] + clipTimelineDuration(state.clips[sourceClipIndex]) : Infinity
+    const end = Math.min(total > 0 ? Math.min(total, start + 2.5) : start + 2.5, clipEnd)
+    let cue = normalizeCaptionCue({
       id: uid(),
       text: translate('자막을 입력하세요', 'Enter a caption'),
       start,
-      end: total > 0 ? Math.min(total, start + 2.5) : start + 2.5,
+      end,
       origin: 'manual',
     })
+    cue = { ...cue, source: captionSourceBinding(cue.start, cue.end, state.clips, state.audios) }
     set((s) => ({
       captionTracks: s.captionTracks.map((candidate) => candidate.id === trackId
         ? { ...candidate, cues: [...candidate.cues, cue].sort((a, b) => a.start - b.start || a.end - b.end) }
@@ -873,9 +915,11 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!track || track.locked) return 0
     const capacity = Math.max(0, 10_000 - (replace ? 0 : track.cues.length))
     const replacedIds = replace ? new Set(track.cues.map((cue) => cue.id)) : new Set<string>()
-    const imported = cues.slice(0, capacity).map((cue) => normalizeCaptionCue({
-      id: uid(), text: cue.text, start: cue.start, end: cue.end, origin: 'imported',
-    }))
+    const state = get()
+    const imported = cues.slice(0, capacity).map((cue) => {
+      const normalized = normalizeCaptionCue({ id: uid(), text: cue.text, start: cue.start, end: cue.end, origin: 'imported' })
+      return { ...normalized, source: captionSourceBinding(normalized.start, normalized.end, state.clips, state.audios) }
+    })
     set((s) => ({
       captionTracks: s.captionTracks.map((candidate) => candidate.id === trackId
         ? { ...candidate, cues: [...(replace ? [] : candidate.cues), ...imported].sort((a, b) => a.start - b.start || a.end - b.end) }
@@ -890,17 +934,35 @@ export const useEditor = create<EditorState>((set, get) => ({
     return imported.length
   },
 
+  setCaptionCueSource: (trackId, cueId, target) => {
+    const state = get()
+    const track = state.captionTracks.find((candidate) => candidate.id === trackId)
+    const cue = track?.cues.find((candidate) => candidate.id === cueId)
+    if (!track || !cue || track.locked) return false
+    const source = target ? captionSourceBinding(cue.start, cue.end, state.clips, state.audios, target) : undefined
+    if (target && !source) return false
+    set((s) => ({
+      captionTracks: s.captionTracks.map((candidate) => candidate.id === trackId
+        ? { ...candidate, cues: candidate.cues.map((item) => item.id === cueId ? { ...item, source } : item) }
+        : candidate),
+    }))
+    return true
+  },
+
   updateCaptionCue: (trackId, cueId, patch) =>
     set((s) => ({
       captionTracks: s.captionTracks.map((track) => {
         if (track.id !== trackId || track.locked) return track
-        const cues = track.cues.map((cue) => cue.id === cueId
-          ? normalizeCaptionCue({
+        const changesTiming = Object.prototype.hasOwnProperty.call(patch, 'start') || Object.prototype.hasOwnProperty.call(patch, 'end')
+        const cues = track.cues.map((cue) => {
+          if (cue.id !== cueId) return cue
+          const normalized = normalizeCaptionCue({
             ...cue,
             ...patch,
             style: patch.style ? { ...(cue.style ?? {}), ...patch.style } : cue.style,
           })
-          : cue)
+          return changesTiming ? refreshCaptionCueSource(normalized, s.clips, s.audios) : normalized
+        })
         return { ...track, cues: cues.sort((a, b) => a.start - b.start || a.end - b.end) }
       }),
     })),
@@ -1057,15 +1119,19 @@ export const useEditor = create<EditorState>((set, get) => ({
       : s.texts.find((x) => x.id === item.id)?.start).filter((value): value is number => value != null)
     const applied = Math.max(delta, -(starts.length ? Math.min(...starts) : 0))
     const has = (type: TimelineItemRef['type'], id: string) => free.some((item) => item.type === type && item.id === id)
+    const audios = s.audios.map((item) => has('audio', item.id) ? { ...item, start: item.start + applied } : item)
+    const movedCaptionTracks = s.captionTracks.map((track) => track.locked ? track : {
+      ...track,
+      cues: track.cues.map((cue) => has('caption', cue.id)
+        ? refreshCaptionCueSource({ ...cue, start: cue.start + applied, end: cue.end + applied }, s.clips, audios)
+        : cue),
+    })
     return {
       overlays: s.overlays.map((item) => has('overlay', item.id) ? { ...item, start: item.start + applied } : item),
-      audios: s.audios.map((item) => has('audio', item.id) ? { ...item, start: item.start + applied } : item),
+      audios,
       backgrounds: s.backgrounds.map((item) => has('background', item.id) ? { ...item, start: item.start + applied } : item),
       texts: s.texts.map((item) => has('text', item.id) ? { ...item, start: item.start + applied, end: item.end + applied } : item),
-      captionTracks: s.captionTracks.map((track) => track.locked ? track : {
-        ...track,
-        cues: track.cues.map((cue) => has('caption', cue.id) ? { ...cue, start: cue.start + applied, end: cue.end + applied } : cue),
-      }),
+      captionTracks: syncCaptionTracksToSources(movedCaptionTracks, s.clips, audios),
     }
   }),
   setAspectRatio: (r) => set({ aspectRatio: r }),
@@ -1081,12 +1147,15 @@ export const useEditor = create<EditorState>((set, get) => ({
     const has = (type: TimelineItemRef['type'], id: string) => chosen.some((item) => item.type === type && item.id === id)
     const groups = s.groups.map((group) => ({ ...group, members: group.members.filter((member) => !has(member.type, member.id)) }))
       .filter((group) => group.members.length >= 2)
+    const clips = s.clips.filter((item) => !has('clip', item.id))
+    const audios = s.audios.filter((item) => !has('audio', item.id))
+    const captionTracks = s.captionTracks.map((track) => track.locked ? track : { ...track, cues: track.cues.filter((cue) => !has('caption', cue.id)) })
     set({
-      clips: s.clips.filter((item) => !has('clip', item.id)),
+      clips,
       overlays: s.overlays.filter((item) => !has('overlay', item.id)),
-      audios: s.audios.filter((item) => !has('audio', item.id)),
+      audios,
       texts: s.texts.filter((item) => !has('text', item.id)),
-      captionTracks: s.captionTracks.map((track) => track.locked ? track : { ...track, cues: track.cues.filter((cue) => !has('caption', cue.id)) }),
+      captionTracks: syncCaptionTracksToSources(captionTracks, clips, audios),
       backgrounds: s.backgrounds.filter((item) => !has('background', item.id)),
       visualOrder: s.visualOrder.filter((item) => !has(item.type, item.id)),
       groups, selection: null, selectedItems: [],
@@ -1101,7 +1170,12 @@ export const useEditor = create<EditorState>((set, get) => ({
       const i = s.clips.findIndex((c) => c.id === sel.id)
       if (i < 0) return
       const copy: Clip = { ...s.clips[i], id: uid() }
-      set({ clips: [...s.clips.slice(0, i + 1), copy, ...s.clips.slice(i + 1)], selection: { type: 'clip', id: copy.id } })
+      const clips = [...s.clips.slice(0, i + 1), copy, ...s.clips.slice(i + 1)]
+      set({
+        clips,
+        captionTracks: syncCaptionTracksToSources(s.captionTracks, clips, s.audios),
+        selection: { type: 'clip', id: copy.id },
+      })
     } else if (sel.type === 'overlay') {
       const o = s.overlays.find((x) => x.id === sel.id)
       if (!o) return
@@ -1136,7 +1210,15 @@ export const useEditor = create<EditorState>((set, get) => ({
       const cue = track?.cues.find((candidate) => candidate.id === sel.id)
       if (!track || !cue || track.locked) return
       const length = cue.end - cue.start
-      const copy: CaptionCue = { ...cue, id: uid(), start: cue.end, end: cue.end + length }
+      const start = cue.end
+      const end = cue.end + length
+      const copy: CaptionCue = {
+        ...cue,
+        id: uid(),
+        start,
+        end,
+        source: captionSourceBinding(start, end, s.clips, s.audios),
+      }
       set({
         captionTracks: s.captionTracks.map((candidate) => candidate.id === track.id
           ? { ...candidate, cues: [...candidate.cues, copy].sort((a, b) => a.start - b.start || a.end - b.end) }
@@ -1211,6 +1293,9 @@ function replaceEditorProject(p: ProjectState) {
   const linkedAssetId = (item: Clip | Overlay | AudioClip | Background) => item.assetId && mediaLibrary.some((asset) => asset.id === item.assetId)
     ? item.assetId
     : mediaLibrary.find((asset) => (!!item.nativeMediaId && asset.nativeMediaId === item.nativeMediaId) || sameSourceFile(asset, item.file))?.id
+  const clips = p.clips.map((c) => ({ ...c, assetId: linkedAssetId(c), fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 }))
+  const audios = p.audios.map((a) => ({ ...a, assetId: linkedAssetId(a), fadeIn: a.fadeIn ?? 0, fadeOut: a.fadeOut ?? 0 }))
+  const captionTracks = syncCaptionTracksToSources((p.captionTracks ?? []).map(normalizeCaptionTrack), clips, audios)
   past.length = 0
   future = []
   lastHistoryKey = ''
@@ -1235,7 +1320,7 @@ function replaceEditorProject(p: ProjectState) {
       shape: o.shape ? resolveShapeStyle(o.shape) : undefined,
       fadeIn: o.fadeIn ?? 0, fadeOut: o.fadeOut ?? 0, positionKeyframes: o.positionKeyframes ?? [],
     })),
-    audios: p.audios.map((a) => ({ ...a, assetId: linkedAssetId(a), fadeIn: a.fadeIn ?? 0, fadeOut: a.fadeOut ?? 0 })),
+    audios,
     backgrounds: p.backgrounds.map((b) => ({
       ...b, assetId: linkedAssetId(b), opacity: b.opacity ?? 1, locked: b.locked ?? false, hidden: b.hidden ?? false,
       fadeIn: b.fadeIn ?? 0, fadeOut: b.fadeOut ?? 0,
@@ -1245,8 +1330,8 @@ function replaceEditorProject(p: ProjectState) {
       locked: t.locked ?? false, hidden: t.hidden ?? false,
       fadeIn: t.fadeIn ?? 0, fadeOut: t.fadeOut ?? 0, positionKeyframes: t.positionKeyframes ?? [],
     })),
-    captionTracks: (p.captionTracks ?? []).map(normalizeCaptionTrack),
-    clips: p.clips.map((c) => ({ ...c, assetId: linkedAssetId(c), fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 })),
+    captionTracks,
+    clips,
     markers: p.markers ?? [],
     groups: p.groups ?? [],
     visualOrder: normalizeVisualOrder(p.overlays, p.texts, p.visualOrder),

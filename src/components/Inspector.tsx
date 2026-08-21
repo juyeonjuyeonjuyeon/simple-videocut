@@ -13,7 +13,7 @@ import { resolveShapeStyle, SHAPE_OPTIONS, SHAPE_STYLE_DEFAULTS } from '../utils
 import ShapeIcon from './ShapeIcon'
 import { translate, useLanguage } from '../i18n'
 import { DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-removal'
-import { CAPTION_STYLE_DEFAULTS } from '../utils/captions'
+import { CAPTION_STYLE_DEFAULTS, captionSourceSpans } from '../utils/captions'
 
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
@@ -760,10 +760,23 @@ function TextInspector({ text, tab }: { text: TextOverlay; tab: InspectorTab }) 
 function CaptionInspector({ track, cue, tab }: { track: CaptionTrack; cue: CaptionCue; tab: InspectorTab }) {
   const updateTrack = useEditor((s) => s.updateCaptionTrack)
   const updateCue = useEditor((s) => s.updateCaptionCue)
+  const setCueSource = useEditor((s) => s.setCaptionCueSource)
   const removeCue = useEditor((s) => s.removeCaptionCue)
   const setPlayhead = useEditor((s) => s.setPlayhead)
+  const clips = useEditor((s) => s.clips)
+  const audios = useEditor((s) => s.audios)
   const setCue = (patch: Partial<Omit<CaptionCue, 'id'>>) => updateCue(track.id, cue.id, patch)
   const setStyle = (patch: Partial<CaptionStyle>) => updateTrack(track.id, { style: patch })
+  const sourceSpans = captionSourceSpans(clips, audios)
+  const sourceValue = cue.source ? `${cue.source.type}:${cue.source.id}` : ''
+  const sourceName = (type: 'clip' | 'audio', id: string) => (
+    type === 'clip' ? clips.find((clip) => clip.id === id)?.name : audios.find((audio) => audio.id === id)?.name
+  ) ?? translate('알 수 없는 파일', 'Unknown file')
+  const sourceOption = (type: 'clip' | 'audio', id: string) => sourceSpans.find((span) => span.type === type && span.id === id)
+  const sourceFits = (type: 'clip' | 'audio', id: string) => {
+    const span = sourceOption(type, id)
+    return Boolean(span && cue.start >= span.start - 1e-6 && cue.end <= span.end + 1e-6)
+  }
 
   return (
     <div className="inspector__body">
@@ -799,6 +812,37 @@ function CaptionInspector({ track, cue, tab }: { track: CaptionTrack; cue: Capti
             <div className="field__label"><span>{translate('종료', 'End')}</span><TimeField seconds={cue.end} onChange={(end) => setCue({ end: Math.max(cue.start + 0.05, end) })} /></div>
             <DurationRow seconds={cue.end - cue.start} onSet={(duration) => setCue({ end: cue.start + duration })} />
             <button className="btn btn--sm" onClick={() => setPlayhead(cue.start)}>{translate('시작 위치로 이동', 'Go to caption start')}</button>
+          </div>
+        </InspectorBlock>
+        <InspectorBlock title={translate('원본 미디어 연결', 'Source media binding')}>
+          <div className="inspector__group">
+            <label className="style-select">
+              <span>{translate('따라갈 클립', 'Follow source')}</span>
+              <select aria-label={translate('자막 원본 연결', 'Caption source binding')} value={sourceValue} disabled={track.locked}
+                onChange={(event) => {
+                  if (!event.target.value) { setCueSource(track.id, cue.id, null); return }
+                  const separator = event.target.value.indexOf(':')
+                  const type = event.target.value.slice(0, separator)
+                  const id = event.target.value.slice(separator + 1)
+                  setCueSource(track.id, cue.id, { type: type as 'clip' | 'audio', id })
+                }}>
+                <option value="">{translate('연결 안 함', 'Not linked')}</option>
+                {clips.length > 0 && <optgroup label={translate('메인 트랙', 'Main track')}>
+                  {clips.map((clip) => <option key={clip.id} value={`clip:${clip.id}`} disabled={!sourceFits('clip', clip.id)}>{clip.name}</option>)}
+                </optgroup>}
+                {audios.length > 0 && <optgroup label={translate('오디오 트랙', 'Audio track')}>
+                  {audios.map((audio) => <option key={audio.id} value={`audio:${audio.id}`} disabled={!sourceFits('audio', audio.id)}>{audio.name}</option>)}
+                </optgroup>}
+              </select>
+            </label>
+            {cue.source && <div className="inspector__hint">{translate(
+              `${sourceName(cue.source.type, cue.source.id)}의 ${formatClock(cue.source.offsetStart)}부터 연결되어 있습니다.`,
+              `Linked from ${formatClock(cue.source.offsetStart)} in ${sourceName(cue.source.type, cue.source.id)}.`,
+            )}</div>}
+            <div className="inspector__hint">{translate(
+              '연결하면 원본을 이동하거나 앞 클립의 길이·순서를 바꿔도 자막이 함께 따라갑니다. 두 원본의 경계를 걸친 자막은 연결할 수 없습니다.',
+              'Linked captions follow source moves and main-track duration or order changes. A cue spanning two sources cannot be linked.',
+            )}</div>
           </div>
         </InspectorBlock>
       </>}
