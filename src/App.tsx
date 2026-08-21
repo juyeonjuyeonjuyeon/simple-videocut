@@ -18,6 +18,7 @@ import HelpDialog from './components/HelpDialog'
 import CropDialog from './components/CropDialog'
 import ThemePicker from './components/ThemePicker'
 import ShapePicker from './components/ShapePicker'
+import ShowcasePreviewDialog from './components/ShowcasePreviewDialog'
 import { localizedErrorMessage, useLanguage } from './i18n'
 
 const ACTIVE_PROJECT_KEY = 'simplecut-active-project-name'
@@ -77,6 +78,7 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false)
   const [showCropEditor, setShowCropEditor] = useState(false)
   const [showShapes, setShowShapes] = useState(false)
+  const [showShowcasePreview, setShowShowcasePreview] = useState(false)
   const [showProjectHome, setShowProjectHome] = useState(false)
   const [projectDialogMode, setProjectDialogMode] = useState<'manage' | 'saveAs' | null>(null)
   const [lastProjectName, setLastProjectName] = useState<string | null>(() => {
@@ -299,10 +301,11 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable
-      const modalOpen = showExport || showHelp || showCropEditor || showShapes || showProjectHome || projectDialogMode !== null
+      const modalOpen = showExport || showHelp || showCropEditor || showShapes || showShowcasePreview || showProjectHome || projectDialogMode !== null
       if (e.key === 'Escape' && modalOpen) {
         e.preventDefault()
-        if (showCropEditor) setShowCropEditor(false)
+        if (showShowcasePreview) { setPlaying(false); setShowShowcasePreview(false) }
+        else if (showCropEditor) setShowCropEditor(false)
         else if (showShapes) setShowShapes(false)
         else if (showHelp) setShowHelp(false)
         else if (showExport) setShowExport(false)
@@ -425,6 +428,10 @@ export default function App() {
           <button className={`iconbtn iconbtn--sm${inspectorOpen ? ' iconbtn--on' : ''}`} onClick={toggleInspector} aria-label={t('오른쪽 편집 패널 열기·닫기', 'Toggle right inspector')}><Icon name="panel" /></button>
           <ThemePicker />
           <button className="iconbtn iconbtn--sm topbar__help" onClick={() => setShowHelp(true)} aria-label={t('도움말 열기', 'Open help')}><Icon name="help" /></button>
+          <button className="btn btn--sm topbar__showcase" onClick={() => { setPlaying(false); setShowShowcasePreview(true) }} disabled={total <= 0}
+            title={t('편집 손잡이 없이 완제품과 플랫폼 화면 확인', 'Review the final result and platform layouts without editing handles')}>
+            <Icon name="screen" />{t('미리보기', 'Preview')}
+          </button>
           <button className="btn btn--primary" onClick={() => setShowExport(true)} disabled={!hasClips}>
             {t('내보내기', 'Export')}
           </button>
@@ -445,7 +452,9 @@ export default function App() {
           onImport={() => libraryRef.current?.click()}
         />}
         <section className="stage__preview">
-          <Preview onOpenCrop={() => { setPlaying(false); setShowCropEditor(true) }} />
+          {!showShowcasePreview
+            ? <Preview onOpenCrop={() => { setPlaying(false); setShowCropEditor(true) }} />
+            : <div className="preview preview--suspended" aria-hidden="true" />}
           <div className="transport">
             <button
               className="iconbtn iconbtn--play"
@@ -484,6 +493,7 @@ export default function App() {
       <Timeline />
 
       {showExport && <ExportDialog onClose={() => setShowExport(false)} />}
+      {showShowcasePreview && <ShowcasePreviewDialog projectName={activeProjectName} onClose={() => setShowShowcasePreview(false)} />}
       {showCropEditor && <CropDialog onClose={() => setShowCropEditor(false)} />}
       {showShapes && <ShapePicker onClose={() => setShowShapes(false)} onSelect={(kind) => {
         addShape(kind)

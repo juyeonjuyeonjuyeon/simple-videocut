@@ -3,7 +3,8 @@ import type { ReactNode, SVGProps } from 'react'
 export type IconName = 'brand' | 'plus' | 'folder' | 'play' | 'pause' | 'repeat' | 'split' | 'layers' |
   'music' | 'palette' | 'text' | 'undo' | 'redo' | 'copy' | 'trash' | 'download' | 'upload' | 'share' | 'close' |
   'warning' | 'screen' | 'video' | 'image' | 'mute' | 'rotate' | 'flipH' | 'flipV' | 'save' | 'panel' | 'crop' | 'lock' | 'unlock' | 'library' | 'search' |
-  'eye' | 'eyeOff' | 'zoomIn' | 'zoomOut' | 'fit' | 'marker' | 'grid' | 'list' | 'project' | 'help' | 'shape' | 'settings' | 'removeBackground'
+  'eye' | 'eyeOff' | 'zoomIn' | 'zoomOut' | 'fit' | 'marker' | 'grid' | 'list' | 'project' | 'help' | 'shape' | 'settings' | 'removeBackground' |
+  'heart' | 'comment' | 'more' | 'user'
 
 // Every icon uses the same 24px grid, optical centre, round joins and stroke
 // weight. Filled shapes are reserved for primary actions such as play.
@@ -54,6 +55,10 @@ const paths: Record<IconName, ReactNode> = {
   help: <><circle cx="12" cy="12" r="9"/><path d="M9.3 9a2.8 2.8 0 0 1 5.4 1.1c0 2.1-2.7 2.4-2.7 4.6M12 18h.01"/></>,
   shape: <><rect x="3.5" y="8" width="9.5" height="9.5" rx="2"/><circle cx="16.5" cy="8" r="4"/></>,
   removeBackground: <><path d="m4 20 11.2-11.2 2 2L6 22H4z"/><path d="M16.5 2.5v4M14.5 4.5h4M7 3.5v3M5.5 5h3M19 15v4M17 17h4"/></>,
+  heart: <path d="M20.8 8.8c0 5.2-8.8 10.1-8.8 10.1S3.2 14 3.2 8.8A4.7 4.7 0 0 1 12 6.5a4.7 4.7 0 0 1 8.8 2.3Z"/>,
+  comment: <path d="M20 15.2a3 3 0 0 1-3 3H9l-5 3v-6a3 3 0 0 1-1-2.2V7a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3Z"/>,
+  more: <><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></>,
+  user: <><circle cx="12" cy="8" r="3.5"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></>,
   settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.55v-.1A1.7 1.7 0 0 0 8.45 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.05 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.25V9.55h.1A1.7 1.7 0 0 0 4.05 8a1.7 1.7 0 0 0-.34-1.88l-.06-.06L6.51 3.2l.06.06A1.7 1.7 0 0 0 8.45 3.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V1.8h4.05v.1A1.7 1.7 0 0 0 15 3.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 8c.38.55.98.9 1.65.95h.1V13h-.1a1.7 1.7 0 0 0-1.65 2Z"/></>,
 }
 

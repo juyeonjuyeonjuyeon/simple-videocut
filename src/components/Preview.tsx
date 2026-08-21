@@ -119,7 +119,7 @@ function ShapeOverlayGraphic({ overlay, frameHeight }: { overlay: Overlay; frame
   )
 }
 
-export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
+export default function Preview({ onOpenCrop, presentation = false }: { onOpenCrop: () => void; presentation?: boolean }) {
   const { t: tr } = useLanguage()
   const clips = useEditor((s) => s.clips)
   const overlays = useEditor((s) => s.overlays)
@@ -127,7 +127,8 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
   const texts = useEditor((s) => s.texts)
   const backgrounds = useEditor((s) => s.backgrounds)
   const storedVisualOrder = useEditor((s) => s.visualOrder)
-  const selection = useEditor((s) => s.selection)
+  const storedSelection = useEditor((s) => s.selection)
+  const selection = presentation ? null : storedSelection
   const playhead = useEditor((s) => s.playhead)
   const isPlaying = useEditor((s) => s.isPlaying)
   const aspectRatio = useEditor((s) => s.aspectRatio)
@@ -781,7 +782,8 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
   const hasContent = clips.length > 0 || overlays.length > 0 || audios.length > 0 || backgrounds.length > 0
 
   return (
-    <div className="preview" ref={areaRef}>
+    <div className={`preview${presentation ? ' preview--presentation' : ''}`} ref={areaRef}
+      aria-label={presentation ? tr('완제품 미리보기 화면', 'Final preview canvas') : undefined}>
       <div
         className="preview__frame"
         ref={frameRef}
