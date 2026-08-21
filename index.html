@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob: simplecut-media:; connect-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'" />
     <meta name="referrer" content="no-referrer" />
+    <script vite-ignore src="./theme-init.js"></script>
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%app-icon.svg" />
     <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
     <link rel="apple-touch-icon" href="%BASE_URL%icon-192.png" />
@@ -35,6 +36,8 @@
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
         transition: opacity 0.35s ease;
       }
+      html[data-theme='light'] #splash { background: #F4F6F8; color: #242830; }
+      html[data-theme='strawberry'] #splash { background: #FFF1F5; color: #4A2F39; }
       #splash.hide { opacity: 0; pointer-events: none; }
       .splash__logo { width: 68px; height: 68px; border-radius: 15px; box-shadow: 0 16px 38px rgba(0,0,0,.28); }
       .splash__name { font-size: 20px; font-weight: 700; letter-spacing: 0.3px; }
@@ -43,6 +46,8 @@
         border: 3px solid #343A43; border-top-color: #D07A7D; border-radius: 50%;
         animation: splashspin 0.8s linear infinite;
       }
+      html[data-theme='light'] .splash__spin { border-color: #D6DCE3; border-top-color: #CB6B72; }
+      html[data-theme='strawberry'] .splash__spin { border-color: #E4BECB; border-top-color: #DE7388; }
       @keyframes splashspin { to { transform: rotate(360deg); } }
     </style>
     <script type="module" src="/src/main.tsx"></script>

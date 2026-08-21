@@ -1,6 +1,6 @@
-const CACHE = 'simplecut-shell-v3'
+const CACHE = 'simplecut-shell-v4'
 const scoped = (path = '') => new URL(path, self.registration.scope).pathname
-const SHELL = [scoped(), scoped('manifest.webmanifest'), scoped('app-icon.svg'), scoped('icon-192.png'), scoped('icon-512.png')]
+const SHELL = [scoped(), scoped('manifest.webmanifest'), scoped('theme-init.js'), scoped('app-icon.svg'), scoped('icon-192.png'), scoped('icon-512.png')]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)))

@@ -15,6 +15,7 @@ import { startPointerDrag } from './utils/pointer'
 import MediaPanel from './components/MediaPanel'
 import HelpDialog from './components/HelpDialog'
 import CropDialog from './components/CropDialog'
+import ThemePicker from './components/ThemePicker'
 
 const ACTIVE_PROJECT_KEY = 'simplecut-active-project-name'
 
@@ -397,6 +398,7 @@ export default function App() {
           <button className={`iconbtn iconbtn--sm${mediaPanelOpen ? ' iconbtn--on' : ''}`} onClick={toggleMediaPanel} title="왼쪽 미디어 패널 열기·닫기" aria-label="왼쪽 미디어 패널 열기·닫기"><Icon name="library" /></button>
           <button className="btn btn--sm topbar__project-menu" onClick={() => setShowProjectHome(true)} title="프로젝트 홈·저장·열기" aria-label="프로젝트 홈 열기"><Icon name="project" /><span>프로젝트</span></button>
           <button className={`iconbtn iconbtn--sm${inspectorOpen ? ' iconbtn--on' : ''}`} onClick={toggleInspector} title="오른쪽 편집 패널 열기·닫기" aria-label="오른쪽 편집 패널 열기·닫기"><Icon name="panel" /></button>
+          <ThemePicker />
           <button className="iconbtn iconbtn--sm topbar__help" onClick={() => setShowHelp(true)} title="도움말과 단축키 (?)" aria-label="도움말 열기"><Icon name="help" /></button>
           <button className="btn btn--primary" onClick={() => setShowExport(true)} disabled={!hasClips}>
             내보내기
