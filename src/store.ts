@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup, VisualLayerRef, MediaAsset, ShapeKind, StickerKind } from './types'
+import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup, VisualLayerRef, MediaAsset, ShapeKind, StickerKind, BasicMotionPreset } from './types'
 import { NO_CROP, FONT_OPTIONS } from './types'
 import type { ProjectState } from './utils/project'
 import { assertMediaCapacity, probeVideo, probeImage, probeAudio, nextClipColor, isVideoFile, isImageFile, isAudioFile } from './utils/media'
@@ -9,6 +9,7 @@ import { normalizeVisualOrder } from './utils/layers'
 import { OVERLAY_STYLE_DEFAULTS } from './utils/overlay-style'
 import { createShapePlaceholderFile, resolveShapeStyle, shapeLabel, SHAPE_STYLE_DEFAULTS } from './utils/shape'
 import { createStickerPlaceholderFile, stickerLabel } from './utils/sticker'
+import { basicMotionFadeIn, basicMotionFrames } from './utils/basic-motion'
 import { translate } from './i18n'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
@@ -92,6 +93,7 @@ interface EditorState {
   togglePositionKeyframe: (type: 'overlay' | 'text', id: string) => void
   clearPositionKeyframes: (type: 'overlay' | 'text', id: string) => void
   setPositionKeyframeEasing: (type: 'overlay' | 'text', id: string, keyframeId: string, easing: KeyframeEasing) => void
+  applyBasicMotion: (type: 'overlay' | 'text', id: string, preset: BasicMotionPreset) => void
 
   // ---- misc ----
   select: (sel: Selection, additive?: boolean) => void
@@ -688,16 +690,17 @@ export const useEditor = create<EditorState>((set, get) => ({
   moveOverlayToMain: (id) =>
     set((s) => {
       const o = s.overlays.find((x) => x.id === id)
-      if (!o || o.shape) return s
+      if (!o || o.shape || o.sticker) return s
       // Drop the overlay-only fields; the rest is a Clip.
       const {
         start: _s, x: _x, y: _y, scale: _sc, scaleY: _sy, aspectLocked: _al, angle: _a,
         opacity: _o, locked: _l, hidden: _h, positionKeyframes: _pk,
+        basicMotion: _bm, sticker: _sticker,
         borderWidth: _bw, borderColor: _bc, borderStyle: _bs,
         shadowEnabled: _se, shadowColor: _sc2, shadowOpacity: _so, shadowBlur: _sb, shadowX: _sx, shadowY: _sy2,
         maskShape: _ms, ...clip
       } = o
-      void _s; void _x; void _y; void _sc; void _sy; void _al; void _a; void _o; void _l; void _h; void _pk
+      void _s; void _x; void _y; void _sc; void _sy; void _al; void _a; void _o; void _l; void _h; void _pk; void _bm; void _sticker
       void _bw; void _bc; void _bs; void _se; void _sc2; void _so; void _sb; void _sx; void _sy2; void _ms
       const offsets = clipStartOffsets(s.clips)
       const insertAt = offsets.findIndex((offset) => offset >= o.start - 1e-6)
@@ -866,6 +869,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         }
         return {
           ...item,
+          basicMotion: frames.length ? undefined : item.basicMotion,
           positionKeyframes: [...frames.filter((candidate) => candidate.id !== existing?.id), frame].sort((a, b) => a.time - b.time),
         }
       }
@@ -882,10 +886,11 @@ export const useEditor = create<EditorState>((set, get) => ({
         const local = Math.max(0, Math.min(s.playhead - item.start, length))
         const frames = item.positionKeyframes ?? []
         const existing = keyframeAt(frames, local)
-        if (existing) return { ...item, positionKeyframes: frames.filter((frame) => frame.id !== existing.id) }
+        if (existing) return { ...item, basicMotion: undefined, positionKeyframes: frames.filter((frame) => frame.id !== existing.id) }
         const position = positionAt(item, local)
         return {
           ...item,
+          basicMotion: undefined,
           positionKeyframes: [...frames, { id: uid(), time: local, ...position, easing: 'ease-in-out' as const }]
             .sort((a, b) => a.time - b.time),
         }
@@ -897,17 +902,32 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   clearPositionKeyframes: (type, id) =>
     set((s) => type === 'overlay'
-      ? { overlays: s.overlays.map((item) => item.id === id ? { ...item, positionKeyframes: [] } : item) }
-      : { texts: s.texts.map((item) => item.id === id ? { ...item, positionKeyframes: [] } : item) }),
+      ? { overlays: s.overlays.map((item) => item.id === id ? { ...item, basicMotion: undefined, positionKeyframes: [] } : item) }
+      : { texts: s.texts.map((item) => item.id === id ? { ...item, basicMotion: undefined, positionKeyframes: [] } : item) }),
 
   setPositionKeyframeEasing: (type, id, keyframeId, easing) =>
     set((s) => {
       const patch = <T extends Overlay | TextOverlay>(item: T): T => item.id === id
-        ? { ...item, positionKeyframes: (item.positionKeyframes ?? []).map((frame) => frame.id === keyframeId ? { ...frame, easing } : frame) }
+        ? { ...item, basicMotion: undefined, positionKeyframes: (item.positionKeyframes ?? []).map((frame) => frame.id === keyframeId ? { ...frame, easing } : frame) }
         : item
       return type === 'overlay'
         ? { overlays: s.overlays.map((item) => patch(item)) }
         : { texts: s.texts.map((item) => patch(item)) }
+    }),
+
+  applyBasicMotion: (type, id, preset) =>
+    set((s) => {
+      const apply = <T extends Overlay | TextOverlay>(item: T): T => {
+        if (item.id !== id) return item
+        const length = type === 'overlay' ? overlayLength(item as Overlay) : Math.max(0.1, (item as TextOverlay).end - item.start)
+        const target = positionAt(item, length)
+        const positionKeyframes = basicMotionFrames(preset, target.x, target.y, length)
+          .map((frame) => ({ ...frame, id: uid() }))
+        return { ...item, x: target.x, y: target.y, basicMotion: preset, fadeIn: basicMotionFadeIn(preset, length), positionKeyframes }
+      }
+      return type === 'overlay'
+        ? { overlays: s.overlays.map((item) => apply(item)) }
+        : { texts: s.texts.map((item) => apply(item)) }
     }),
 
   // ---------- misc ----------

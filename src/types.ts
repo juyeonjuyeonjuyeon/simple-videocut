@@ -46,6 +46,9 @@ export interface TimelineMarker {
 
 export type KeyframeEasing = 'linear' | 'ease-in-out'
 
+/** Deliberately small motion set backed by the shared preview/export keyframe path. */
+export type BasicMotionPreset = 'none' | 'fade' | 'rise' | 'slide-left' | 'drift'
+
 /** Position automation shared by picture-in-picture and text layers. */
 export interface PositionKeyframe {
   id: string
@@ -199,6 +202,7 @@ export interface Overlay {
   sticker?: StickerStyle
   fadeIn?: number
   fadeOut?: number
+  basicMotion?: BasicMotionPreset
   positionKeyframes?: PositionKeyframe[]
 }
 
@@ -274,6 +278,7 @@ export interface TextOverlay {
   hidden?: boolean
   fadeIn?: number
   fadeOut?: number
+  basicMotion?: BasicMotionPreset
   positionKeyframes?: PositionKeyframe[]
 }
 

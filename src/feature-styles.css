@@ -25,6 +25,19 @@
 .sticker-inspector-card div { min-width: 0; display: grid; gap: 3px; }
 .sticker-inspector-card b { font-size: 12px; }
 .sticker-inspector-card span { color: var(--text-dim); font-size: 10px; line-height: 1.4; }
+.motion-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.motion-presets > button { min-width: 0; display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 7px; padding: 7px; border: 1px solid var(--line); border-radius: 9px; color: var(--text); background: var(--bg-1); font-size: 11px; text-align: left; cursor: pointer; }
+.motion-presets > button:hover,
+.motion-presets > button:focus-visible { border-color: var(--accent); outline: none; }
+.motion-presets > button.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, var(--bg-1)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+.motion-presets__sample { position: relative; width: 34px; height: 24px; overflow: hidden; border-radius: 6px; background: var(--bg-2); }
+.motion-presets__sample::before { content: ''; position: absolute; top: 11px; left: 5px; right: 5px; height: 1px; background: var(--line-strong); opacity: .75; }
+.motion-presets__sample i { position: absolute; top: 8px; left: 13px; width: 8px; height: 8px; border-radius: 3px; background: var(--blush); box-shadow: 0 0 0 1px color-mix(in srgb, var(--blush) 65%, var(--bg-0)); }
+.motion-presets__sample--none i { opacity: .75; }
+.motion-presets__sample--fade i { box-shadow: -8px 0 0 color-mix(in srgb, var(--blush) 15%, transparent), -4px 0 0 color-mix(in srgb, var(--blush) 40%, transparent); }
+.motion-presets__sample--rise i { box-shadow: 0 7px 0 color-mix(in srgb, var(--blush) 25%, transparent); }
+.motion-presets__sample--slide-left i { box-shadow: -9px 0 0 color-mix(in srgb, var(--blush) 25%, transparent); }
+.motion-presets__sample--drift i { box-shadow: -8px 3px 0 color-mix(in srgb, var(--blush) 22%, transparent), 8px -3px 0 color-mix(in srgb, var(--blush) 45%, transparent); }
 
 @media (max-width: 600px) {
   .sticker-picker { grid-template-columns: repeat(3, minmax(0, 1fr)); max-height: min(58vh, 440px); overflow-y: auto; }

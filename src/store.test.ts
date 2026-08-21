@@ -90,6 +90,25 @@ describe('timeline splitting', () => {
     expect(positionAt(result, 1)).toMatchObject({ x: 0.8, y: 0.7 })
   })
 
+  it('applies basic motion with bounded keyframes shared by preview and export', () => {
+    const overlay: Overlay = {
+      ...clip(1), id: 'overlay-motion', start: 0, x: 0.5, y: 0.5, scale: 0.5, angle: 0,
+      positionKeyframes: [],
+    }
+    useEditor.setState({ overlays: [overlay], playhead: 0 })
+
+    useEditor.getState().applyBasicMotion('overlay', overlay.id, 'rise')
+
+    const animated = useEditor.getState().overlays[0]
+    expect(animated.basicMotion).toBe('rise')
+    expect(animated.positionKeyframes).toHaveLength(2)
+    expect(animated.fadeIn).toBeGreaterThan(0)
+    expect(positionAt(animated, 0).y).toBeGreaterThan(positionAt(animated, 1).y)
+
+    useEditor.getState().clearPositionKeyframes('overlay', overlay.id)
+    expect(useEditor.getState().overlays[0].basicMotion).toBeUndefined()
+  })
+
   it('moves grouped free layers together and follows a grouped main clip trim', () => {
     const overlay: Overlay = {
       ...clip(1), id: 'overlay-1', start: 0.5, x: 0.2, y: 0.3, scale: 0.5, angle: 0,

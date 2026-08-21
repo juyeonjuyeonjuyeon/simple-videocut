@@ -1,5 +1,6 @@
 import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, ExportSettings, TimelineMarker, TimelineGroup, VisualLayerRef, MediaAsset } from '../types'
 import { isStickerKind } from './sticker'
+import { isBasicMotionPreset } from './basic-motion'
 
 const DB_NAME = 'simplecut-db'
 const STORE = 'projects'
@@ -517,6 +518,7 @@ const validateItem = (value: unknown, track: string) => {
     if ('fadeIn' in item) finite(item.fadeIn, 0, PROJECT_LIMITS.maxDurationSeconds, '텍스트 시작 페이드')
     if ('fadeOut' in item) finite(item.fadeOut, 0, PROJECT_LIMITS.maxDurationSeconds, '텍스트 끝 페이드')
     if ('positionKeyframes' in item) validatePositionKeyframes(item.positionKeyframes, (item.end as number) - (item.start as number), '텍스트')
+    if ('basicMotion' in item && item.basicMotion !== undefined && !isBasicMotionPreset(item.basicMotion)) throw new Error('텍스트 기본 애니메이션 값이 잘못되었습니다.')
     return
   }
   const visual = track !== '오디오'
@@ -585,6 +587,7 @@ const validateItem = (value: unknown, track: string) => {
       if (!isStickerKind(sticker.kind)) throw new Error(`${track} 스티커 종류가 잘못되었습니다.`)
     }
     if ('positionKeyframes' in item) validatePositionKeyframes(item.positionKeyframes, ((item.trimEnd as number) - (item.trimStart as number)) / (item.speed as number) * (item.repeat as number), track)
+    if ('basicMotion' in item && item.basicMotion !== undefined && !isBasicMotionPreset(item.basicMotion)) throw new Error(`${track} 기본 애니메이션 값이 잘못되었습니다.`)
   } else if (track === '클립') {
     if ('canvasX' in item && item.canvasX !== undefined) finite(item.canvasX, 0, 1, `${track} 캔버스 가로 위치`)
     if ('canvasY' in item && item.canvasY !== undefined) finite(item.canvasY, 0, 1, `${track} 캔버스 세로 위치`)

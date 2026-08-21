@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useEditor } from '../store'
-import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop, PositionKeyframe, KeyframeEasing, OverlayBorderStyle, OverlayMaskShape } from '../types'
+import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop, PositionKeyframe, KeyframeEasing, OverlayBorderStyle, OverlayMaskShape, BasicMotionPreset } from '../types'
 import { NO_CROP } from '../types'
 import { formatTime, formatClock, parseClock, clipTimelineDuration, overlayLength, audioLength, totalDuration, exactDurationPatch } from '../utils/time'
 import { rotateBy } from '../utils/transform'
@@ -15,6 +15,7 @@ import { stickerLabel } from '../utils/sticker'
 import ShapeIcon from './ShapeIcon'
 import { translate, useLanguage } from '../i18n'
 import { DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-removal'
+import { BASIC_MOTION_OPTIONS } from '../utils/basic-motion'
 
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
@@ -296,6 +297,23 @@ function FadeRow({ length, fadeIn = 0, fadeOut = 0, onPatch, label }: {
   )
 }
 
+function BasicMotionRow({ value = 'none', onSelect }: { value?: BasicMotionPreset; onSelect: (preset: BasicMotionPreset) => void }) {
+  return (
+    <div className="inspector__group">
+      <div className="motion-presets" role="radiogroup" aria-label={translate('기본 애니메이션', 'Basic animation')}>
+        {BASIC_MOTION_OPTIONS.map((option) => (
+          <button type="button" role="radio" aria-checked={value === option.value} key={option.value}
+            className={value === option.value ? 'is-active' : ''} onClick={() => onSelect(option.value)}>
+            <span className={`motion-presets__sample motion-presets__sample--${option.value}`} aria-hidden="true"><i /></span>
+            <span>{translate(option.label, option.labelEn)}</span>
+          </button>
+        ))}
+      </div>
+      <div className="inspector__hint">{translate('위치 키프레임과 시작 페이드를 안전한 기본값으로 설정합니다. 직접 만든 위치 키프레임은 선택한 프리셋으로 바뀝니다.', 'Sets safe position keyframes and entrance fade values. Selecting a preset replaces custom position keyframes.')}</div>
+    </div>
+  )
+}
+
 function LayerStateRow({ opacity = 1, locked = false, hidden = false, onPatch, onCenter }: {
   opacity?: number; locked?: boolean; hidden?: boolean; onPatch: (p: Patch) => void
   onCenter?: (axis: 'x' | 'y' | 'both') => void
@@ -478,6 +496,7 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
   const togglePositionKeyframe = useEditor((s) => s.togglePositionKeyframe)
   const clearPositionKeyframes = useEditor((s) => s.clearPositionKeyframes)
   const setPositionKeyframeEasing = useEditor((s) => s.setPositionKeyframeEasing)
+  const applyBasicMotion = useEditor((s) => s.applyBasicMotion)
   const setPlayhead = useEditor((s) => s.setPlayhead)
   const playhead = useEditor((s) => s.playhead)
   const raise = useEditor((s) => s.raiseOverlay)
@@ -634,6 +653,7 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
           </div>
         </InspectorBlock>}
         {!ov.shape && !sticker && ov.kind === 'video' && <InspectorBlock title={translate('속도', 'Speed')}><SpeedRow speed={ov.speed} onPatch={patch} /></InspectorBlock>}
+        <InspectorBlock title={translate('기본 애니메이션', 'Basic animation')}><BasicMotionRow value={ov.basicMotion} onSelect={(preset) => applyBasicMotion('overlay', ov.id, preset)} /></InspectorBlock>
         <InspectorBlock title={translate('페이드', 'Fade')}><FadeRow length={overlayLength(ov)} fadeIn={ov.fadeIn} fadeOut={ov.fadeOut} onPatch={patch} label={translate('화면·소리 페이드', 'Video and audio fade')} /></InspectorBlock>
         <InspectorBlock title={ov.shape || sticker ? translate('길이', 'Duration') : translate('길이와 반복', 'Duration and repeat')}>
           {!ov.shape && !sticker && <RepeatRow repeat={ov.repeat} onPatch={patch} />}
@@ -693,6 +713,7 @@ function TextInspector({ text, tab }: { text: TextOverlay; tab: InspectorTab }) 
   const togglePositionKeyframe = useEditor((s) => s.togglePositionKeyframe)
   const clearPositionKeyframes = useEditor((s) => s.clearPositionKeyframes)
   const setPositionKeyframeEasing = useEditor((s) => s.setPositionKeyframeEasing)
+  const applyBasicMotion = useEditor((s) => s.applyBasicMotion)
   const setPlayhead = useEditor((s) => s.setPlayhead)
   const playhead = useEditor((s) => s.playhead)
   const remove = useEditor((s) => s.removeText)
@@ -758,6 +779,7 @@ function TextInspector({ text, tab }: { text: TextOverlay; tab: InspectorTab }) 
       </>}
       {tab === 'time' && <>
         <InspectorBlock title={translate('길이', 'Duration')}><DurationRow seconds={text.end - text.start} onSet={(duration) => set({ end: text.start + duration })} /></InspectorBlock>
+        <InspectorBlock title={translate('기본 애니메이션', 'Basic animation')}><BasicMotionRow value={text.basicMotion} onSelect={(preset) => applyBasicMotion('text', text.id, preset)} /></InspectorBlock>
         <InspectorBlock title={translate('페이드', 'Fade')}><FadeRow length={text.end - text.start} fadeIn={text.fadeIn} fadeOut={text.fadeOut} onPatch={(patch) => set(patch as Partial<TextOverlay>)} label={translate('텍스트 페이드', 'Text fade')} /></InspectorBlock>
       </>}
     </div>
