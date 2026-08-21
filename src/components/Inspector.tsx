@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useEditor } from '../store'
 import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop, PositionKeyframe, KeyframeEasing } from '../types'
 import { NO_CROP, FONT_OPTIONS } from '../types'
@@ -11,6 +11,31 @@ import { normalizeVisualOrder } from '../utils/layers'
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
   'timelineDuration' | 'fadeIn' | 'fadeOut' | 'opacity' | 'locked' | 'hidden' | 'scaleY' | 'aspectLocked'>>
+
+type InspectorTab = 'basic' | 'transform' | 'style' | 'time' | 'audio'
+interface InspectorTabOption { id: InspectorTab; label: string }
+
+function InspectorTabs({ tabs, active, onChange }: {
+  tabs: InspectorTabOption[]; active: InspectorTab; onChange: (tab: InspectorTab) => void
+}) {
+  return (
+    <div className="inspector-tabs" role="tablist" aria-label="속성 종류">
+      {tabs.map((tab) => (
+        <button key={tab.id} type="button" role="tab" aria-selected={active === tab.id}
+          className={active === tab.id ? 'is-active' : ''} onClick={() => onChange(tab.id)}>{tab.label}</button>
+      ))}
+    </div>
+  )
+}
+
+function InspectorBlock({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="inspector-block">
+      <h3>{title}</h3>
+      {children}
+    </section>
+  )
+}
 
 const decimalsOf = (step: number) => {
   const s = String(step)
@@ -269,7 +294,7 @@ function PositionKeyframeRow({ frames = [], localTime, onToggle, onClear, onSeek
 }
 
 // ---- main clip ----
-function ClipInspector({ clip }: { clip: Clip }) {
+function ClipInspector({ clip, tab }: { clip: Clip; tab: InspectorTab }) {
   const update = useEditor((s) => s.updateClip)
   const move = useEditor((s) => s.moveClip)
   const remove = useEditor((s) => s.removeClip)
@@ -283,67 +308,87 @@ function ClipInspector({ clip }: { clip: Clip }) {
   if (clip.kind === 'color') {
     return (
       <div className="inspector__body">
-        <div className="inspector__group">
-          <NameField icon={icon} name={clip.name} onChange={(v) => update(clip.id, { name: v })} />
-          <div className="inspector__hint">단색 배경 · 길이 {formatTime(clipTimelineDuration(clip))}</div>
-        </div>
-        <div className="inspector__group inspector__row">
-          <label className="field__label"><span>배경 색상</span></label>
-          <input type="color" value={clip.bgColor ?? '#000000'} onChange={(e) => update(clip.id, { bgColor: e.target.value })} />
-        </div>
-        <div className="inspector__group">
-          <Range label="길이" badge={formatTime(clip.trimEnd)} value={Math.min(clip.trimEnd, 60)} min={0.5} max={60} step={0.5} unit="초"
-            onChange={(v) => update(clip.id, { trimEnd: v })} />
-        </div>
-        <FadeRow length={clipTimelineDuration(clip)} fadeIn={clip.fadeIn} fadeOut={clip.fadeOut} onPatch={patch} label="화면 페이드" />
-        <RepeatRow repeat={clip.repeat} onPatch={patch} />
-        <div className="inspector__group btnrow">
-          <button className="btn" disabled={idx <= 0} onClick={() => move(clip.id, -1)}>← 앞으로</button>
-          <button className="btn" disabled={idx >= clips.length - 1} onClick={() => move(clip.id, 1)}>뒤로 →</button>
-        </div>
-        <button className="btn btn--danger" onClick={() => remove(clip.id)}>배경 삭제</button>
+        {tab === 'basic' && <>
+          <InspectorBlock title="기본 정보">
+            <div className="inspector__group">
+              <NameField icon={icon} name={clip.name} onChange={(v) => update(clip.id, { name: v })} />
+              <div className="inspector__hint">단색 배경 · 길이 {formatTime(clipTimelineDuration(clip))}</div>
+            </div>
+          </InspectorBlock>
+          <InspectorBlock title="색상">
+            <div className="inspector__group inspector__row">
+              <label className="field__label"><span>배경 색상</span></label>
+              <input type="color" value={clip.bgColor ?? '#000000'} onChange={(e) => update(clip.id, { bgColor: e.target.value })} />
+            </div>
+          </InspectorBlock>
+          <InspectorBlock title="트랙 위치">
+            <div className="inspector__group btnrow">
+              <button className="btn" disabled={idx <= 0} onClick={() => move(clip.id, -1)}>← 앞으로</button>
+              <button className="btn" disabled={idx >= clips.length - 1} onClick={() => move(clip.id, 1)}>뒤로 →</button>
+            </div>
+          </InspectorBlock>
+          <button className="btn btn--danger" onClick={() => remove(clip.id)}>배경 삭제</button>
+        </>}
+        {tab === 'time' && <>
+          <InspectorBlock title="길이">
+            <div className="inspector__group">
+              <Range label="길이" badge={formatTime(clip.trimEnd)} value={Math.min(clip.trimEnd, 60)} min={0.5} max={60} step={0.5} unit="초"
+                onChange={(v) => update(clip.id, { trimEnd: v })} />
+            </div>
+          </InspectorBlock>
+          <InspectorBlock title="시작과 끝"><FadeRow length={clipTimelineDuration(clip)} fadeIn={clip.fadeIn} fadeOut={clip.fadeOut} onPatch={patch} label="화면 페이드" /></InspectorBlock>
+          <InspectorBlock title="반복"><RepeatRow repeat={clip.repeat} onPatch={patch} /></InspectorBlock>
+        </>}
       </div>
     )
   }
 
   return (
     <div className="inspector__body">
-      <div className="inspector__group">
-        <NameField icon={icon} name={clip.name} onChange={(v) => update(clip.id, { name: v })} />
-        <div className="inspector__hint">길이 {formatTime(clipTimelineDuration(clip))} · 원본 {formatTime(clip.duration)}</div>
-      </div>
-
-      <div className="inspector__group">
-        <Range label="시작 트림" badge={formatTime(clip.trimStart)} value={clip.trimStart} min={0} max={clip.duration} step={0.1} unit="초"
-          onChange={(v) => update(clip.id, { trimStart: Math.min(v, clip.trimEnd - 0.1) })} />
-        <Range label="끝 트림" badge={formatTime(clip.trimEnd)} value={clip.trimEnd} min={0} max={clip.duration} step={0.1} unit="초"
-          onChange={(v) => update(clip.id, { trimEnd: Math.max(v, clip.trimStart + 0.1) })} />
-      </div>
-
-      <TransformRow rotate={clip.rotate} flipH={clip.flipH} flipV={clip.flipV} onPatch={patch} />
-      <CropRow crop={clip.crop} onPatch={patch} />
-      {clip.kind === 'video' && <SpeedRow speed={clip.speed} onPatch={patch} />}
-      {clip.kind === 'video' && <VolumeRow volume={clip.volume} muted={clip.muted} onPatch={patch} />}
-      <FadeRow length={clipTimelineDuration(clip)} fadeIn={clip.fadeIn} fadeOut={clip.fadeOut} onPatch={patch} label="화면·소리 페이드" />
-      <RepeatRow repeat={clip.repeat} onPatch={patch} />
-      <DurationRow
-        seconds={clipTimelineDuration(clip)}
-        onSet={(t) => update(clip.id, exactDurationPatch((clip.trimEnd - clip.trimStart) / clip.speed, t))}
-      />
-
-      <div className="inspector__group btnrow">
-        <button className="btn" disabled={idx <= 0} onClick={() => move(clip.id, -1)}>← 앞으로</button>
-        <button className="btn" disabled={idx >= clips.length - 1} onClick={() => move(clip.id, 1)}>뒤로 →</button>
-      </div>
-      <button className="btn" onClick={() => toOverlay(clip.id)}><Icon name="layers" />오버레이 레이어로 이동</button>
-      <button className="btn" onClick={() => toBackground(clip.id)}><Icon name="palette" />배경 레이어로 이동</button>
-      <button className="btn btn--danger" onClick={() => remove(clip.id)}>클립 삭제</button>
+      {tab === 'basic' && <>
+        <InspectorBlock title="기본 정보">
+          <div className="inspector__group">
+            <NameField icon={icon} name={clip.name} onChange={(v) => update(clip.id, { name: v })} />
+            <div className="inspector__hint">길이 {formatTime(clipTimelineDuration(clip))} · 원본 {formatTime(clip.duration)}</div>
+          </div>
+        </InspectorBlock>
+        <InspectorBlock title="트랙 위치">
+          <div className="inspector__group btnrow">
+            <button className="btn" disabled={idx <= 0} onClick={() => move(clip.id, -1)}>← 앞으로</button>
+            <button className="btn" disabled={idx >= clips.length - 1} onClick={() => move(clip.id, 1)}>뒤로 →</button>
+          </div>
+          <button className="btn" onClick={() => toOverlay(clip.id)}><Icon name="layers" />오버레이 레이어로 이동</button>
+          <button className="btn" onClick={() => toBackground(clip.id)}><Icon name="palette" />배경 레이어로 이동</button>
+        </InspectorBlock>
+        <button className="btn btn--danger" onClick={() => remove(clip.id)}>클립 삭제</button>
+      </>}
+      {tab === 'transform' && <>
+        <InspectorBlock title="회전과 반전"><TransformRow rotate={clip.rotate} flipH={clip.flipH} flipV={clip.flipV} onPatch={patch} /></InspectorBlock>
+        <InspectorBlock title="자르기"><CropRow crop={clip.crop} onPatch={patch} /></InspectorBlock>
+      </>}
+      {tab === 'time' && <>
+        <InspectorBlock title="트림">
+          <div className="inspector__group">
+            <Range label="시작 트림" badge={formatTime(clip.trimStart)} value={clip.trimStart} min={0} max={clip.duration} step={0.1} unit="초"
+              onChange={(v) => update(clip.id, { trimStart: Math.min(v, clip.trimEnd - 0.1) })} />
+            <Range label="끝 트림" badge={formatTime(clip.trimEnd)} value={clip.trimEnd} min={0} max={clip.duration} step={0.1} unit="초"
+              onChange={(v) => update(clip.id, { trimEnd: Math.max(v, clip.trimStart + 0.1) })} />
+          </div>
+        </InspectorBlock>
+        {clip.kind === 'video' && <InspectorBlock title="속도"><SpeedRow speed={clip.speed} onPatch={patch} /></InspectorBlock>}
+        <InspectorBlock title="페이드"><FadeRow length={clipTimelineDuration(clip)} fadeIn={clip.fadeIn} fadeOut={clip.fadeOut} onPatch={patch} label="화면·소리 페이드" /></InspectorBlock>
+        <InspectorBlock title="길이와 반복">
+          <RepeatRow repeat={clip.repeat} onPatch={patch} />
+          <DurationRow seconds={clipTimelineDuration(clip)} onSet={(t) => update(clip.id, exactDurationPatch((clip.trimEnd - clip.trimStart) / clip.speed, t))} />
+        </InspectorBlock>
+      </>}
+      {tab === 'audio' && clip.kind === 'video' && <InspectorBlock title="클립 오디오"><VolumeRow volume={clip.volume} muted={clip.muted} onPatch={patch} /></InspectorBlock>}
     </div>
   )
 }
 
 // ---- overlay ----
-function OverlayInspector({ ov }: { ov: Overlay }) {
+function OverlayInspector({ ov, tab }: { ov: Overlay; tab: InspectorTab }) {
   const update = useEditor((s) => s.updateOverlay)
   const updatePosition = useEditor((s) => s.updateLayerPosition)
   const togglePositionKeyframe = useEditor((s) => s.togglePositionKeyframe)
@@ -365,63 +410,76 @@ function OverlayInspector({ ov }: { ov: Overlay }) {
 
   return (
     <div className="inspector__body">
-      <div className="inspector__group">
-        <NameField icon={<Icon name={ov.kind === 'image' ? 'image' : 'layers'} />} name={ov.name} onChange={(v) => update(ov.id, { name: v })} />
-        <div className="inspector__hint">오버레이 · 길이 {formatTime(overlayLength(ov))} · 미리보기에서 끌어 이동/크기조절</div>
-      </div>
-
-      <div className="inspector__group">
-        <Range label="가로 위치" value={Math.round(position.x * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('overlay', ov.id, { x: v / 100 })} />
-        <Range label="세로 위치" value={Math.round(position.y * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('overlay', ov.id, { y: v / 100 })} />
-        <Range label="가로 크기" value={Math.round(ov.scale * 100)} min={10} max={100} step={1} unit="%" onChange={(v) => update(ov.id, { scale: v / 100 })} />
-        {ov.scaleY != null && !(ov.aspectLocked ?? true) && <Range label="세로 크기" value={Math.round(ov.scaleY * 100)} min={5} max={100} step={1} unit="%" onChange={(v) => update(ov.id, { scaleY: v / 100 })} />}
-        <button className={`btn btn--sm${ov.aspectLocked ?? true ? ' btn--on' : ''}`} onClick={() => update(ov.id, ov.aspectLocked ?? true
-          ? { aspectLocked: false }
-          : { aspectLocked: true, scaleY: undefined })}>
-          <Icon name={ov.aspectLocked ?? true ? 'lock' : 'unlock'} />비율 {ov.aspectLocked ?? true ? '고정' : '자유'}
-        </button>
-      </div>
-      <LayerStateRow opacity={ov.opacity} locked={ov.locked} hidden={ov.hidden} onPatch={patch}
-        onCenter={(axis) => updatePosition('overlay', ov.id, { ...(axis !== 'y' ? { x: 0.5 } : {}), ...(axis !== 'x' ? { y: 0.5 } : {}) })} />
-      <PositionKeyframeRow frames={ov.positionKeyframes} localTime={localTime}
-        onToggle={() => togglePositionKeyframe('overlay', ov.id)}
-        onClear={() => clearPositionKeyframes('overlay', ov.id)}
-        onSeek={(frame) => setPlayhead(ov.start + frame.time)}
-        onEasing={(keyframeId, easing) => setPositionKeyframeEasing('overlay', ov.id, keyframeId, easing)} />
-
-      <div className="inspector__group">
-        <Range label="시작 트림" badge={formatTime(ov.trimStart)} value={ov.trimStart} min={0} max={ov.duration} step={0.1} unit="초"
-          onChange={(v) => update(ov.id, { trimStart: Math.min(v, ov.trimEnd - 0.1) })} />
-        <Range label="끝 트림" badge={formatTime(ov.trimEnd)} value={ov.trimEnd} min={0} max={ov.duration} step={0.1} unit="초"
-          onChange={(v) => update(ov.id, { trimEnd: Math.max(v, ov.trimStart + 0.1) })} />
-      </div>
-
-      <TransformRow rotate={ov.rotate} flipH={ov.flipH} flipV={ov.flipV} onPatch={patch} />
-      <div className="inspector__group">
-        <Range label="자유 회전" value={ov.angle || 0} min={-180} max={180} step={1} unit="°" onChange={(v) => update(ov.id, { angle: v })} />
-      </div>
-      <CropRow crop={ov.crop} onPatch={patch} />
-      {ov.kind === 'video' && <SpeedRow speed={ov.speed} onPatch={patch} />}
-      {ov.kind === 'video' && <VolumeRow volume={ov.volume} muted={ov.muted} onPatch={patch} />}
-      <FadeRow length={overlayLength(ov)} fadeIn={ov.fadeIn} fadeOut={ov.fadeOut} onPatch={patch} label="화면·소리 페이드" />
-      <RepeatRow repeat={ov.repeat} onPatch={patch} />
-      <DurationRow
-        seconds={overlayLength(ov)}
-        onSet={(t) => update(ov.id, exactDurationPatch((ov.trimEnd - ov.trimStart) / ov.speed, t))}
-      />
-
-      <div className="inspector__group btnrow">
-        <button className="btn" disabled={idx <= 0} onClick={() => raise(ov.id, -1)}>▼ 아래로</button>
-        <button className="btn" disabled={idx >= visualOrder.length - 1} onClick={() => raise(ov.id, 1)}>위로 ▲</button>
-      </div>
-      <button className="btn" onClick={() => toMain(ov.id)}><Icon name="video" />메인 트랙으로 이동</button>
-      <button className="btn btn--danger" onClick={() => remove(ov.id)}>오버레이 삭제</button>
+      {tab === 'basic' && <>
+        <InspectorBlock title="기본 정보">
+          <div className="inspector__group">
+            <NameField icon={<Icon name={ov.kind === 'image' ? 'image' : 'layers'} />} name={ov.name} onChange={(v) => update(ov.id, { name: v })} />
+            <div className="inspector__hint">레이어 · 길이 {formatTime(overlayLength(ov))}</div>
+          </div>
+        </InspectorBlock>
+        <InspectorBlock title="레이어 상태">
+          <LayerStateRow opacity={ov.opacity} locked={ov.locked} hidden={ov.hidden} onPatch={patch}
+            onCenter={(axis) => updatePosition('overlay', ov.id, { ...(axis !== 'y' ? { x: 0.5 } : {}), ...(axis !== 'x' ? { y: 0.5 } : {}) })} />
+        </InspectorBlock>
+        <InspectorBlock title="레이어 위치">
+          <div className="inspector__group btnrow">
+            <button className="btn" disabled={idx <= 0} onClick={() => raise(ov.id, -1)}>▼ 아래로</button>
+            <button className="btn" disabled={idx >= visualOrder.length - 1} onClick={() => raise(ov.id, 1)}>위로 ▲</button>
+          </div>
+          <button className="btn" onClick={() => toMain(ov.id)}><Icon name="video" />메인 트랙으로 이동</button>
+        </InspectorBlock>
+        <button className="btn btn--danger" onClick={() => remove(ov.id)}>레이어 삭제</button>
+      </>}
+      {tab === 'transform' && <>
+        <InspectorBlock title="위치와 크기">
+          <div className="inspector__group">
+            <Range label="가로 위치" value={Math.round(position.x * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('overlay', ov.id, { x: v / 100 })} />
+            <Range label="세로 위치" value={Math.round(position.y * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('overlay', ov.id, { y: v / 100 })} />
+            <Range label="가로 크기" value={Math.round(ov.scale * 100)} min={10} max={100} step={1} unit="%" onChange={(v) => update(ov.id, { scale: v / 100 })} />
+            {ov.scaleY != null && !(ov.aspectLocked ?? true) && <Range label="세로 크기" value={Math.round(ov.scaleY * 100)} min={5} max={100} step={1} unit="%" onChange={(v) => update(ov.id, { scaleY: v / 100 })} />}
+            <button className={`btn btn--sm${ov.aspectLocked ?? true ? ' btn--on' : ''}`} onClick={() => update(ov.id, ov.aspectLocked ?? true
+              ? { aspectLocked: false }
+              : { aspectLocked: true, scaleY: undefined })}>
+              <Icon name={ov.aspectLocked ?? true ? 'lock' : 'unlock'} />비율 {ov.aspectLocked ?? true ? '고정' : '자유'}
+            </button>
+          </div>
+        </InspectorBlock>
+        <InspectorBlock title="회전과 반전">
+          <TransformRow rotate={ov.rotate} flipH={ov.flipH} flipV={ov.flipV} onPatch={patch} />
+          <div className="inspector__group"><Range label="자유 회전" value={ov.angle || 0} min={-180} max={180} step={1} unit="°" onChange={(v) => update(ov.id, { angle: v })} /></div>
+        </InspectorBlock>
+        <InspectorBlock title="자르기"><CropRow crop={ov.crop} onPatch={patch} /></InspectorBlock>
+        <InspectorBlock title="움직임">
+          <PositionKeyframeRow frames={ov.positionKeyframes} localTime={localTime}
+            onToggle={() => togglePositionKeyframe('overlay', ov.id)}
+            onClear={() => clearPositionKeyframes('overlay', ov.id)}
+            onSeek={(frame) => setPlayhead(ov.start + frame.time)}
+            onEasing={(keyframeId, easing) => setPositionKeyframeEasing('overlay', ov.id, keyframeId, easing)} />
+        </InspectorBlock>
+      </>}
+      {tab === 'time' && <>
+        <InspectorBlock title="트림">
+          <div className="inspector__group">
+            <Range label="시작 트림" badge={formatTime(ov.trimStart)} value={ov.trimStart} min={0} max={ov.duration} step={0.1} unit="초"
+              onChange={(v) => update(ov.id, { trimStart: Math.min(v, ov.trimEnd - 0.1) })} />
+            <Range label="끝 트림" badge={formatTime(ov.trimEnd)} value={ov.trimEnd} min={0} max={ov.duration} step={0.1} unit="초"
+              onChange={(v) => update(ov.id, { trimEnd: Math.max(v, ov.trimStart + 0.1) })} />
+          </div>
+        </InspectorBlock>
+        {ov.kind === 'video' && <InspectorBlock title="속도"><SpeedRow speed={ov.speed} onPatch={patch} /></InspectorBlock>}
+        <InspectorBlock title="페이드"><FadeRow length={overlayLength(ov)} fadeIn={ov.fadeIn} fadeOut={ov.fadeOut} onPatch={patch} label="화면·소리 페이드" /></InspectorBlock>
+        <InspectorBlock title="길이와 반복">
+          <RepeatRow repeat={ov.repeat} onPatch={patch} />
+          <DurationRow seconds={overlayLength(ov)} onSet={(t) => update(ov.id, exactDurationPatch((ov.trimEnd - ov.trimStart) / ov.speed, t))} />
+        </InspectorBlock>
+      </>}
+      {tab === 'audio' && ov.kind === 'video' && <InspectorBlock title="레이어 오디오"><VolumeRow volume={ov.volume} muted={ov.muted} onPatch={patch} /></InspectorBlock>}
     </div>
   )
 }
 
 // ---- audio ----
-function AudioInspector({ audio }: { audio: AudioClip }) {
+function AudioInspector({ audio, tab }: { audio: AudioClip; tab: InspectorTab }) {
   const update = useEditor((s) => s.updateAudio)
   const remove = useEditor((s) => s.removeAudio)
   const clips = useEditor((s) => s.clips)
@@ -430,31 +488,39 @@ function AudioInspector({ audio }: { audio: AudioClip }) {
 
   return (
     <div className="inspector__body">
-      <div className="inspector__group">
-        <NameField icon={<Icon name="music" />} name={audio.name} onChange={(v) => update(audio.id, { name: v })} />
-        <div className="inspector__hint">음악 · 길이 {formatTime(audioLength(audio))} · 원본 {formatTime(audio.duration)}</div>
-      </div>
-
-      <div className="inspector__group">
-        <Range label="시작 트림" badge={formatTime(audio.trimStart)} value={audio.trimStart} min={0} max={audio.duration} step={0.1} unit="초"
-          onChange={(v) => update(audio.id, { trimStart: Math.min(v, audio.trimEnd - 0.1) })} />
-        <Range label="끝 트림" badge={formatTime(audio.trimEnd)} value={audio.trimEnd} min={0} max={audio.duration} step={0.1} unit="초"
-          onChange={(v) => update(audio.id, { trimEnd: Math.max(v, audio.trimStart + 0.1) })} />
-      </div>
-
-      <VolumeRow volume={audio.volume} muted={audio.muted} onPatch={(p) => update(audio.id, p)} />
-      <FadeRow length={audioLength(audio)} fadeIn={audio.fadeIn} fadeOut={audio.fadeOut} onPatch={(p) => update(audio.id, p)} label="소리 페이드" />
-      <RepeatRow repeat={audio.repeat} onPatch={(p) => update(audio.id, p)} />
-      {mainLength > 0 && <button className="btn btn--sm" onClick={() => update(audio.id, { start: 0, ...exactDurationPatch(Math.max(0.1, base), mainLength) })}>메인 트랙 전체 길이에 맞춤</button>}
-      <DurationRow seconds={audioLength(audio)} onSet={(t) => update(audio.id, exactDurationPatch(Math.max(0.1, base), t))} />
-      <button className="btn btn--danger" onClick={() => remove(audio.id)}>음악 삭제</button>
+      {tab === 'basic' && <>
+        <InspectorBlock title="기본 정보">
+          <div className="inspector__group">
+            <NameField icon={<Icon name="music" />} name={audio.name} onChange={(v) => update(audio.id, { name: v })} />
+            <div className="inspector__hint">오디오 · 길이 {formatTime(audioLength(audio))} · 원본 {formatTime(audio.duration)}</div>
+          </div>
+        </InspectorBlock>
+        <InspectorBlock title="음량"><VolumeRow volume={audio.volume} muted={audio.muted} onPatch={(p) => update(audio.id, p)} /></InspectorBlock>
+        <InspectorBlock title="페이드"><FadeRow length={audioLength(audio)} fadeIn={audio.fadeIn} fadeOut={audio.fadeOut} onPatch={(p) => update(audio.id, p)} label="소리 페이드" /></InspectorBlock>
+        <button className="btn btn--danger" onClick={() => remove(audio.id)}>오디오 삭제</button>
+      </>}
+      {tab === 'time' && <>
+        <InspectorBlock title="트림">
+          <div className="inspector__group">
+            <Range label="시작 트림" badge={formatTime(audio.trimStart)} value={audio.trimStart} min={0} max={audio.duration} step={0.1} unit="초"
+              onChange={(v) => update(audio.id, { trimStart: Math.min(v, audio.trimEnd - 0.1) })} />
+            <Range label="끝 트림" badge={formatTime(audio.trimEnd)} value={audio.trimEnd} min={0} max={audio.duration} step={0.1} unit="초"
+              onChange={(v) => update(audio.id, { trimEnd: Math.max(v, audio.trimStart + 0.1) })} />
+          </div>
+        </InspectorBlock>
+        <InspectorBlock title="길이와 반복">
+          <RepeatRow repeat={audio.repeat} onPatch={(p) => update(audio.id, p)} />
+          {mainLength > 0 && <button className="btn btn--sm" onClick={() => update(audio.id, { start: 0, ...exactDurationPatch(Math.max(0.1, base), mainLength) })}>메인 트랙 전체 길이에 맞춤</button>}
+          <DurationRow seconds={audioLength(audio)} onSet={(t) => update(audio.id, exactDurationPatch(Math.max(0.1, base), t))} />
+        </InspectorBlock>
+      </>}
     </div>
   )
 }
 
 // ---- text ----
 const ALIGNS: TextOverlay['align'][] = ['left', 'center', 'right', 'justify']
-function TextInspector({ text }: { text: TextOverlay }) {
+function TextInspector({ text, tab }: { text: TextOverlay; tab: InspectorTab }) {
   const update = useEditor((s) => s.updateText)
   const updatePosition = useEditor((s) => s.updateLayerPosition)
   const togglePositionKeyframe = useEditor((s) => s.togglePositionKeyframe)
@@ -475,108 +541,66 @@ function TextInspector({ text }: { text: TextOverlay }) {
 
   return (
     <div className="inspector__body">
-      <div className="inspector__group">
-        <div className="inspector__title">텍스트</div>
-        <textarea className="textarea" rows={2} value={text.text} onChange={(e) => set({ text: e.target.value })} />
-      </div>
-
-      <div className="inspector__group">
-        <div className="field__label"><span>폰트</span></div>
-        <div className="chips">
-          {FONT_OPTIONS.map((f) => (
-            <button key={f.label} className={`chip${text.font === f.value ? ' chip--on' : ''}`} style={{ fontFamily: f.value }}
-              onClick={() => set({ font: f.value })}>{f.label}</button>
-          ))}
-        </div>
-      </div>
-
-      <div className="inspector__group">
-        <div className="field__label"><span>정렬</span></div>
-        <div className="chips">
-          {ALIGNS.map((a) => (
-            <button key={a} className={`chip chip--icon${text.align === a ? ' chip--on' : ''}`}
-              aria-label={a} onClick={() => set({ align: a })}><AlignIcon a={a} /></button>
-          ))}
-        </div>
-      </div>
-
-      <div className="inspector__group">
-        <Range label="가로 위치" value={Math.round(position.x * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('text', text.id, { x: v / 100 })} />
-        <Range label="세로 위치" value={Math.round(position.y * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('text', text.id, { y: v / 100 })} />
-        <Range label="글자 크기" value={Math.round(text.size * 1000)} min={20} max={400} step={5} onChange={(v) => set({ size: v / 1000 })} />
-        <Range label="회전" value={text.angle || 0} min={-180} max={180} step={1} unit="°" onChange={(v) => set({ angle: v })} />
-        <div className="inspector__hint">미리보기에서 글자를 끌어 이동하고 모서리와 회전 손잡이로 조절합니다.</div>
-      </div>
-      <LayerStateRow opacity={text.opacity} locked={text.locked} hidden={text.hidden}
-        onPatch={(patch) => set(patch as Partial<TextOverlay>)}
-        onCenter={(axis) => updatePosition('text', text.id, { ...(axis !== 'y' ? { x: 0.5 } : {}), ...(axis !== 'x' ? { y: 0.5 } : {}) })} />
-      <PositionKeyframeRow frames={text.positionKeyframes} localTime={localTime}
-        onToggle={() => togglePositionKeyframe('text', text.id)}
-        onClear={() => clearPositionKeyframes('text', text.id)}
-        onSeek={(frame) => setPlayhead(text.start + frame.time)}
-        onEasing={(keyframeId, easing) => setPositionKeyframeEasing('text', text.id, keyframeId, easing)} />
-
-      <div className="inspector__group">
-        <div className="inspector__row">
-          <label className="field__label"><span>글자색</span></label>
-          <input type="color" value={text.color} onChange={(e) => set({ color: e.target.value })} />
-        </div>
-        <Range label="글자 불투명도" value={Math.round(text.colorAlpha * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => set({ colorAlpha: v / 100 })} />
-      </div>
-
-      <div className="inspector__group">
-        <label className="switch"><input type="checkbox" checked={text.box} onChange={(e) => set({ box: e.target.checked })} /><span>배경 박스</span></label>
-        {text.box && (
-          <>
-            <div className="inspector__row">
-              <label className="field__label"><span>배경색</span></label>
-              <input type="color" value={text.boxColor} onChange={(e) => set({ boxColor: e.target.value })} />
-            </div>
-            <Range label="배경 불투명도" value={Math.round(text.boxAlpha * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => set({ boxAlpha: v / 100 })} />
-          </>
-        )}
-      </div>
-
-      <div className="inspector__group">
-        <Range label="테두리 두께" value={Number((text.strokeWidth * 100).toFixed(1))} min={0} max={15} step={0.1} onChange={(v) => set({ strokeWidth: v / 100 })} />
-        {text.strokeWidth > 0 && (
-          <div className="inspector__row">
-            <label className="field__label"><span>테두리 색</span></label>
-            <input type="color" value={text.strokeColor} onChange={(e) => set({ strokeColor: e.target.value })} />
+      {tab === 'basic' && <>
+        <InspectorBlock title="내용">
+          <div className="inspector__group"><textarea className="textarea" rows={3} value={text.text} onChange={(e) => set({ text: e.target.value })} aria-label="텍스트 내용" /></div>
+        </InspectorBlock>
+        <InspectorBlock title="글꼴">
+          <div className="inspector__group"><div className="chips">{FONT_OPTIONS.map((font) => (
+            <button key={font.label} className={`chip${text.font === font.value ? ' chip--on' : ''}`} style={{ fontFamily: font.value }} onClick={() => set({ font: font.value })}>{font.label}</button>
+          ))}</div></div>
+        </InspectorBlock>
+        <InspectorBlock title="정렬">
+          <div className="inspector__group"><div className="chips">{ALIGNS.map((align) => (
+            <button key={align} className={`chip chip--icon${text.align === align ? ' chip--on' : ''}`} aria-label={align} onClick={() => set({ align })}><AlignIcon a={align} /></button>
+          ))}</div></div>
+        </InspectorBlock>
+        <button className="btn btn--danger" onClick={() => remove(text.id)}>텍스트 삭제</button>
+      </>}
+      {tab === 'transform' && <>
+        <InspectorBlock title="위치와 크기">
+          <div className="inspector__group">
+            <Range label="가로 위치" value={Math.round(position.x * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('text', text.id, { x: v / 100 })} />
+            <Range label="세로 위치" value={Math.round(position.y * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('text', text.id, { y: v / 100 })} />
+            <Range label="글자 크기" value={Math.round(text.size * 1000)} min={20} max={400} step={5} onChange={(v) => set({ size: v / 1000 })} />
+            <Range label="회전" value={text.angle || 0} min={-180} max={180} step={1} unit="°" onChange={(v) => set({ angle: v })} />
+            <div className="inspector__hint">미리보기에서 직접 이동·크기·회전을 조절할 수도 있습니다.</div>
           </div>
-        )}
-      </div>
-
-      <div className="inspector__group">
-        <label className="switch"><input type="checkbox" checked={text.shadow} onChange={(e) => set({ shadow: e.target.checked })} /><span>그림자</span></label>
-        <div className="inspector__hint">글자 뒤에 그림자를 넣습니다.</div>
-        {text.shadow && (
-          <>
-            <div className="inspector__row">
-              <label className="field__label"><span>그림자 색</span></label>
-              <input type="color" value={text.shadowColor} onChange={(e) => set({ shadowColor: e.target.value })} />
-            </div>
-            <Range label="번짐 (흐림 정도)" value={Math.round(text.shadowBlur * 100)} min={0} max={40} step={1} unit="%" onChange={(v) => set({ shadowBlur: v / 100 })} />
-            <Range label="거리 (아래로 이동)" value={Math.round(text.shadowDist * 100)} min={0} max={30} step={1} unit="%" onChange={(v) => set({ shadowDist: v / 100 })} />
-          </>
-        )}
-      </div>
-
-      <DurationRow seconds={text.end - text.start} onSet={(t) => set({ end: text.start + t })} />
-      <FadeRow length={text.end - text.start} fadeIn={text.fadeIn} fadeOut={text.fadeOut}
-        onPatch={(patch) => set(patch as Partial<TextOverlay>)} label="텍스트 페이드" />
-
-      <div className="inspector__group btnrow">
-        <button className="btn" disabled={idx <= 0} onClick={() => raise(text.id, -1)}>▼ 아래로</button>
-        <button className="btn" disabled={idx >= visualOrder.length - 1} onClick={() => raise(text.id, 1)}>위로 ▲</button>
-      </div>
-      <button className="btn btn--danger" onClick={() => remove(text.id)}>텍스트 삭제</button>
+        </InspectorBlock>
+        <InspectorBlock title="레이어 상태">
+          <LayerStateRow opacity={text.opacity} locked={text.locked} hidden={text.hidden} onPatch={(patch) => set(patch as Partial<TextOverlay>)} onCenter={(axis) => updatePosition('text', text.id, { ...(axis !== 'y' ? { x: 0.5 } : {}), ...(axis !== 'x' ? { y: 0.5 } : {}) })} />
+        </InspectorBlock>
+        <InspectorBlock title="움직임">
+          <PositionKeyframeRow frames={text.positionKeyframes} localTime={localTime} onToggle={() => togglePositionKeyframe('text', text.id)} onClear={() => clearPositionKeyframes('text', text.id)} onSeek={(frame) => setPlayhead(text.start + frame.time)} onEasing={(keyframeId, easing) => setPositionKeyframeEasing('text', text.id, keyframeId, easing)} />
+        </InspectorBlock>
+        <InspectorBlock title="레이어 순서">
+          <div className="inspector__group btnrow"><button className="btn" disabled={idx <= 0} onClick={() => raise(text.id, -1)}>▼ 아래로</button><button className="btn" disabled={idx >= visualOrder.length - 1} onClick={() => raise(text.id, 1)}>위로 ▲</button></div>
+        </InspectorBlock>
+      </>}
+      {tab === 'style' && <>
+        <InspectorBlock title="글자색">
+          <div className="inspector__group"><div className="inspector__row"><label className="field__label"><span>색상</span></label><input type="color" value={text.color} onChange={(e) => set({ color: e.target.value })} /></div><Range label="불투명도" value={Math.round(text.colorAlpha * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => set({ colorAlpha: v / 100 })} /></div>
+        </InspectorBlock>
+        <InspectorBlock title="배경 박스">
+          <div className="inspector__group"><label className="switch"><input type="checkbox" checked={text.box} onChange={(e) => set({ box: e.target.checked })} /><span>배경 박스 사용</span></label>{text.box && <><div className="inspector__row"><label className="field__label"><span>배경색</span></label><input type="color" value={text.boxColor} onChange={(e) => set({ boxColor: e.target.value })} /></div><Range label="불투명도" value={Math.round(text.boxAlpha * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => set({ boxAlpha: v / 100 })} /></>}</div>
+        </InspectorBlock>
+        <InspectorBlock title="테두리">
+          <div className="inspector__group"><Range label="두께" value={Number((text.strokeWidth * 100).toFixed(1))} min={0} max={15} step={0.1} onChange={(v) => set({ strokeWidth: v / 100 })} />{text.strokeWidth > 0 && <div className="inspector__row"><label className="field__label"><span>색상</span></label><input type="color" value={text.strokeColor} onChange={(e) => set({ strokeColor: e.target.value })} /></div>}</div>
+        </InspectorBlock>
+        <InspectorBlock title="그림자">
+          <div className="inspector__group"><label className="switch"><input type="checkbox" checked={text.shadow} onChange={(e) => set({ shadow: e.target.checked })} /><span>그림자 사용</span></label>{text.shadow && <><div className="inspector__row"><label className="field__label"><span>색상</span></label><input type="color" value={text.shadowColor} onChange={(e) => set({ shadowColor: e.target.value })} /></div><Range label="번짐" value={Math.round(text.shadowBlur * 100)} min={0} max={40} step={1} unit="%" onChange={(v) => set({ shadowBlur: v / 100 })} /><Range label="거리" value={Math.round(text.shadowDist * 100)} min={0} max={30} step={1} unit="%" onChange={(v) => set({ shadowDist: v / 100 })} /></>}</div>
+        </InspectorBlock>
+      </>}
+      {tab === 'time' && <>
+        <InspectorBlock title="길이"><DurationRow seconds={text.end - text.start} onSet={(duration) => set({ end: text.start + duration })} /></InspectorBlock>
+        <InspectorBlock title="페이드"><FadeRow length={text.end - text.start} fadeIn={text.fadeIn} fadeOut={text.fadeOut} onPatch={(patch) => set(patch as Partial<TextOverlay>)} label="텍스트 페이드" /></InspectorBlock>
+      </>}
     </div>
   )
 }
 
 // ---- background layer ----
-function BackgroundInspector({ bg }: { bg: Background }) {
+function BackgroundInspector({ bg, tab }: { bg: Background; tab: InspectorTab }) {
   const update = useEditor((s) => s.updateBackground)
   const remove = useEditor((s) => s.removeBackground)
   const raise = useEditor((s) => s.raiseBackground)
@@ -587,40 +611,21 @@ function BackgroundInspector({ bg }: { bg: Background }) {
 
   return (
     <div className="inspector__body">
-      <div className="inspector__group">
-        <NameField icon={<Icon name="palette" />} name={bg.name} onChange={(v) => update(bg.id, { name: v })} />
-        <div className="inspector__hint">배경 레이어(맨 뒤) · 길이 {formatTime(clipTimelineDuration(bg))}</div>
-      </div>
-
-      {bg.kind === 'color' ? (
-        <div className="inspector__group inspector__row">
-          <label className="field__label"><span>배경 색상</span></label>
-          <input type="color" value={bg.bgColor ?? '#000000'} onChange={(e) => update(bg.id, { bgColor: e.target.value })} />
-        </div>
-      ) : (
-        <div className="inspector__group">
-          <Range label="시작 트림" badge={formatTime(bg.trimStart)} value={bg.trimStart} min={0} max={bg.duration} step={0.1} unit="초"
-            onChange={(v) => update(bg.id, { trimStart: Math.min(v, bg.trimEnd - 0.1) })} />
-          <Range label="끝 트림" badge={formatTime(bg.trimEnd)} value={bg.trimEnd} min={0} max={bg.duration} step={0.1} unit="초"
-            onChange={(v) => update(bg.id, { trimEnd: Math.max(v, bg.trimStart + 0.1) })} />
-        </div>
-      )}
-
-      {bg.kind === 'video' && <VolumeRow volume={bg.volume} muted={bg.muted} onPatch={patch} />}
-      <LayerStateRow opacity={bg.opacity} locked={bg.locked} hidden={bg.hidden} onPatch={patch} />
-      <FadeRow length={clipTimelineDuration(bg)} fadeIn={bg.fadeIn} fadeOut={bg.fadeOut} onPatch={patch} label="배경 페이드" />
-      <RepeatRow repeat={bg.repeat} onPatch={patch} />
-      <DurationRow
-        seconds={clipTimelineDuration(bg)}
-        onSet={(t) => update(bg.id, exactDurationPatch((bg.trimEnd - bg.trimStart) / bg.speed, t))}
-      />
-
-      <div className="inspector__group btnrow">
-        <button className="btn" disabled={idx <= 0} onClick={() => raise(bg.id, -1)}>▼ 아래로</button>
-        <button className="btn" disabled={idx >= backgrounds.length - 1} onClick={() => raise(bg.id, 1)}>위로 ▲</button>
-      </div>
-      <button className="btn" onClick={() => toMain(bg.id)}><Icon name="video" />메인 트랙으로 이동</button>
-      <button className="btn btn--danger" onClick={() => remove(bg.id)}>배경 삭제</button>
+      {tab === 'basic' && <>
+        <InspectorBlock title="기본 정보">
+          <div className="inspector__group"><NameField icon={<Icon name="palette" />} name={bg.name} onChange={(v) => update(bg.id, { name: v })} /><div className="inspector__hint">배경 레이어 · 길이 {formatTime(clipTimelineDuration(bg))}</div></div>
+        </InspectorBlock>
+        {bg.kind === 'color' && <InspectorBlock title="색상"><div className="inspector__group inspector__row"><label className="field__label"><span>배경 색상</span></label><input type="color" value={bg.bgColor ?? '#000000'} onChange={(e) => update(bg.id, { bgColor: e.target.value })} /></div></InspectorBlock>}
+        {bg.kind === 'video' && <InspectorBlock title="오디오"><VolumeRow volume={bg.volume} muted={bg.muted} onPatch={patch} /></InspectorBlock>}
+        <InspectorBlock title="레이어 상태"><LayerStateRow opacity={bg.opacity} locked={bg.locked} hidden={bg.hidden} onPatch={patch} /></InspectorBlock>
+        <InspectorBlock title="레이어 위치"><div className="inspector__group btnrow"><button className="btn" disabled={idx <= 0} onClick={() => raise(bg.id, -1)}>▼ 아래로</button><button className="btn" disabled={idx >= backgrounds.length - 1} onClick={() => raise(bg.id, 1)}>위로 ▲</button></div><button className="btn" onClick={() => toMain(bg.id)}><Icon name="video" />메인 트랙으로 이동</button></InspectorBlock>
+        <button className="btn btn--danger" onClick={() => remove(bg.id)}>배경 삭제</button>
+      </>}
+      {tab === 'time' && <>
+        {bg.kind !== 'color' && <InspectorBlock title="트림"><div className="inspector__group"><Range label="시작 트림" badge={formatTime(bg.trimStart)} value={bg.trimStart} min={0} max={bg.duration} step={0.1} unit="초" onChange={(v) => update(bg.id, { trimStart: Math.min(v, bg.trimEnd - 0.1) })} /><Range label="끝 트림" badge={formatTime(bg.trimEnd)} value={bg.trimEnd} min={0} max={bg.duration} step={0.1} unit="초" onChange={(v) => update(bg.id, { trimEnd: Math.max(v, bg.trimStart + 0.1) })} /></div></InspectorBlock>}
+        <InspectorBlock title="페이드"><FadeRow length={clipTimelineDuration(bg)} fadeIn={bg.fadeIn} fadeOut={bg.fadeOut} onPatch={patch} label="배경 페이드" /></InspectorBlock>
+        <InspectorBlock title="길이와 반복"><RepeatRow repeat={bg.repeat} onPatch={patch} /><DurationRow seconds={clipTimelineDuration(bg)} onSet={(duration) => update(bg.id, exactDurationPatch((bg.trimEnd - bg.trimStart) / bg.speed, duration))} /></InspectorBlock>
+      </>}
     </div>
   )
 }
@@ -639,6 +644,7 @@ export default function Inspector() {
   const ungroupSelected = useEditor((s) => s.ungroupSelected)
   const deleteSelected = useEditor((s) => s.deleteSelected)
   const groups = useEditor((s) => s.groups)
+  const [activeTab, setActiveTab] = useState<InspectorTab>('basic')
 
   const selClip = selection?.type === 'clip' ? clips.find((c) => c.id === selection.id) : null
   const selOverlay = selection?.type === 'overlay' ? overlays.find((o) => o.id === selection.id) : null
@@ -648,6 +654,22 @@ export default function Inspector() {
   const contextTitle = selectedItems.length > 1 ? `${selectedItems.length}개 항목 선택됨`
     : selClip?.name || selOverlay?.name || selAudio?.name || (selText ? '텍스트' : '') || selBg?.name || '캔버스'
   const groupedSelection = selectedItems.some((item) => groups.some((group) => group.members.some((member) => member.type === item.type && member.id === item.id)))
+  const inspectorTabs: InspectorTabOption[] = useMemo(() => selText
+    ? [{ id: 'basic', label: '내용' }, { id: 'style', label: '스타일' }, { id: 'transform', label: '배치' }, { id: 'time', label: '시간' }]
+    : selAudio
+      ? [{ id: 'basic', label: '오디오' }, { id: 'time', label: '시간' }]
+      : selOverlay
+        ? [{ id: 'basic', label: '기본' }, { id: 'transform', label: '변형' }, { id: 'time', label: '시간' }, ...(selOverlay.kind === 'video' ? [{ id: 'audio' as const, label: '오디오' }] : [])]
+        : selClip
+          ? [{ id: 'basic', label: '기본' }, ...(selClip.kind === 'color' ? [] : [{ id: 'transform' as const, label: '변형' }]), { id: 'time', label: '시간' }, ...(selClip.kind === 'video' ? [{ id: 'audio' as const, label: '오디오' }] : [])]
+          : selBg
+            ? [{ id: 'basic', label: '기본' }, { id: 'time', label: '시간' }]
+            : [], [selAudio, selBg, selClip, selOverlay, selText])
+  const selectionKey = selection ? `${selection.type}:${selection.id}` : 'canvas'
+  useEffect(() => { setActiveTab('basic') }, [selectionKey])
+  useEffect(() => {
+    if (inspectorTabs.length && !inspectorTabs.some((tab) => tab.id === activeTab)) setActiveTab(inspectorTabs[0].id)
+  }, [activeTab, inspectorTabs])
 
   return (
     <aside className="inspector">
@@ -655,7 +677,7 @@ export default function Inspector() {
         <small>{selection ? '선택 항목 편집' : '프로젝트 설정'}</small>
         <b title={contextTitle}>{contextTitle}</b>
       </div>
-      <details className="inspector__section" open={!selection}>
+      {!selection && <details className="inspector__section" open>
         <summary>캔버스</summary>
         <div className="inspector__group">
           <div className="field__label"><span>화면 비율</span></div>
@@ -665,8 +687,9 @@ export default function Inspector() {
             ))}
           </div>
         </div>
-      </details>
-      <hr className="inspector__sep" />
+      </details>}
+      {selection && selectedItems.length <= 1 && <InspectorTabs tabs={inspectorTabs} active={activeTab} onChange={setActiveTab} />}
+      {!selection && <hr className="inspector__sep" />}
       {selectedItems.length > 1 ? (
         <div className="inspector__body inspector__multi">
           <div className="inspector__hint">선택한 항목은 타임라인에서 함께 이동할 수 있습니다. 그룹으로 묶으면 다음 편집에서도 관계가 유지됩니다.</div>
@@ -675,15 +698,15 @@ export default function Inspector() {
           <button className="btn btn--danger" onClick={deleteSelected}>선택 항목 삭제</button>
         </div>
       ) : selClip ? (
-        <ClipInspector clip={selClip} />
+        <ClipInspector clip={selClip} tab={activeTab} />
       ) : selOverlay ? (
-        <OverlayInspector ov={selOverlay} />
+        <OverlayInspector ov={selOverlay} tab={activeTab} />
       ) : selAudio ? (
-        <AudioInspector audio={selAudio} />
+        <AudioInspector audio={selAudio} tab={activeTab} />
       ) : selText ? (
-        <TextInspector text={selText} />
+        <TextInspector text={selText} tab={activeTab} />
       ) : selBg ? (
-        <BackgroundInspector bg={selBg} />
+        <BackgroundInspector bg={selBg} tab={activeTab} />
       ) : (
         <div className="inspector__empty">타임라인이나 미리보기에서 항목을 선택하면<br />여기서 편집할 수 있어요.</div>
       )}

@@ -478,6 +478,39 @@ button, input, textarea { font-family: inherit; }
 }
 .inspector__context small { color: var(--text-dim); font-size: 10px; }
 .inspector__context b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.inspector-tabs {
+  position: sticky;
+  top: 42px;
+  z-index: 2;
+  flex: 0 0 auto;
+  display: flex;
+  gap: 3px;
+  margin: -14px -16px 0;
+  padding: 8px 12px;
+  overflow-x: auto;
+  background: color-mix(in srgb, var(--bg-1) 96%, transparent);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+}
+.inspector-tabs button {
+  flex: 1 0 auto;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-dim);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.inspector-tabs button:hover { color: var(--text); background: var(--bg-2); }
+.inspector-tabs button.is-active { color: #fff; background: var(--accent); }
+.inspector-block { display: flex; flex-direction: column; gap: 10px; }
+.inspector-block + .inspector-block { padding-top: 14px; border-top: 1px solid var(--line); }
+.inspector-block h3 { margin: 0; color: var(--text); font-size: 12px; font-weight: 750; }
+.inspector-block > .inspector__group { padding-bottom: 0; border-bottom: 0; }
+.inspector-block > .btn { width: 100%; margin-top: 6px; }
 .inspector__section { border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2); }
 .inspector__section summary { padding: 9px 10px; color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer; }
 .inspector__section[open] summary { border-bottom: 1px solid var(--line); }
