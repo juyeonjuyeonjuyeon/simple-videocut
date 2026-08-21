@@ -62,6 +62,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
   const overlays = useEditor((s) => s.overlays)
   const audios = useEditor((s) => s.audios)
   const backgrounds = useEditor((s) => s.backgrounds)
+  const visualOrder = useEditor((s) => s.visualOrder)
   const aspectRatio = useEditor((s) => s.aspectRatio)
   const exportSettings = useEditor((s) => s.exportSettings)
   const setExportSettings = useEditor((s) => s.setExportSettings)
@@ -100,6 +101,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
         overlays,
         audios,
         backgrounds,
+        visualOrder,
         aspect: aspectRatio,
         height: exportSettings.height,
         format: exportSettings.format,

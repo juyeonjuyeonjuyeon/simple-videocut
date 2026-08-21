@@ -21,6 +21,7 @@ function snapshotProject() {
     clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
     markers: s.markers, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
     groups: s.groups,
+    visualOrder: s.visualOrder,
   }
 }
 
@@ -65,11 +66,23 @@ export default function App() {
   const [restorable, setRestorable] = useState<ProjectMeta | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [manualSaveStatus, setManualSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const [inspectorOpen, setInspectorOpen] = useState(true)
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
+  const [inspectorOpen, setInspectorOpen] = useState(() => window.innerWidth > 860)
   const [mediaPanelOpen, setMediaPanelOpen] = useState(() => window.innerWidth > 1000)
   // Resizable panels (desktop).
   const [inspectorW, setInspectorW] = useState(320)
   const [timelineH, setTimelineH] = useState<number | null>(null)
+
+  const toggleMediaPanel = () => setMediaPanelOpen((open) => {
+    const next = !open
+    if (next && window.innerWidth <= 860) setInspectorOpen(false)
+    return next
+  })
+  const toggleInspector = () => setInspectorOpen((open) => {
+    const next = !open
+    if (next && window.innerWidth <= 860) setMediaPanelOpen(false)
+    return next
+  })
 
   const startResize = (axis: 'w' | 'h') => (e: React.PointerEvent) => {
     e.preventDefault()
@@ -103,6 +116,7 @@ export default function App() {
     setManualSaveStatus('saving')
     try {
       await saveProject(activeProjectName, snapshotProject())
+      setLastSavedAt(Date.now())
       setManualSaveStatus('saved')
       window.setTimeout(() => setManualSaveStatus('idle'), 1800)
     } catch (error) {
@@ -127,7 +141,7 @@ export default function App() {
       const strip = (arr: { file?: File; src?: string }[]) => arr.map(({ file: _f, src: _s, ...r }) => { void _f; void _s; return r })
       return JSON.stringify({
         c: strip(s.clips), o: strip(s.overlays), a: strip(s.audios), b: strip(s.backgrounds),
-        t: s.texts, m: s.markers, g: s.groups, ar: s.aspectRatio, es: s.exportSettings,
+        t: s.texts, m: s.markers, g: s.groups, vo: s.visualOrder, ar: s.aspectRatio, es: s.exportSettings,
       })
     }
     const saveNow = async () => {
@@ -148,9 +162,11 @@ export default function App() {
           clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
           markers: s.markers,
           groups: s.groups,
+          visualOrder: s.visualOrder,
           aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
         })
         lastSig.current = sig
+        setLastSavedAt(Date.now())
         dirty = signature() !== sig
         succeeded = true
       } catch (error) {
@@ -300,13 +316,11 @@ export default function App() {
         </div>
         <div className="topbar__actions">
           <span className={`save-status save-status--${saveStatus}`} role="status">
-            {manualSaveStatus === 'saving' ? '프로젝트 저장 중…' : manualSaveStatus === 'saved' ? '프로젝트 저장됨' : manualSaveStatus === 'error' ? '저장 실패' : saveStatus === 'saving' ? '자동 저장 중…' : saveStatus === 'saved' ? '자동 저장됨' : saveStatus === 'error' ? '자동 저장 실패' : ''}
+            {manualSaveStatus === 'saving' ? '프로젝트 저장 중…' : manualSaveStatus === 'saved' ? '프로젝트 저장됨' : manualSaveStatus === 'error' ? '저장 실패' : saveStatus === 'saving' ? '자동 저장 중…' : saveStatus === 'saved' && lastSavedAt ? `자동 저장됨 · ${new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : saveStatus === 'error' ? '자동 저장 실패' : ''}
           </span>
-          <button className="btn topbar__add" onClick={() => fileRef.current?.click()} aria-label="파일 추가"><Icon name="plus" /><span className="topbar__add-label"> 파일 추가</span></button>
-          <button className={`iconbtn iconbtn--sm${mediaPanelOpen ? ' iconbtn--on' : ''}`} onClick={() => setMediaPanelOpen((open) => !open)} title="왼쪽 미디어 패널 열기·닫기" aria-label="왼쪽 미디어 패널 열기·닫기"><Icon name="library" /></button>
-          <button className="iconbtn iconbtn--sm" onClick={() => void saveCurrentProject()} title={activeProjectName ? `${activeProjectName} 저장 (⌘S)` : '프로젝트 저장'} aria-label="프로젝트 저장"><Icon name="save" /></button>
-          <button className="iconbtn iconbtn--sm" onClick={() => setProjectDialogMode('manage')} title="프로젝트 열기·관리" aria-label="프로젝트 열기·관리"><Icon name="folder" /></button>
-          <button className={`iconbtn iconbtn--sm${inspectorOpen ? ' iconbtn--on' : ''}`} onClick={() => setInspectorOpen((open) => !open)} title="오른쪽 편집 패널 열기·닫기" aria-label="오른쪽 편집 패널 열기·닫기"><Icon name="panel" /></button>
+          <button className={`iconbtn iconbtn--sm${mediaPanelOpen ? ' iconbtn--on' : ''}`} onClick={toggleMediaPanel} title="왼쪽 미디어 패널 열기·닫기" aria-label="왼쪽 미디어 패널 열기·닫기"><Icon name="library" /></button>
+          <button className="btn btn--sm topbar__project-menu" onClick={() => setProjectDialogMode('manage')} title="저장·다른 이름으로 저장·프로젝트 열기" aria-label="프로젝트 열기·관리"><Icon name="project" /><span>프로젝트</span></button>
+          <button className={`iconbtn iconbtn--sm${inspectorOpen ? ' iconbtn--on' : ''}`} onClick={toggleInspector} title="오른쪽 편집 패널 열기·닫기" aria-label="오른쪽 편집 패널 열기·닫기"><Icon name="panel" /></button>
           <button className="btn btn--primary" onClick={() => setShowExport(true)} disabled={!hasClips}>
             내보내기
           </button>
@@ -350,8 +364,6 @@ export default function App() {
             </div>
             <div className="transport__spacer" />
             <button className="btn btn--sm" onClick={splitAtPlayhead} disabled={!hasClips} title="단축키: S"><Icon name="split" />분할</button>
-            <button className="btn btn--sm" onClick={() => overlayRef.current?.click()}><Icon name="layers" />오버레이</button>
-            <button className="btn btn--sm" onClick={() => audioRef.current?.click()}><Icon name="music" />음악</button>
             <button className="btn btn--sm" onClick={addBackground}><Icon name="palette" />배경</button>
             <button className="btn btn--sm" onClick={addText}><Icon name="text" />텍스트</button>
             <button className="iconbtn" onClick={undo} disabled={!canUndo} title="실행 취소" aria-label="실행 취소"><Icon name="undo" /></button>

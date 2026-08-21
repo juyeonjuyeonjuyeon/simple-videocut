@@ -6,6 +6,7 @@ import { formatTime, formatClock, parseClock, clipTimelineDuration, overlayLengt
 import { rotateBy } from '../utils/transform'
 import Icon from './Icon'
 import { keyframeAt, positionAt } from '../utils/motion'
+import { normalizeVisualOrder } from '../utils/layers'
 
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
@@ -354,7 +355,10 @@ function OverlayInspector({ ov }: { ov: Overlay }) {
   const remove = useEditor((s) => s.removeOverlay)
   const toMain = useEditor((s) => s.moveOverlayToMain)
   const overlays = useEditor((s) => s.overlays)
-  const idx = overlays.findIndex((o) => o.id === ov.id)
+  const texts = useEditor((s) => s.texts)
+  const storedVisualOrder = useEditor((s) => s.visualOrder)
+  const visualOrder = normalizeVisualOrder(overlays, texts, storedVisualOrder)
+  const idx = visualOrder.findIndex((item) => item.type === 'overlay' && item.id === ov.id)
   const patch = (p: Patch) => update(ov.id, p)
   const localTime = Math.max(0, Math.min(playhead - ov.start, overlayLength(ov)))
   const position = positionAt(ov, localTime)
@@ -408,7 +412,7 @@ function OverlayInspector({ ov }: { ov: Overlay }) {
 
       <div className="inspector__group btnrow">
         <button className="btn" disabled={idx <= 0} onClick={() => raise(ov.id, -1)}>▼ 아래로</button>
-        <button className="btn" disabled={idx >= overlays.length - 1} onClick={() => raise(ov.id, 1)}>위로 ▲</button>
+        <button className="btn" disabled={idx >= visualOrder.length - 1} onClick={() => raise(ov.id, 1)}>위로 ▲</button>
       </div>
       <button className="btn" onClick={() => toMain(ov.id)}><Icon name="video" />메인 트랙으로 이동</button>
       <button className="btn btn--danger" onClick={() => remove(ov.id)}>오버레이 삭제</button>
@@ -461,7 +465,10 @@ function TextInspector({ text }: { text: TextOverlay }) {
   const remove = useEditor((s) => s.removeText)
   const raise = useEditor((s) => s.raiseText)
   const texts = useEditor((s) => s.texts)
-  const idx = texts.findIndex((t) => t.id === text.id)
+  const overlays = useEditor((s) => s.overlays)
+  const storedVisualOrder = useEditor((s) => s.visualOrder)
+  const visualOrder = normalizeVisualOrder(overlays, texts, storedVisualOrder)
+  const idx = visualOrder.findIndex((item) => item.type === 'text' && item.id === text.id)
   const set = (p: Partial<TextOverlay>) => update(text.id, p)
   const localTime = Math.max(0, Math.min(playhead - text.start, text.end - text.start))
   const position = positionAt(text, localTime)
@@ -561,7 +568,7 @@ function TextInspector({ text }: { text: TextOverlay }) {
 
       <div className="inspector__group btnrow">
         <button className="btn" disabled={idx <= 0} onClick={() => raise(text.id, -1)}>▼ 아래로</button>
-        <button className="btn" disabled={idx >= texts.length - 1} onClick={() => raise(text.id, 1)}>위로 ▲</button>
+        <button className="btn" disabled={idx >= visualOrder.length - 1} onClick={() => raise(text.id, 1)}>위로 ▲</button>
       </div>
       <button className="btn btn--danger" onClick={() => remove(text.id)}>텍스트 삭제</button>
     </div>
@@ -620,6 +627,7 @@ function BackgroundInspector({ bg }: { bg: Background }) {
 
 export default function Inspector() {
   const selection = useEditor((s) => s.selection)
+  const selectedItems = useEditor((s) => s.selectedItems)
   const clips = useEditor((s) => s.clips)
   const overlays = useEditor((s) => s.overlays)
   const audios = useEditor((s) => s.audios)
@@ -627,25 +635,46 @@ export default function Inspector() {
   const backgrounds = useEditor((s) => s.backgrounds)
   const aspectRatio = useEditor((s) => s.aspectRatio)
   const setAspectRatio = useEditor((s) => s.setAspectRatio)
+  const groupSelected = useEditor((s) => s.groupSelected)
+  const ungroupSelected = useEditor((s) => s.ungroupSelected)
+  const deleteSelected = useEditor((s) => s.deleteSelected)
+  const groups = useEditor((s) => s.groups)
 
   const selClip = selection?.type === 'clip' ? clips.find((c) => c.id === selection.id) : null
   const selOverlay = selection?.type === 'overlay' ? overlays.find((o) => o.id === selection.id) : null
   const selAudio = selection?.type === 'audio' ? audios.find((a) => a.id === selection.id) : null
   const selText = selection?.type === 'text' ? texts.find((t) => t.id === selection.id) : null
   const selBg = selection?.type === 'background' ? backgrounds.find((b) => b.id === selection.id) : null
+  const contextTitle = selectedItems.length > 1 ? `${selectedItems.length}개 항목 선택됨`
+    : selClip?.name || selOverlay?.name || selAudio?.name || (selText ? '텍스트' : '') || selBg?.name || '캔버스'
+  const groupedSelection = selectedItems.some((item) => groups.some((group) => group.members.some((member) => member.type === item.type && member.id === item.id)))
 
   return (
     <aside className="inspector">
-      <div className="inspector__group">
-        <div className="field__label"><span>화면 비율</span></div>
-        <div className="chips">
-          {(['16:9', '9:16', '1:1'] as const).map((r) => (
-            <button key={r} className={`chip${aspectRatio === r ? ' chip--on' : ''}`} onClick={() => setAspectRatio(r)}>{r}</button>
-          ))}
-        </div>
+      <div className="inspector__context">
+        <small>{selection ? '선택 항목 편집' : '프로젝트 설정'}</small>
+        <b title={contextTitle}>{contextTitle}</b>
       </div>
+      <details className="inspector__section" open={!selection}>
+        <summary>캔버스</summary>
+        <div className="inspector__group">
+          <div className="field__label"><span>화면 비율</span></div>
+          <div className="chips">
+            {(['16:9', '9:16', '1:1'] as const).map((r) => (
+              <button key={r} className={`chip${aspectRatio === r ? ' chip--on' : ''}`} onClick={() => setAspectRatio(r)}>{r}</button>
+            ))}
+          </div>
+        </div>
+      </details>
       <hr className="inspector__sep" />
-      {selClip ? (
+      {selectedItems.length > 1 ? (
+        <div className="inspector__body inspector__multi">
+          <div className="inspector__hint">선택한 항목은 타임라인에서 함께 이동할 수 있습니다. 그룹으로 묶으면 다음 편집에서도 관계가 유지됩니다.</div>
+          <button className="btn btn--primary" onClick={groupSelected}>선택 항목 그룹 만들기</button>
+          {groupedSelection && <button className="btn" onClick={ungroupSelected}>그룹 해제</button>}
+          <button className="btn btn--danger" onClick={deleteSelected}>선택 항목 삭제</button>
+        </div>
+      ) : selClip ? (
         <ClipInspector clip={selClip} />
       ) : selOverlay ? (
         <OverlayInspector ov={selOverlay} />

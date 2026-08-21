@@ -57,7 +57,7 @@ test('selecting a lower overlay never changes the rendered layer order', async (
 
   await page.getByRole('button', { name: '텍스트', exact: true }).click()
   const textTrack = await page.locator('.timeline__lane--text').boundingBox()
-  const overlayTrack = await page.locator('.timeline__lane--overlay').boundingBox()
+  const overlayTrack = await page.locator('.timeline__lane--overlay').first().boundingBox()
   expect(textTrack).not.toBeNull()
   expect(overlayTrack).not.toBeNull()
   expect(textTrack!.y).toBeLessThan(overlayTrack!.y)

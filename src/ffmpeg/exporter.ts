@@ -1,10 +1,11 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
-import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, Crop, Rotation } from '../types'
+import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, Crop, Rotation, VisualLayerRef } from '../types'
 import { aspectToWH, projectDuration, overlayLength, audioLength, clipTimelineDuration, clipBaseLength, repeatCountFor } from '../utils/time'
 import { hexToRgba } from '../utils/color'
 import { hasNativeFFmpeg, NativeFFmpeg } from './native'
 import { positionExpression } from '../utils/motion'
+import { normalizeVisualOrder } from '../utils/layers'
 
 // Keep the encoding engine on the same origin. Exports must not depend on a
 // third-party CDN being reachable after the editor itself has loaded.
@@ -263,6 +264,7 @@ export interface ExportOptions {
   overlays?: Overlay[]
   audios?: AudioClip[]
   backgrounds?: Background[]
+  visualOrder?: VisualLayerRef[]
   aspect: AspectRatio
   height: number
   format?: 'mp4' | 'webm'
@@ -613,9 +615,8 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     })
     filters.push(`${lastBg}[cv]overlay=0:0:eof_action=pass[mainv]`)
 
-    // Composite PiP overlays (video/image) onto the running video, shifting
-    // each to its timeline start and scaling/positioning per x/y/scale.
-    let lastV = '[mainv]'
+    // Prepare PiP overlay streams. Their final compositing position is decided
+    // by the shared visual layer stack below, together with text layers.
     overlays.forEach((o, k) => {
       const ovIdx = ovBase + k
       const len = ovLen(o)
@@ -638,36 +639,51 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
           `${videoEnvelope(len, o.fadeIn, o.fadeOut, o.opacity ?? 1)}` +
           `tpad=start_duration=${shift.toFixed(3)}:start_mode=add:color=0x00000000[ovv${k}]`,
       )
-      const out = `[ovo${k}]`
-      const localTime = `(t-${shift.toFixed(6)})`
-      const x = positionExpression(o, 'x', localTime)
-      const y = positionExpression(o, 'y', localTime)
-      filters.push(
-        `${lastV}[ovv${k}]overlay=x='(${x})*W-w/2':y='(${y})*H-h/2':eval=frame:` +
-          `eof_action=pass:enable='between(t,${shift.toFixed(3)},${(shift + len).toFixed(3)})'${out}`,
-      )
-      lastV = out
     })
 
-    // Overlay each text PNG over its time window (above the PiP layers).
+    // Prepare text streams at their own timeline ranges.
     texts.forEach((t, k) => {
       const inputIdx = inputCount + k
-      const out = `[txt${k}]`
       const len = Math.max(0.001, t.end - t.start)
-      const hasPositionKeyframes = Boolean(t.positionKeyframes?.length)
       filters.push(
         `[${inputIdx}:v]format=rgba,${videoEnvelope(len, t.fadeIn, t.fadeOut, t.opacity ?? 1)}` +
           `setpts=PTS+${t.start.toFixed(3)}/TB[textv${k}]`,
       )
-      filters.push(
-        `${lastV}[textv${k}]overlay=` +
-          (hasPositionKeyframes
-            ? `x='((${positionExpression(t, 'x', `(t-${t.start.toFixed(6)})`)})-0.5)*W':` +
-              `y='((${positionExpression(t, 'y', `(t-${t.start.toFixed(6)})`)})-0.5)*H':eval=frame:`
-            : 'x=0:y=0:') +
-          `eof_action=pass:` +
-          `enable='between(t,${t.start.toFixed(3)},${t.end.toFixed(3)})'${out}`,
-      )
+    })
+
+    // Composite media and text using one explicit back-to-front order. This
+    // keeps the preview, timeline rows and exported file visually identical.
+    const visualOrder = normalizeVisualOrder(overlays, texts, opts.visualOrder)
+    let lastV = '[mainv]'
+    visualOrder.forEach((ref, layerIndex) => {
+      const out = `[layer${layerIndex}]`
+      if (ref.type === 'overlay') {
+        const k = overlays.findIndex((item) => item.id === ref.id)
+        if (k < 0) return
+        const o = overlays[k]
+        const len = ovLen(o)
+        const shift = o.start
+        const localTime = `(t-${shift.toFixed(6)})`
+        const x = positionExpression(o, 'x', localTime)
+        const y = positionExpression(o, 'y', localTime)
+        filters.push(
+          `${lastV}[ovv${k}]overlay=x='(${x})*W-w/2':y='(${y})*H-h/2':eval=frame:` +
+            `eof_action=pass:enable='between(t,${shift.toFixed(3)},${(shift + len).toFixed(3)})'${out}`,
+        )
+      } else {
+        const k = texts.findIndex((item) => item.id === ref.id)
+        if (k < 0) return
+        const t = texts[k]
+        const hasPositionKeyframes = Boolean(t.positionKeyframes?.length)
+        filters.push(
+          `${lastV}[textv${k}]overlay=` +
+            (hasPositionKeyframes
+              ? `x='((${positionExpression(t, 'x', `(t-${t.start.toFixed(6)})`)})-0.5)*W':` +
+                `y='((${positionExpression(t, 'y', `(t-${t.start.toFixed(6)})`)})-0.5)*H':eval=frame:`
+              : 'x=0:y=0:') +
+            `eof_action=pass:enable='between(t,${t.start.toFixed(3)},${t.end.toFixed(3)})'${out}`,
+        )
+      }
       lastV = out
     })
 

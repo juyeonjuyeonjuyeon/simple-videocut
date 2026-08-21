@@ -14,6 +14,7 @@ function snapshot(): ProjectState {
     clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
     markers: s.markers,
     groups: s.groups,
+    visualOrder: s.visualOrder,
     aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
   }
 }

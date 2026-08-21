@@ -227,6 +227,9 @@ export type Selection =
 
 export type TimelineItemRef = Exclude<Selection, null>
 
+/** Shared back-to-front order for visual layers placed above the main track. */
+export type VisualLayerRef = Extract<TimelineItemRef, { type: 'overlay' | 'text' }>
+
 /** Persistent timeline group. Members keep their individual layer identity. */
 export interface TimelineGroup {
   id: string

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Clip, Overlay } from './types'
+import type { Clip, Overlay, TextOverlay } from './types'
 import type { ProjectState } from './utils/project'
 import { useEditor } from './store'
 import { projectDuration } from './utils/time'
@@ -107,5 +107,29 @@ describe('timeline splitting', () => {
     const resized = useEditor.getState().overlays[0]
     expect(resized.start).toBeCloseTo(0.75)
     expect(resized.timelineDuration).toBeCloseTo(1)
+  })
+
+  it('reorders text and media inside one shared visual stack', () => {
+    const overlay: Overlay = {
+      ...clip(1), id: 'overlay-1', start: 0, x: 0.5, y: 0.5, scale: 0.5, angle: 0,
+      positionKeyframes: [],
+    }
+    const text: TextOverlay = {
+      id: 'text-1', text: '제목', start: 0, end: 2, x: 0.5, y: 0.5, size: 0.08,
+      color: '#fff', colorAlpha: 1, box: false, boxColor: '#000', boxAlpha: 0,
+      font: 'sans-serif', strokeWidth: 0, strokeColor: '#000', shadow: false,
+      shadowColor: '#000', shadowBlur: 0, shadowDist: 0, align: 'center', angle: 0,
+    }
+    useEditor.setState({
+      overlays: [overlay], texts: [text],
+      visualOrder: [{ type: 'overlay', id: overlay.id }, { type: 'text', id: text.id }],
+    })
+
+    useEditor.getState().raiseOverlay(overlay.id, 1)
+
+    expect(useEditor.getState().visualOrder).toEqual([
+      { type: 'text', id: text.id },
+      { type: 'overlay', id: overlay.id },
+    ])
   })
 })

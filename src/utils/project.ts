@@ -1,4 +1,4 @@
-import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, ExportSettings, TimelineMarker, TimelineGroup } from '../types'
+import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, ExportSettings, TimelineMarker, TimelineGroup, VisualLayerRef } from '../types'
 
 const DB_NAME = 'simplecut-db'
 const STORE = 'projects'
@@ -22,6 +22,7 @@ export interface ProjectState {
   texts: TextOverlay[]
   markers?: TimelineMarker[]
   groups?: TimelineGroup[]
+  visualOrder?: VisualLayerRef[]
   aspectRatio: AspectRatio
   exportSettings: ExportSettings
 }
@@ -39,6 +40,7 @@ interface SerializedProject {
   texts: TextOverlay[]
   markers?: TimelineMarker[]
   groups?: TimelineGroup[]
+  visualOrder?: VisualLayerRef[]
   media: MediaBlob[]
 }
 
@@ -90,6 +92,7 @@ function serialize(name: string, s: ProjectState): SerializedProject {
     texts: s.texts,
     markers: s.markers ?? [],
     groups: s.groups ?? [],
+    visualOrder: s.visualOrder ?? [],
     media,
   }
 }
@@ -139,6 +142,7 @@ function deserialize(p: SerializedProject): ProjectState {
     texts: p.texts,
     markers: p.markers ?? [],
     groups: p.groups ?? [],
+    visualOrder: p.visualOrder ?? [],
   }
 }
 

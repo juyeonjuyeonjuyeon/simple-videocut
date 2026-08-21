@@ -13,7 +13,7 @@ import {
 } from '../utils/time'
 import { cssTransform, cssCropFill } from '../utils/transform'
 import { hexToRgba } from '../utils/color'
-import { overlayPreviewZ, PREVIEW_Z, textPreviewZ } from '../utils/layers'
+import { normalizeVisualOrder, PREVIEW_Z, visualPreviewZ } from '../utils/layers'
 import { startPointerDrag } from '../utils/pointer'
 import { positionAt } from '../utils/motion'
 import Icon from './Icon'
@@ -38,6 +38,7 @@ export default function Preview() {
   const audios = useEditor((s) => s.audios)
   const texts = useEditor((s) => s.texts)
   const backgrounds = useEditor((s) => s.backgrounds)
+  const storedVisualOrder = useEditor((s) => s.visualOrder)
   const selection = useEditor((s) => s.selection)
   const playhead = useEditor((s) => s.playhead)
   const isPlaying = useEditor((s) => s.isPlaying)
@@ -69,10 +70,12 @@ export default function Preview() {
   const [cropMode, setCropMode] = useState(false)
   const cropOriginal = useRef<{ kind: 'clip' | 'overlay'; id: string; crop: Crop } | null>(null)
   const [overlayControlHeight, setOverlayControlHeight] = useState(0)
+  const [guides, setGuides] = useState({ x: false, y: false })
   const selClip = selection?.type === 'clip' ? clips.find((c) => c.id === selection.id) : null
   const selOverlayId = selection?.type === 'overlay' ? selection.id : null
   const selOverlay = selOverlayId ? overlays.find((o) => o.id === selOverlayId) : null
   const selOverlayPosition = selOverlay ? positionAt(selOverlay, playhead - selOverlay.start) : null
+  const visualOrder = normalizeVisualOrder(overlays, texts, storedVisualOrder)
 
   // Leave crop mode when the selection changes.
   const selectionKey = selection ? `${selection.type}:${selection.id}` : ''
@@ -563,15 +566,18 @@ export default function Preview() {
     const grabDx = e.clientX - (rect.left + position.x * rect.width)
     const grabDy = e.clientY - (rect.top + position.y * rect.height)
     startPointerDrag((ev) => {
-      updateLayerPosition('overlay', id, {
-        x: (ev.clientX - grabDx - rect.left) / rect.width,
-        y: (ev.clientY - grabDy - rect.top) / rect.height,
-      })
-    })
+      const rawX = (ev.clientX - grabDx - rect.left) / rect.width
+      const rawY = (ev.clientY - grabDy - rect.top) / rect.height
+      const snapX = Math.abs(rawX - 0.5) * rect.width <= 8
+      const snapY = Math.abs(rawY - 0.5) * rect.height <= 8
+      setGuides({ x: snapX, y: snapY })
+      updateLayerPosition('overlay', id, { x: snapX ? 0.5 : rawX, y: snapY ? 0.5 : rawY })
+    }, () => setGuides({ x: false, y: false }))
   }
 
-  // ---- resize a PiP overlay while its opposite corner stays anchored ----
-  const onResizeDown = (e: React.PointerEvent, id: string, corner: 'tl' | 'tr' | 'bl' | 'br') => {
+  // ---- resize a PiP overlay while its opposite edge/corner stays anchored ----
+  type ResizeHandle = 'tl' | 't' | 'tr' | 'r' | 'br' | 'b' | 'bl' | 'l'
+  const onResizeDown = (e: React.PointerEvent, id: string, handle: ResizeHandle) => {
     e.stopPropagation()
     if (e.button !== 0) return
     select({ type: 'overlay', id })
@@ -586,13 +592,15 @@ export default function Preview() {
     const width = o.scale * rect.width
     const height = wrapEls.current.get(id)?.offsetHeight || width / (16 / 9)
     const aspect = width / Math.max(1, height)
-    const signX = corner === 'tr' || corner === 'br' ? 1 : -1
-    const signY = corner === 'bl' || corner === 'br' ? 1 : -1
+    const movesX = handle.includes('l') || handle.includes('r')
+    const movesY = handle.includes('t') || handle.includes('b')
+    const signX = handle.includes('r') ? 1 : -1
+    const signY = handle.includes('b') ? 1 : -1
     const radians = ((o.angle || 0) * Math.PI) / 180
     const ux = Math.cos(radians), uy = Math.sin(radians)
     const vx = -Math.sin(radians), vy = Math.cos(radians)
-    const anchorX = centerX - signX * ux * width / 2 - signY * vx * height / 2
-    const anchorY = centerY - signX * uy * width / 2 - signY * vy * height / 2
+    const anchorX = centerX - (movesX ? signX * ux * width / 2 : 0) - (movesY ? signY * vx * height / 2 : 0)
+    const anchorY = centerY - (movesX ? signX * uy * width / 2 : 0) - (movesY ? signY * vy * height / 2 : 0)
     const minWidth = rect.width * 0.1
     const maxWidth = rect.width
     const minHeight = rect.height * 0.05
@@ -602,15 +610,23 @@ export default function Preview() {
     startPointerDrag((ev) => {
       const dx = ev.clientX - anchorX
       const dy = ev.clientY - anchorY
-      const localWidth = signX * (dx * ux + dy * uy)
-      const localHeight = signY * (dx * vx + dy * vy)
-      const projectedWidth = (localWidth + localHeight / aspect) / (1 + 1 / (aspect * aspect))
-      const nextWidth = Math.max(minWidth, Math.min(aspectLocked ? projectedWidth : localWidth, maxWidth))
-      const nextHeight = aspectLocked
-        ? nextWidth / aspect
-        : Math.max(minHeight, Math.min(localHeight, maxHeight))
-      const nextCenterX = anchorX + signX * ux * nextWidth / 2 + signY * vx * nextHeight / 2
-      const nextCenterY = anchorY + signX * uy * nextWidth / 2 + signY * vy * nextHeight / 2
+      const localWidth = movesX ? signX * (dx * ux + dy * uy) : width
+      const localHeight = movesY ? signY * (dx * vx + dy * vy) : height
+      let nextWidth = width
+      let nextHeight = height
+      if (movesX && movesY) {
+        const projectedWidth = (localWidth + localHeight / aspect) / (1 + 1 / (aspect * aspect))
+        nextWidth = Math.max(minWidth, Math.min(aspectLocked ? projectedWidth : localWidth, maxWidth))
+        nextHeight = aspectLocked ? nextWidth / aspect : Math.max(minHeight, Math.min(localHeight, maxHeight))
+      } else if (movesX) {
+        nextWidth = Math.max(minWidth, Math.min(localWidth, maxWidth))
+        if (aspectLocked) nextHeight = nextWidth / aspect
+      } else {
+        nextHeight = Math.max(minHeight, Math.min(localHeight, maxHeight))
+        if (aspectLocked) nextWidth = nextHeight * aspect
+      }
+      const nextCenterX = anchorX + (movesX ? signX * ux * nextWidth / 2 : 0) + (movesY ? signY * vx * nextHeight / 2 : 0)
+      const nextCenterY = anchorY + (movesX ? signX * uy * nextWidth / 2 : 0) + (movesY ? signY * vy * nextHeight / 2 : 0)
       updateLayerPosition('overlay', id, {
         x: (nextCenterX - rect.left) / rect.width,
         y: (nextCenterY - rect.top) / rect.height,
@@ -662,11 +678,13 @@ export default function Preview() {
     const grabDx = e.clientX - (rect.left + position.x * rect.width)
     const grabDy = e.clientY - (rect.top + position.y * rect.height)
     startPointerDrag((ev) => {
-      updateLayerPosition('text', id, {
-        x: (ev.clientX - grabDx - rect.left) / rect.width,
-        y: (ev.clientY - grabDy - rect.top) / rect.height,
-      })
-    })
+      const rawX = (ev.clientX - grabDx - rect.left) / rect.width
+      const rawY = (ev.clientY - grabDy - rect.top) / rect.height
+      const snapX = Math.abs(rawX - 0.5) * rect.width <= 8
+      const snapY = Math.abs(rawY - 0.5) * rect.height <= 8
+      setGuides({ x: snapX, y: snapY })
+      updateLayerPosition('text', id, { x: snapX ? 0.5 : rawX, y: snapY ? 0.5 : rawY })
+    }, () => setGuides({ x: false, y: false }))
   }
 
   // ---- drag the corner handle to resize text (distance-from-center based) ----
@@ -727,7 +745,7 @@ export default function Preview() {
         <img ref={mainImgRef} className="preview__video" alt="" style={{ display: 'none' }} />
         <div ref={mainColorRef} className="preview__video" style={{ display: 'none' }} />
 
-        {overlays.map((o, layerIndex) => {
+        {overlays.map((o) => {
           const sel = selection?.type === 'overlay' && selection.id === o.id
           const position = positionAt(o, playhead - o.start)
           return (
@@ -743,7 +761,7 @@ export default function Preview() {
                 width: `${o.scale * 100}%`,
                 height: o.scaleY != null && !(o.aspectLocked ?? true) ? `${o.scaleY * 100}%` : undefined,
                 visibility: 'hidden',
-                zIndex: overlayPreviewZ(layerIndex),
+                zIndex: visualPreviewZ(visualOrder, { type: 'overlay', id: o.id }),
               }}
               onPointerDown={(e) => onOverlayDown(e, o.id)}
               onDoubleClick={(e) => { e.stopPropagation(); if (sel) { if (cropMode) finishCrop(); else beginCrop('overlay', o.id) } }}
@@ -783,8 +801,8 @@ export default function Preview() {
             onPointerDown={(event) => onOverlayDown(event, selOverlay.id)}
             onDoubleClick={(event) => { event.stopPropagation(); if (cropMode) finishCrop(); else beginCrop('overlay', selOverlay.id) }}
           >
-            {!cropMode && !selOverlay.locked && (['tl', 'tr', 'bl', 'br'] as const).map((corner) => (
-              <span key={corner} className={`preview__resize preview__resize--${corner}`} onPointerDown={(event) => onResizeDown(event, selOverlay.id, corner)} />
+            {!cropMode && !selOverlay.locked && (['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'] as const).map((handle) => (
+              <span key={handle} className={`preview__resize preview__resize--${handle}`} onPointerDown={(event) => onResizeDown(event, selOverlay.id, handle)} />
             ))}
             {!cropMode && !selOverlay.locked && (
               <span className="preview__rotate" title="끌어서 회전" onPointerDown={onRotateDown('overlay', selOverlay.id)}><Icon name="rotate" /></span>
@@ -800,7 +818,7 @@ export default function Preview() {
           </div>
         )}
 
-        {visibleTexts.map((t, layerIndex) => {
+        {visibleTexts.map((t) => {
           const fontPx = t.size * box.h
           const sel = selection?.type === 'text' && selection.id === t.id
           const position = positionAt(t, playhead - t.start)
@@ -823,7 +841,7 @@ export default function Preview() {
                 textShadow: t.shadow ? `0 ${t.shadowDist * fontPx}px ${t.shadowBlur * fontPx}px ${t.shadowColor}` : 'none',
                 transform: `translate(-50%, -50%) rotate(${t.angle || 0}deg)`,
                 opacity: (t.opacity ?? 1) * fadeLevel(playhead - t.start, t.end - t.start, t.fadeIn, t.fadeOut),
-                zIndex: textPreviewZ(layerIndex),
+                zIndex: visualPreviewZ(visualOrder, { type: 'text', id: t.id }),
               }}
               onPointerDown={(e) => onTextDown(e, t.id)}
             >
@@ -833,6 +851,9 @@ export default function Preview() {
             </div>
           )
         })}
+
+        {guides.x && <div className="preview-guide preview-guide--x" />}
+        {guides.y && <div className="preview-guide preview-guide--y" />}
 
         {cropMode && selClip && (
           <>

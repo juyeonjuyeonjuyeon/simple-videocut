@@ -1,12 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { overlayPreviewZ, packVisualLanes, PREVIEW_Z, textPreviewZ } from './layers'
+import { normalizeVisualOrder, packVisualLanes, PREVIEW_Z, visualPreviewZ } from './layers'
 
 describe('visual layer order', () => {
-  it('keeps later overlays in front and all text above media overlays', () => {
-    expect(overlayPreviewZ(0)).toBeLessThan(overlayPreviewZ(1))
-    expect(overlayPreviewZ(99)).toBeLessThan(textPreviewZ(0))
-    expect(textPreviewZ(0)).toBeLessThan(textPreviewZ(1))
-    expect(textPreviewZ(99)).toBeLessThan(PREVIEW_Z.editor)
+  it('uses one explicit order for media and text layers', () => {
+    const order = normalizeVisualOrder([{ id: 'image' }], [{ id: 'title' }], [
+      { type: 'text', id: 'title' },
+      { type: 'overlay', id: 'image' },
+    ])
+    expect(order).toEqual([
+      { type: 'text', id: 'title' },
+      { type: 'overlay', id: 'image' },
+    ])
+    expect(visualPreviewZ(order, { type: 'text', id: 'title' }))
+      .toBeLessThan(visualPreviewZ(order, { type: 'overlay', id: 'image' }))
+    expect(visualPreviewZ(order, { type: 'overlay', id: 'image' })).toBeLessThan(PREVIEW_Z.editor)
+  })
+
+  it('backfills and removes stale entries when old projects are loaded', () => {
+    expect(normalizeVisualOrder([{ id: 'image' }], [{ id: 'title' }], [
+      { type: 'overlay', id: 'gone' },
+    ])).toEqual([
+      { type: 'overlay', id: 'image' },
+      { type: 'text', id: 'title' },
+    ])
   })
 
   it('shows the frontmost overlapping item in the top timeline row', () => {

@@ -13,10 +13,11 @@ import {
   exactDurationPatch,
 } from '../utils/time'
 import { contrastText } from '../utils/color'
-import { packVisualLanes } from '../utils/layers'
+import { normalizeVisualOrder, packVisualLanes } from '../utils/layers'
 import { startPointerDrag as startDrag } from '../utils/pointer'
 import type { Clip, Selection, PositionKeyframe, TimelineItemRef } from '../types'
 import { AudioWaveform, ClipThumbnailStrip } from './TimelineMedia'
+import Icon from './Icon'
 
 const clipBg = (c: Clip) => (c.kind === 'color' ? c.bgColor ?? '#000000' : c.color)
 
@@ -29,8 +30,8 @@ const SNAP_PX = 7
 const DRAG_THRESHOLD = 4
 const OV_LANE_H = 34
 const AUD_LANE_H = 30
-const TXT_LANE_H = 26
 const LONG_PRESS_MS = 520
+const TRACK_HEADER_W = 116
 
 type FreeKind = 'overlay' | 'audio' | 'text' | 'background'
 
@@ -46,6 +47,7 @@ export default function Timeline() {
   const selection = useEditor((s) => s.selection)
   const selectedItems = useEditor((s) => s.selectedItems)
   const groups = useEditor((s) => s.groups)
+  const storedVisualOrder = useEditor((s) => s.visualOrder)
   const playhead = useEditor((s) => s.playhead)
   const isPlaying = useEditor((s) => s.isPlaying)
   const select = useEditor((s) => s.select)
@@ -199,12 +201,13 @@ export default function Timeline() {
 
   const total = projectDuration(clips, overlays, audios, texts, backgrounds)
   const offsets = clipStartOffsets(clips)
+  const usableTrackW = Math.max(1, trackW - TRACK_HEADER_W)
   // Scale that would fit all current content to the viewport (for the 전체보기 button & zoom %).
-  const fitPps = trackW > 0 ? clampPps(trackW / Math.max(total, 1)) : DEFAULT_PX_PER_SEC
+  const fitPps = trackW > 0 ? clampPps(usableTrackW / Math.max(total, 1)) : DEFAULT_PX_PER_SEC
   // The time axis always extends well past the content so it reads as (nearly) endless.
-  const viewSec = pxPerSec > 0 ? trackW / pxPerSec : 0
+  const viewSec = pxPerSec > 0 ? usableTrackW / pxPerSec : 0
   const spanSec = fitMode ? Math.max(total, viewSec) : Math.max(total, viewSec) + Math.max(viewSec, 30)
-  const contentW = fitMode ? trackW : Math.max(trackW, spanSec * pxPerSec)
+  const contentW = fitMode ? trackW : Math.max(trackW, TRACK_HEADER_W + spanSec * pxPerSec)
   const atFit = fitMode && Math.abs(pxPerSec - fitPps) < 0.5
   const atMin = pxPerSec <= MIN_PX_PER_SEC * 1.001
   const atMax = pxPerSec >= MAX_PX_PER_SEC * 0.999
@@ -214,9 +217,9 @@ export default function Timeline() {
     if (!fittedRef.current && total > 0 && trackW > 0) {
       fittedRef.current = true
       setFitMode(true)
-      setPxPerSec(clampPps(trackW / Math.max(total, 1)))
+      setPxPerSec(clampPps(usableTrackW / Math.max(total, 1)))
     }
-  }, [total, trackW])
+  }, [total, trackW, usableTrackW])
 
   // 전체보기 is a persistent viewport mode, not a one-time zoom value. Keep
   // fitting when a trim/edit changes the project length and never add overflow.
@@ -228,21 +231,20 @@ export default function Timeline() {
   }, [fitMode, fitPps, trackW])
 
   // Lane packing for the free tracks.
-  const overlayLanes = packVisualLanes(overlays.map((o) => ({ start: o.start, end: o.start + overlayLength(o) })))
   const audioLanes = packLanes(audios.map((a) => ({ start: a.start, end: a.start + audioLength(a) })))
-  const textLanes = packVisualLanes(texts.map((t) => ({ start: t.start, end: t.end })))
   const bgLanes = packVisualLanes(backgrounds.map((b) => ({ start: b.start, end: b.start + clipTimelineDuration(b) })))
-  const nOverlayLanes = overlayLanes.length ? Math.max(...overlayLanes) + 1 : 0
   const nAudioLanes = audioLanes.length ? Math.max(...audioLanes) + 1 : 0
-  const nTextLanes = textLanes.length ? Math.max(...textLanes) + 1 : 0
   const nBgLanes = bgLanes.length ? Math.max(...bgLanes) + 1 : 0
+  const visualOrder = normalizeVisualOrder(overlays, texts, storedVisualOrder)
+  const visualFrontToBack = [...visualOrder].reverse()
+  const timelineX = (time: number) => TRACK_HEADER_W + time * pxPerSec
 
   // Keep the playhead in view only during playback. Manual keyframe/playhead
   // edits must not unexpectedly move a fitted or manually positioned viewport.
   useEffect(() => {
     const el = scrollRef.current
     if (!el || !isPlaying || fitMode) return
-    const x = playhead * pxPerSec
+    const x = TRACK_HEADER_W + playhead * pxPerSec
     const margin = 80
     if (x < el.scrollLeft + margin) el.scrollLeft = Math.max(0, x - margin)
     else if (x > el.scrollLeft + el.clientWidth - margin) el.scrollLeft = x - el.clientWidth + margin
@@ -262,14 +264,14 @@ export default function Timeline() {
       setFitMode(false)
       const rect = el.getBoundingClientRect()
       const cursorX = e.clientX - rect.left
-      const anchorTime = (cursorX + el.scrollLeft) / pxPerSec
+      const anchorTime = Math.max(0, (cursorX + el.scrollLeft - TRACK_HEADER_W) / pxPerSec)
       const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
       setPxPerSec((p) => {
         const np = clampPps(p * factor)
         requestAnimationFrame(() => {
           const e2 = scrollRef.current
           if (!e2) return
-          e2.scrollLeft = anchorTime * np - cursorX
+          e2.scrollLeft = TRACK_HEADER_W + anchorTime * np - cursorX
         })
         return np
       })
@@ -283,7 +285,7 @@ export default function Timeline() {
     const el = scrollRef.current
     if (!el) return 0
     const rect = el.getBoundingClientRect()
-    return Math.max(0, Math.min((clientX - rect.left + el.scrollLeft) / pxPerSec, total))
+    return Math.max(0, Math.min((clientX - rect.left + el.scrollLeft - TRACK_HEADER_W) / pxPerSec, total))
   }
 
   // Snap a time to nearby edges of *other* items (and 0 / playhead) — the magnet effect.
@@ -318,13 +320,11 @@ export default function Timeline() {
   const trackAt = (clientY: number): 'overlay' | 'main' | 'bg' | null => {
     const el = scrollRef.current
     if (!el) return null
-    const hit = (sel: string) => {
-      const t = el.querySelector(sel)
-      if (!t) return false
-      const r = t.getBoundingClientRect()
+    const hit = (sel: string) => Array.from(el.querySelectorAll(sel)).some((track) => {
+      const r = track.getBoundingClientRect()
       return clientY >= r.top && clientY <= r.bottom
-    }
-    if (hit('.timeline__lane--overlay')) return 'overlay'
+    })
+    if (hit('.timeline__lane--visual')) return 'overlay'
     if (hit('.timeline__lane--bg')) return 'bg'
     if (hit('.timeline__track')) return 'main'
     return null
@@ -386,12 +386,12 @@ export default function Timeline() {
         if (!el) return
         const rect = el.getBoundingClientRect()
         const cursorContentX = ev.clientX - rect.left + el.scrollLeft
-        setDragLeft(cursorContentX - grabOffset)
+        setDragLeft(Math.max(TRACK_HEADER_W, cursorContentX - grabOffset))
         const cur = useEditor.getState().clips
         const offs = clipStartOffsets(cur)
         const dragged = cur.find((x) => x.id === id)
         const draggedW = dragged ? clipTimelineDuration(dragged) * pxPerSec : 0
-        const centerTime = (cursorContentX - grabOffset + draggedW / 2) / pxPerSec
+        const centerTime = (cursorContentX - grabOffset + draggedW / 2 - TRACK_HEADER_W) / pxPerSec
         let target = 0
         for (let i = 0; i < cur.length; i++) {
           if (cur[i].id === id) continue
@@ -580,14 +580,14 @@ export default function Timeline() {
 
   const zoomBy = (factor: number) => {
     const el = scrollRef.current
-    const anchorTime = el ? (el.scrollLeft + el.clientWidth / 2) / pxPerSec : 0
+    const anchorTime = el ? Math.max(0, (el.scrollLeft + el.clientWidth / 2 - TRACK_HEADER_W) / pxPerSec) : 0
     setFitMode(false)
     setPxPerSec((p) => {
       const np = clampPps(p * factor)
       requestAnimationFrame(() => {
         const e2 = scrollRef.current
         if (!e2) return
-        e2.scrollLeft = anchorTime * np - e2.clientWidth / 2
+        e2.scrollLeft = TRACK_HEADER_W + anchorTime * np - e2.clientWidth / 2
       })
       return np
     })
@@ -627,7 +627,7 @@ export default function Timeline() {
       key={id}
       className={`tlclip${selected ? ' tlclip--selected' : ''}${flags?.hidden ? ' tlclip--hidden' : ''}${flags?.locked ? ' tlclip--locked' : ''}`}
       style={{
-        left: start * pxPerSec,
+        left: timelineX(start),
         width: Math.max(10, len * pxPerSec),
         top: lane * laneH + 2,
         height: laneH - 6,
@@ -646,26 +646,58 @@ export default function Timeline() {
     </div>
   )
 
+  const zoomValue = Math.round((Math.log(pxPerSec / MIN_PX_PER_SEC) / Math.log(MAX_PX_PER_SEC / MIN_PX_PER_SEC)) * 1000)
+  const setZoomValue = (value: number) => {
+    setFitMode(false)
+    setPxPerSec(clampPps(MIN_PX_PER_SEC * ((MAX_PX_PER_SEC / MIN_PX_PER_SEC) ** (value / 1000))))
+  }
+
+  const trackHeader = (
+    label: string,
+    target?: TimelineItemRef,
+    state?: { locked?: boolean; hidden?: boolean; muted?: boolean },
+  ) => (
+    <div className="timeline__track-header" onPointerDown={(event) => event.stopPropagation()}>
+      <button type="button" className="timeline__track-name" title={label} onClick={() => target && select(target)}>{label}</button>
+      {target && (target.type === 'overlay' || target.type === 'text' || target.type === 'background') && (
+        <button type="button" className="timeline__track-action" title={state?.hidden ? '레이어 표시' : '레이어 숨기기'} onClick={() => {
+          if (target.type === 'overlay') updateOverlay(target.id, { hidden: !state?.hidden })
+          else if (target.type === 'text') updateText(target.id, { hidden: !state?.hidden })
+          else updateBackground(target.id, { hidden: !state?.hidden })
+        }}><Icon name={state?.hidden ? 'eyeOff' : 'eye'} /></button>
+      )}
+      {target && target.type !== 'clip' && target.type !== 'audio' && (
+        <button type="button" className="timeline__track-action" title={state?.locked ? '잠금 해제' : '레이어 잠금'} onClick={() => {
+          if (target.type === 'overlay') updateOverlay(target.id, { locked: !state?.locked })
+          else if (target.type === 'text') updateText(target.id, { locked: !state?.locked })
+          else updateBackground(target.id, { locked: !state?.locked })
+        }}><Icon name={state?.locked ? 'lock' : 'unlock'} /></button>
+      )}
+    </div>
+  )
+
   return (
     <div className="timeline">
       <div className="timeline__bar">
-        <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1 / 1.5)} disabled={atMin} title="축소">−</button>
-        <button className="btn btn--sm" onClick={fitView} disabled={atFit} title="전체를 한 화면에">전체보기</button>
-        <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1.5)} disabled={atMax} title="확대">＋</button>
-        <button className="btn btn--sm timeline__marker-add" onClick={() => addMarker(playhead)} title="현재 위치에 마커 추가 (M)">마커 추가</button>
+        <button className="iconbtn iconbtn--xs" onClick={() => addMarker(playhead)} title="현재 위치에 마커 추가 (M)" aria-label="마커 추가"><Icon name="marker" /></button>
         {selectedItems.length > 1 && <button className="btn btn--sm" onClick={groupSelected}>그룹 만들기 ({selectedItems.length})</button>}
         {selectedItems.some((item) => Boolean(groupFor(item))) && <button className="btn btn--sm" onClick={ungroupSelected}>그룹 해제</button>}
-        <span className="timeline__zoom">{Math.round((pxPerSec / fitPps) * 100)}%</span>
         <span className="timeline__hint">스크롤=확대 · Shift+스크롤=이동</span>
         <div className="timeline__bar-spacer" />
         <span className="timeline__total">{formatTime(playhead)} / {formatTime(total)}</span>
+        <div className="timeline__zoom-control" aria-label="타임라인 확대 및 축소">
+          <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1 / 1.35)} disabled={atMin} title="축소"><Icon name="zoomOut" /></button>
+          <input type="range" min={0} max={1000} step={1} value={zoomValue} onChange={(event) => setZoomValue(Number(event.target.value))} aria-label="타임라인 확대 비율" />
+          <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1.35)} disabled={atMax} title="확대"><Icon name="zoomIn" /></button>
+          <button className={`iconbtn iconbtn--xs${atFit ? ' iconbtn--on' : ''}`} onClick={fitView} title="전체 타임라인 맞춤" aria-label="전체 타임라인 맞춤"><Icon name="fit" /></button>
+        </div>
       </div>
 
       <div className={`timeline__scroll${fitMode ? ' timeline__scroll--fit' : ''}`} ref={scrollRef}>
         <div className="timeline__content" style={{ width: contentW }}>
           <div className="timeline__ruler" onPointerDown={onRulerDown} onDoubleClick={(event) => addMarker(timeAt(event.clientX))}>
             {ticks.map((t) => (
-              <span key={t} className="timeline__tick" style={{ left: t * pxPerSec }}>
+              <span key={t} className="timeline__tick" style={{ left: timelineX(t) }}>
                 {tickLabel(t)}
               </span>
             ))}
@@ -676,7 +708,7 @@ export default function Timeline() {
               key={marker.id}
               type="button"
               className="timeline-marker"
-              style={{ left: marker.time * pxPerSec, ['--marker-color' as string]: marker.color }}
+              style={{ left: timelineX(marker.time), ['--marker-color' as string]: marker.color }}
               onPointerDown={(event) => onMarkerDown(event, marker.id)}
               onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); openMarkerMenu(marker.id, event.clientX, event.clientY) }}
               onDoubleClick={(event) => { event.stopPropagation(); openMarkerMenu(marker.id, event.clientX, event.clientY) }}
@@ -688,45 +720,44 @@ export default function Timeline() {
             </button>
           ))}
 
-          {/* Text is always composited above media overlays. */}
-          {nTextLanes > 0 && (
-            <div
-              className="timeline__lane timeline__lane--text"
-              style={{ height: nTextLanes * TXT_LANE_H }}
-              onPointerDown={(e) => e.target === e.currentTarget && select(null)}
-            >
-              {texts.map((t, i) =>
-                freeChip('text', t.id, t.start, t.end - t.start, textLanes[i], TXT_LANE_H, '#3a4250',
-                  `T ${t.text}`,
-                  isSelected({ type: 'text', id: t.id }),
+          {/* One visible row per composited layer. Top row is always frontmost. */}
+          {visualFrontToBack.map((ref) => {
+            if (ref.type === 'overlay') {
+              const o = overlays.find((item) => item.id === ref.id)
+              if (!o) return null
+              return (
+                <div key={`visual:${ref.type}:${ref.id}`} className="timeline__lane timeline__lane--visual timeline__lane--overlay" style={{ height: OV_LANE_H }}
+                  onPointerDown={(event) => event.target === event.currentTarget && select(null)}>
+                  {trackHeader(o.name, ref, { hidden: o.hidden, locked: o.locked })}
+                  {freeChip('overlay', o.id, o.start, overlayLength(o), 0, OV_LANE_H, o.color,
+                    `${o.kind === 'image' ? '이미지' : '영상'} · ${o.name}${o.repeat > 1 ? ` · 반복 ${o.repeat}회` : ''}${o.kind === 'video' && o.muted ? ' · 음소거' : ''}`,
+                    isSelected(ref),
+                    <>{fadeVisual(o.fadeIn, o.fadeOut, overlayLength(o))}{keyframeVisual(o.positionKeyframes, overlayLength(o))}</>,
+                    { hidden: o.hidden, locked: o.locked })}
+                </div>
+              )
+            }
+            const t = texts.find((item) => item.id === ref.id)
+            if (!t) return null
+            return (
+              <div key={`visual:${ref.type}:${ref.id}`} className="timeline__lane timeline__lane--visual timeline__lane--text" style={{ height: OV_LANE_H }}
+                onPointerDown={(event) => event.target === event.currentTarget && select(null)}>
+                {trackHeader(t.text || '텍스트', ref, { hidden: t.hidden, locked: t.locked })}
+                {freeChip('text', t.id, t.start, t.end - t.start, 0, OV_LANE_H, '#3a4250',
+                  `텍스트 · ${t.text}`,
+                  isSelected(ref),
                   <>{fadeVisual(t.fadeIn, t.fadeOut, t.end - t.start)}{keyframeVisual(t.positionKeyframes, t.end - t.start)}</>,
-                  { hidden: t.hidden, locked: t.locked }),
-              )}
-            </div>
-          )}
-
-          {/* Overlay lanes (PiP), frontmost overlapping layer on the top row. */}
-          {nOverlayLanes > 0 && (
-            <div
-              className="timeline__lane timeline__lane--overlay"
-              style={{ height: nOverlayLanes * OV_LANE_H }}
-              onPointerDown={(e) => e.target === e.currentTarget && select(null)}
-            >
-              {overlays.map((o, i) =>
-                freeChip('overlay', o.id, o.start, overlayLength(o), overlayLanes[i], OV_LANE_H, o.color,
-                  `${o.kind === 'image' ? '이미지' : '오버레이'} · ${o.name}${o.repeat > 1 ? ` · 반복 ${o.repeat}회` : ''}${o.kind === 'video' && o.muted ? ' · 음소거' : ''}`,
-                  isSelected({ type: 'overlay', id: o.id }),
-                  <>{fadeVisual(o.fadeIn, o.fadeOut, overlayLength(o))}{keyframeVisual(o.positionKeyframes, overlayLength(o))}</>,
-                  { hidden: o.hidden, locked: o.locked }),
-              )}
-            </div>
-          )}
+                  { hidden: t.hidden, locked: t.locked })}
+              </div>
+            )
+          })}
 
           {/* Main video track */}
           <div
             className={`timeline__track${dragId ? ' timeline__track--reordering' : ''}`}
             onPointerDown={(e) => e.target === e.currentTarget && select(null)}
           >
+            {trackHeader('메인 트랙')}
             {clips.length === 0 && <div className="timeline__placeholder">＋ 동영상·사진을 추가하세요</div>}
             {clips.map((c, i) => {
               const isSel = isSelected({ type: 'clip', id: c.id })
@@ -737,7 +768,7 @@ export default function Timeline() {
                   key={c.id}
                   className={`clip${isSel ? ' clip--selected' : ''}${isDragging ? ' clip--dragging' : ''}`}
                   style={{
-                    left: isDragging ? dragLeft : offsets[i] * pxPerSec,
+                    left: isDragging ? dragLeft : timelineX(offsets[i]),
                     width: clipWidth,
                     background: clipBg(c),
                     color: contrastText(clipBg(c)),
@@ -772,7 +803,7 @@ export default function Timeline() {
                   key={`transition-${clip.id}-${next.id}`}
                   type="button"
                   className={`timeline-transition${active ? ' timeline-transition--active' : ''}`}
-                  style={{ left: boundary * pxPerSec }}
+                  style={{ left: timelineX(boundary) }}
                   aria-label={`${clip.name}과 ${next.name} 사이 전환`}
                   title={active ? '검정 페이드 전환 편집' : '클립 사이 전환 추가'}
                   onPointerDown={(event) => event.stopPropagation()}
@@ -793,6 +824,7 @@ export default function Timeline() {
               style={{ height: nAudioLanes * AUD_LANE_H }}
               onPointerDown={(e) => e.target === e.currentTarget && select(null)}
             >
+              {trackHeader('오디오')}
               {audios.map((a, i) =>
                 freeChip('audio', a.id, a.start, audioLength(a), audioLanes[i], AUD_LANE_H, a.color,
                   `음악 · ${a.name}${a.repeat > 1 ? ` · 반복 ${a.repeat}회` : ''}${a.muted ? ' · 음소거' : ''}`,
@@ -809,6 +841,7 @@ export default function Timeline() {
               style={{ height: nBgLanes * AUD_LANE_H }}
               onPointerDown={(e) => e.target === e.currentTarget && select(null)}
             >
+              {trackHeader('배경')}
               {backgrounds.map((b, i) =>
                 freeChip('background', b.id, b.start, clipTimelineDuration(b), bgLanes[i], AUD_LANE_H, clipBg(b),
                   `배경 · ${b.name}${b.kind === 'video' && b.muted ? ' · 음소거' : ''}`,
@@ -819,7 +852,7 @@ export default function Timeline() {
             </div>
           )}
 
-          <div className="timeline__playhead" style={{ left: playhead * pxPerSec }} onPointerDown={onRulerDown} title={`${formatTimeFine(playhead)} · 끌어서 이동`}>
+          <div className="timeline__playhead" style={{ left: timelineX(playhead) }} onPointerDown={onRulerDown} title={`${formatTimeFine(playhead)} · 끌어서 이동`}>
             <span className="timeline__playhead-time">{formatTimeFine(playhead)}</span>
             <span className="timeline__playhead-grab" />
           </div>
@@ -839,11 +872,12 @@ export default function Timeline() {
         const canMute = target.type === 'audio'
           || (target.type === 'overlay' && st.overlays.find((x) => x.id === target.id)?.kind === 'video')
           || (target.type === 'background' && st.backgrounds.find((x) => x.id === target.id)?.kind === 'video')
-        const layerItems = target.type === 'overlay' ? st.overlays
-          : target.type === 'background' ? st.backgrounds
-          : target.type === 'text' ? st.texts
-          : []
-        const layerIndex = layerItems.findIndex((entry) => entry.id === target.id)
+        const menuVisualOrder = normalizeVisualOrder(st.overlays, st.texts, st.visualOrder)
+        const sharedVisualLayer = target.type === 'overlay' || target.type === 'text'
+        const layerIndex = sharedVisualLayer
+          ? menuVisualOrder.findIndex((entry) => entry.type === target.type && entry.id === target.id)
+          : target.type === 'background' ? st.backgrounds.findIndex((entry) => entry.id === target.id) : -1
+        const layerCount = sharedVisualLayer ? menuVisualOrder.length : target.type === 'background' ? st.backgrounds.length : 0
         const mainLength = totalDuration(st.clips)
         const itemStart = item?.start ?? visualItem?.start ?? 0
         const targetGroup = groupFor(target)
@@ -895,7 +929,7 @@ export default function Timeline() {
               <button role="menuitem" disabled={itemStart >= mainLength} onClick={() => withTarget(target, () => fitSpan(itemStart, mainLength - itemStart))}>현재 위치부터 메인 끝까지</button>
             </>}
             {(target.type === 'overlay' || target.type === 'background' || target.type === 'text') && <>
-              <button role="menuitem" disabled={layerIndex < 0 || layerIndex >= layerItems.length - 1} onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, 1) : target.type === 'background' ? raiseBackground(target.id, 1) : raiseText(target.id, 1))}>레이어 한 단계 위로</button>
+              <button role="menuitem" disabled={layerIndex < 0 || layerIndex >= layerCount - 1} onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, 1) : target.type === 'background' ? raiseBackground(target.id, 1) : raiseText(target.id, 1))}>레이어 한 단계 위로</button>
               <button role="menuitem" disabled={layerIndex <= 0} onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, -1) : target.type === 'background' ? raiseBackground(target.id, -1) : raiseText(target.id, -1))}>레이어 한 단계 아래로</button>
             </>}
             {target.type === 'clip' && <>

@@ -1,10 +1,11 @@
 import { create } from 'zustand'
-import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup } from './types'
+import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup, VisualLayerRef } from './types'
 import { NO_CROP, FONT_OPTIONS } from './types'
 import type { ProjectState } from './utils/project'
 import { assertMediaCapacity, probeVideo, probeImage, probeAudio, nextClipColor, isVideoFile, isImageFile, isAudioFile } from './utils/media'
 import { clipTimelineDuration, clipStartOffsets, projectDuration, overlayLength, audioLength, exactDurationPatch } from './utils/time'
 import { keyframeAt, positionAt } from './utils/motion'
+import { normalizeVisualOrder } from './utils/layers'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
 const registerNativeMedia = async (file: File) => {
@@ -24,6 +25,7 @@ interface EditorState {
   backgrounds: Background[]
   markers: TimelineMarker[]
   groups: TimelineGroup[]
+  visualOrder: VisualLayerRef[]
   selection: Selection
   selectedItems: TimelineItemRef[]
   aspectRatio: AspectRatio
@@ -157,6 +159,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   backgrounds: [],
   markers: [],
   groups: [],
+  visualOrder: [],
   selection: null,
   selectedItems: [],
   aspectRatio: '16:9',
@@ -341,6 +344,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({
       clips: s.clips.filter((x) => x.id !== id),
       overlays: [...s.overlays, ov],
+      visualOrder: [...normalizeVisualOrder(s.overlays, s.texts, s.visualOrder), { type: 'overlay', id: ov.id }],
       selection: { type: 'overlay', id: ov.id },
     })
   },
@@ -444,7 +448,11 @@ export const useEditor = create<EditorState>((set, get) => ({
           const { duration, hasAudio, src } = await probeVideo(file)
           ov = { ...base, kind: 'video', src, duration, trimStart: 0, trimEnd: duration, hasAudio }
         }
-        set((s) => ({ overlays: [...s.overlays, ov], selection: { type: 'overlay', id: ov.id } }))
+        set((s) => ({
+          overlays: [...s.overlays, ov],
+          visualOrder: [...normalizeVisualOrder(s.overlays, s.texts, s.visualOrder), { type: 'overlay', id: ov.id }],
+          selection: { type: 'overlay', id: ov.id },
+        }))
       } catch (e) {
         console.error(e)
         alert((e as Error).message)
@@ -481,18 +489,19 @@ export const useEditor = create<EditorState>((set, get) => ({
   removeOverlay: (id) => {
     set((s) => ({
       overlays: s.overlays.filter((o) => o.id !== id),
+      visualOrder: s.visualOrder.filter((item) => item.type !== 'overlay' || item.id !== id),
       selection: s.selection?.type === 'overlay' && s.selection.id === id ? null : s.selection,
     }))
   },
 
   raiseOverlay: (id, dir) =>
     set((s) => {
-      const i = s.overlays.findIndex((o) => o.id === id)
+      const visualOrder = normalizeVisualOrder(s.overlays, s.texts, s.visualOrder)
+      const i = visualOrder.findIndex((item) => item.type === 'overlay' && item.id === id)
       const j = i + dir
-      if (i < 0 || j < 0 || j >= s.overlays.length) return s
-      const overlays = s.overlays.slice()
-      ;[overlays[i], overlays[j]] = [overlays[j], overlays[i]]
-      return { overlays }
+      if (i < 0 || j < 0 || j >= visualOrder.length) return s
+      ;[visualOrder[i], visualOrder[j]] = [visualOrder[j], visualOrder[i]]
+      return { visualOrder }
     }),
 
   moveOverlayToMain: (id) =>
@@ -510,6 +519,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       const index = insertAt < 0 ? s.clips.length : insertAt
       return {
         overlays: s.overlays.filter((x) => x.id !== id),
+        visualOrder: s.visualOrder.filter((item) => item.type !== 'overlay' || item.id !== id),
         clips: [...s.clips.slice(0, index), clip as Clip, ...s.clips.slice(index)],
         selection: { type: 'clip', id: clip.id },
       }
@@ -573,7 +583,11 @@ export const useEditor = create<EditorState>((set, get) => ({
       align: 'center', angle: 0,
       opacity: 1, locked: false, hidden: false, fadeIn: 0, fadeOut: 0, positionKeyframes: [],
     }
-    set((st) => ({ texts: [...st.texts, text], selection: { type: 'text', id: text.id } }))
+    set((st) => ({
+      texts: [...st.texts, text],
+      visualOrder: [...normalizeVisualOrder(st.overlays, st.texts, st.visualOrder), { type: 'text', id: text.id }],
+      selection: { type: 'text', id: text.id },
+    }))
   },
 
   updateText: (id, patch) =>
@@ -598,17 +612,18 @@ export const useEditor = create<EditorState>((set, get) => ({
   removeText: (id) =>
     set((s) => ({
       texts: s.texts.filter((t) => t.id !== id),
+      visualOrder: s.visualOrder.filter((item) => item.type !== 'text' || item.id !== id),
       selection: s.selection?.type === 'text' && s.selection.id === id ? null : s.selection,
     })),
 
   raiseText: (id, dir) =>
     set((s) => {
-      const i = s.texts.findIndex((t) => t.id === id)
+      const visualOrder = normalizeVisualOrder(s.overlays, s.texts, s.visualOrder)
+      const i = visualOrder.findIndex((item) => item.type === 'text' && item.id === id)
       const j = i + dir
-      if (i < 0 || j < 0 || j >= s.texts.length) return s
-      const texts = s.texts.slice()
-      ;[texts[i], texts[j]] = [texts[j], texts[i]]
-      return { texts }
+      if (i < 0 || j < 0 || j >= visualOrder.length) return s
+      ;[visualOrder[i], visualOrder[j]] = [visualOrder[j], visualOrder[i]]
+      return { visualOrder }
     }),
 
   // ---------- timeline markers ----------
@@ -758,6 +773,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       audios: s.audios.filter((item) => !has('audio', item.id)),
       texts: s.texts.filter((item) => !has('text', item.id)),
       backgrounds: s.backgrounds.filter((item) => !has('background', item.id)),
+      visualOrder: s.visualOrder.filter((item) => !has(item.type, item.id)),
       groups, selection: null, selectedItems: [],
     })
   },
@@ -775,7 +791,11 @@ export const useEditor = create<EditorState>((set, get) => ({
       const o = s.overlays.find((x) => x.id === sel.id)
       if (!o) return
       const copy: Overlay = { ...o, id: uid(), start: o.start + overlayLength(o) }
-      set({ overlays: [...s.overlays, copy], selection: { type: 'overlay', id: copy.id } })
+      set({
+        overlays: [...s.overlays, copy],
+        visualOrder: [...normalizeVisualOrder(s.overlays, s.texts, s.visualOrder), { type: 'overlay', id: copy.id }],
+        selection: { type: 'overlay', id: copy.id },
+      })
     } else if (sel.type === 'audio') {
       const a = s.audios.find((x) => x.id === sel.id)
       if (!a) return
@@ -786,7 +806,11 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (!tx) return
       const len = tx.end - tx.start
       const copy: TextOverlay = { ...tx, id: uid(), start: tx.end, end: tx.end + len }
-      set({ texts: [...s.texts, copy], selection: { type: 'text', id: copy.id } })
+      set({
+        texts: [...s.texts, copy],
+        visualOrder: [...normalizeVisualOrder(s.overlays, s.texts, s.visualOrder), { type: 'text', id: copy.id }],
+        selection: { type: 'text', id: copy.id },
+      })
     } else if (sel.type === 'background') {
       const b = s.backgrounds.find((x) => x.id === sel.id)
       if (!b) return
@@ -799,11 +823,11 @@ export const useEditor = create<EditorState>((set, get) => ({
 }))
 
 type EditorSnapshot = Pick<EditorState,
-  'clips' | 'overlays' | 'audios' | 'texts' | 'backgrounds' | 'markers' | 'groups' | 'aspectRatio' | 'exportSettings'>
+  'clips' | 'overlays' | 'audios' | 'texts' | 'backgrounds' | 'markers' | 'groups' | 'visualOrder' | 'aspectRatio' | 'exportSettings'>
 
 const takeSnapshot = (s: EditorState): EditorSnapshot => ({
   clips: s.clips, overlays: s.overlays, audios: s.audios, texts: s.texts,
-  backgrounds: s.backgrounds, markers: s.markers, groups: s.groups, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
+  backgrounds: s.backgrounds, markers: s.markers, groups: s.groups, visualOrder: s.visualOrder, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
 })
 
 const past: EditorSnapshot[] = []
@@ -820,6 +844,7 @@ const historyKey = (a: EditorState, b: EditorState) => {
   if (a.backgrounds !== b.backgrounds) return 'backgrounds'
   if (a.markers !== b.markers) return 'markers'
   if (a.groups !== b.groups) return 'groups'
+  if (a.visualOrder !== b.visualOrder) return 'visualOrder'
   if (a.aspectRatio !== b.aspectRatio) return 'aspectRatio'
   if (a.exportSettings !== b.exportSettings) return 'exportSettings'
   return ''
@@ -861,6 +886,7 @@ function replaceEditorProject(p: ProjectState) {
     clips: p.clips.map((c) => ({ ...c, fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 })),
     markers: p.markers ?? [],
     groups: p.groups ?? [],
+    visualOrder: normalizeVisualOrder(p.overlays, p.texts, p.visualOrder),
     aspectRatio: p.aspectRatio, exportSettings: p.exportSettings,
     selection: null, selectedItems: [], playhead: 0, isPlaying: false, canUndo: false, canRedo: false,
   })
