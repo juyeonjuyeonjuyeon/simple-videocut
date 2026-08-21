@@ -16,6 +16,7 @@ import { translate, useLanguage } from '../i18n'
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
   'timelineDuration' | 'fadeIn' | 'fadeOut' | 'opacity' | 'locked' | 'hidden' | 'scaleY' | 'aspectLocked' |
+  'canvasX' | 'canvasY' | 'canvasScale' | 'canvasScaleY' | 'canvasAspectLocked' | 'canvasAngle' |
   'borderWidth' | 'borderColor' | 'borderStyle' | 'shadowEnabled' | 'shadowColor' | 'shadowOpacity' |
   'shadowBlur' | 'shadowX' | 'shadowY' | 'maskShape'>>
 
@@ -395,6 +396,25 @@ function ClipInspector({ clip, tab, onOpenCrop }: { clip: Clip; tab: InspectorTa
         <button className="btn btn--danger" onClick={() => remove(clip.id)}>{translate('클립 삭제', 'Delete clip')}</button>
       </>}
       {tab === 'transform' && <>
+        <InspectorBlock title={translate('캔버스 위치와 크기', 'Canvas position and size')}>
+          <div className="inspector__group">
+            <Range label={translate('가로 위치', 'Horizontal position')} value={Math.round((clip.canvasX ?? 0.5) * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => update(clip.id, { canvasX: v / 100 })} />
+            <Range label={translate('세로 위치', 'Vertical position')} value={Math.round((clip.canvasY ?? 0.5) * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => update(clip.id, { canvasY: v / 100 })} />
+            <Range label={translate('크기', 'Size')} value={Math.round((clip.canvasScale ?? 1) * 100)} min={5} max={300} step={1} unit="%" onChange={(v) => update(clip.id, { canvasScale: v / 100 })} />
+            {!(clip.canvasAspectLocked ?? true) && <Range label={translate('세로 크기', 'Height')} value={Math.round((clip.canvasScaleY ?? clip.canvasScale ?? 1) * 100)} min={5} max={300} step={1} unit="%" onChange={(v) => update(clip.id, { canvasScaleY: v / 100 })} />}
+            <Range label={translate('자유 회전', 'Free rotation')} value={clip.canvasAngle ?? 0} min={-180} max={180} step={1} unit="°" onChange={(v) => update(clip.id, { canvasAngle: v })} />
+            <button className={`btn btn--sm${clip.canvasAspectLocked ?? true ? ' btn--on' : ''}`} onClick={() => update(clip.id, clip.canvasAspectLocked ?? true
+              ? { canvasAspectLocked: false, canvasScaleY: clip.canvasScale ?? 1 }
+              : { canvasAspectLocked: true, canvasScaleY: undefined })}>
+              <Icon name={clip.canvasAspectLocked ?? true ? 'lock' : 'unlock'} />{translate('비율', 'Aspect')} {clip.canvasAspectLocked ?? true ? translate('고정', 'Locked') : translate('자유', 'Free')}
+            </button>
+            <div className="btnrow">
+              <button className="btn btn--sm" onClick={() => update(clip.id, { canvasX: 0.5, canvasY: 0.5 })}>{translate('정중앙', 'Center')}</button>
+              <button className="btn btn--sm" onClick={() => update(clip.id, { canvasX: 0.5, canvasY: 0.5, canvasScale: 1, canvasScaleY: undefined, canvasAspectLocked: true, canvasAngle: 0 })}>{translate('캔버스에 맞춤', 'Fit to canvas')}</button>
+            </div>
+            <div className="inspector__hint">{translate('미리보기에서도 직접 이동·크기·회전을 조절할 수 있습니다.', 'You can also move, resize, and rotate directly in the preview.')}</div>
+          </div>
+        </InspectorBlock>
         <InspectorBlock title={translate('회전과 반전', 'Rotate and flip')}><TransformRow rotate={clip.rotate} flipH={clip.flipH} flipV={clip.flipV} onPatch={patch} /></InspectorBlock>
         <InspectorBlock title={translate('자르기', 'Crop')}><CropRow crop={clip.crop} onPatch={patch} onOpen={onOpenCrop} /></InspectorBlock>
       </>}

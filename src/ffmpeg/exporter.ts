@@ -8,6 +8,7 @@ import { positionExpression } from '../utils/motion'
 import { normalizeVisualOrder } from '../utils/layers'
 import { overlayOutputSize, renderOverlayEffectAssets } from '../utils/overlay-style'
 import { renderShapePng } from '../utils/shape'
+import { resolveMainPlacement } from '../utils/main-placement'
 
 // Keep the encoding engine on the same origin. Exports must not depend on a
 // third-party CDN being reachable after the editor itself has loaded.
@@ -418,12 +419,14 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     const audioFlags: boolean[] = []
     const inputFiles: string[] = []
     const inputTrimStarts: number[] = []
+    const inputSizes: Array<{ width: number; height: number }> = []
     for (let i = 0; i < clips.length; i++) {
       const clip = clips[i]
       if (clip.kind === 'color') {
         audioFlags.push(false)
         inputFiles.push('')
         inputTrimStarts.push(0)
+        inputSizes.push({ width: W, height: H })
         continue
       }
       if (!clip.sourceSize) throw new Error(`원본 영상 파일이 비어 있습니다: ${clip.name}`)
@@ -434,6 +437,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       audioFlags.push(prepared.hasAudio)
       inputFiles.push(prepared.fileName)
       inputTrimStarts.push(prepared.trimStart)
+      inputSizes.push({ width: prepared.width, height: prepared.height })
     }
 
     // 2. Render each text overlay to a PNG at output resolution.
@@ -590,16 +594,22 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         const hex = (c.bgColor || '#000000').replace('#', '0x')
         filters.push(`color=c=${hex}:s=${W}x${H}:r=30:d=${segDur.toFixed(3)},setsar=1,format=rgba,${videoEnvelope(segDur, c.fadeIn, c.fadeOut)}null[v${p}]`)
       } else {
-        // Cropped clips fill the frame (cover) like the preview; uncropped clips
-        // keep their aspect with letterbox padding so no content is lost.
-        const cr = c.crop
-        const cropped = cr.top || cr.right || cr.bottom || cr.left
-        const fit = cropped
-          ? `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}`
-          : `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
+        const placement = resolveMainPlacement(c, inputSizes[p].width, inputSizes[p].height, W, H)
+        const targetWidth = Math.max(2, Math.round(placement.width / 2) * 2)
+        const targetHeight = Math.max(2, Math.round(placement.height / 2) * 2)
+        const rad = ((c.canvasAngle || 0) * Math.PI) / 180
+        const freeRotation = c.canvasAngle
+          ? `rotate=a=${rad.toFixed(5)}:ow=rotw(${rad.toFixed(5)}):oh=roth(${rad.toFixed(5)}):c=0x00000000,`
+          : ''
         filters.push(
-          `[${inputIdxOf[p]}:v]setpts=PTS/${sp},trim=duration=${segDur.toFixed(3)},setpts=PTS-STARTPTS,${spatialFilters(c)}${fit},setsar=1,fps=30,format=rgba,` +
-            `${videoEnvelope(segDur, c.fadeIn, c.fadeOut)}null[v${p}]`,
+          `[${inputIdxOf[p]}:v]setpts=PTS/${sp},trim=duration=${segDur.toFixed(3)},setpts=PTS-STARTPTS,` +
+            `${spatialFilters(c)}scale=${targetWidth}:${targetHeight},setsar=1,fps=30,format=rgba,${freeRotation}` +
+            `${videoEnvelope(segDur, c.fadeIn, c.fadeOut)}null[mainclip${p}]`,
+        )
+        filters.push(`color=c=0x00000000:s=${W}x${H}:r=30:d=${segDur.toFixed(3)},format=rgba[maincanvas${p}]`)
+        filters.push(
+          `[maincanvas${p}][mainclip${p}]overlay=x='${(c.canvasX ?? 0.5).toFixed(6)}*W-w/2':` +
+            `y='${(c.canvasY ?? 0.5).toFixed(6)}*H-h/2':eof_action=pass[v${p}]`,
         )
       }
 

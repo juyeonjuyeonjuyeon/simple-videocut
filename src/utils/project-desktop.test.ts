@@ -11,6 +11,8 @@ const makeProject = (): ProjectState => {
     duration: 2, trimStart: 0, trimEnd: 2, speed: 1, volume: 1, muted: false,
     hasAudio: true, color: '#123456', rotate: 0, flipH: false, flipV: false,
     crop: { top: 0, right: 0, bottom: 0, left: 0 }, repeat: 1,
+    canvasX: 0.35, canvasY: 0.6, canvasScale: 0.55, canvasScaleY: 0.8,
+    canvasAspectLocked: false, canvasAngle: 12,
   }
   return {
     clips: [clip], overlays: [], audios: [], backgrounds: [], texts: [],
@@ -36,8 +38,16 @@ describe('desktop project persistence', () => {
 
     expect(registerMedia).toHaveBeenCalledOnce()
     expect(projectSave).toHaveBeenCalledOnce()
-    const stored = projectSave.mock.calls[0][1] as { media: Array<Record<string, unknown>> }
+    const stored = projectSave.mock.calls[0][1] as { media: Array<Record<string, unknown>>; clips: Array<Record<string, unknown>> }
     expect(stored.media[0]).toMatchObject({ nativeMediaId: managedId, size: 13 })
     expect(stored.media[0]).not.toHaveProperty('blob')
+    expect(stored.clips[0]).toMatchObject({
+      canvasX: 0.35,
+      canvasY: 0.6,
+      canvasScale: 0.55,
+      canvasScaleY: 0.8,
+      canvasAspectLocked: false,
+      canvasAngle: 12,
+    })
   })
 })

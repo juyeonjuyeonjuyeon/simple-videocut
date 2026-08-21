@@ -346,6 +346,12 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.speed = Math.max(0.1, Math.min(next.speed, 4))
         next.volume = Math.max(0, Math.min(next.volume, 2))
         next.crop = clampCrop(next.crop)
+        if (next.canvasX != null) next.canvasX = Math.max(0, Math.min(next.canvasX, 1))
+        if (next.canvasY != null) next.canvasY = Math.max(0, Math.min(next.canvasY, 1))
+        if (next.canvasScale != null) next.canvasScale = Math.max(0.05, Math.min(next.canvasScale, 3))
+        if (next.canvasScaleY != null) next.canvasScaleY = Math.max(0.05, Math.min(next.canvasScaleY, 3))
+        if (next.canvasAngle != null) next.canvasAngle = Math.max(-180, Math.min(next.canvasAngle, 180))
+        next.canvasAspectLocked = next.canvasAspectLocked ?? true
         next.repeat = Math.max(1, Math.min(Math.round(next.repeat), 99))
         normalizeExactDuration(next, patch, (next.trimEnd - next.trimStart) / next.speed)
         clampFades(next, clipTimelineDuration(next))

@@ -573,6 +573,13 @@ const validateItem = (value: unknown, track: string) => {
     if ('shadowY' in item) finite(item.shadowY, -40 / 720, 40 / 720, `${track} 그림자 세로 위치`)
     if ('maskShape' in item && !['none', 'rounded', 'circle', 'ellipse', 'heart', 'star', 'hexagon'].includes(String(item.maskShape))) throw new Error(`${track} 마스크 모양이 잘못되었습니다.`)
     if ('positionKeyframes' in item) validatePositionKeyframes(item.positionKeyframes, ((item.trimEnd as number) - (item.trimStart as number)) / (item.speed as number) * (item.repeat as number), track)
+  } else if (track === '클립') {
+    if ('canvasX' in item && item.canvasX !== undefined) finite(item.canvasX, 0, 1, `${track} 캔버스 가로 위치`)
+    if ('canvasY' in item && item.canvasY !== undefined) finite(item.canvasY, 0, 1, `${track} 캔버스 세로 위치`)
+    if ('canvasScale' in item && item.canvasScale !== undefined) finite(item.canvasScale, 0.05, 3, `${track} 캔버스 크기`)
+    if ('canvasScaleY' in item && item.canvasScaleY !== undefined) finite(item.canvasScaleY, 0.05, 3, `${track} 캔버스 세로 크기`)
+    if ('canvasAspectLocked' in item && item.canvasAspectLocked !== undefined) bool(item.canvasAspectLocked, `${track} 캔버스 비율 고정`)
+    if ('canvasAngle' in item && item.canvasAngle !== undefined) finite(item.canvasAngle, -180, 180, `${track} 캔버스 회전`)
   } else if (track === '오디오' || track === '배경') {
     finite(item.start, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 시작 위치`)
     if (track === '배경') {

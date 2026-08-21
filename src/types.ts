@@ -72,7 +72,7 @@ export interface MediaAsset {
   hasAudio: boolean
 }
 
-/** A clip on the MAIN track: video or image, packed sequentially, full-frame. */
+/** A clip on the MAIN track: video or image, packed sequentially on the canvas. */
 export interface Clip {
   id: string
   /** Source in the project media bin, when available. */
@@ -102,6 +102,15 @@ export interface Clip {
   flipH: boolean
   flipV: boolean
   crop: Crop
+  /** Canvas position; omitted values keep older projects centered and automatically contained. */
+  canvasX?: number
+  canvasY?: number
+  /** Scale relative to the source's automatic contained size. */
+  canvasScale?: number
+  canvasScaleY?: number
+  canvasAspectLocked?: boolean
+  /** Free rotation in degrees, applied to the placed main clip. */
+  canvasAngle?: number
   /** Number of times the trimmed segment repeats back-to-back (>=1). */
   repeat: number
   /** Exact occupied timeline length. When set, the final repeat is cut short. */
