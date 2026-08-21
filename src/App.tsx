@@ -13,6 +13,7 @@ import { AUDIO_ACCEPT, isAudioFile, isImageFile, isVideoFile } from './utils/med
 import Icon from './components/Icon'
 import { startPointerDrag } from './utils/pointer'
 import MediaPanel from './components/MediaPanel'
+import HelpDialog from './components/HelpDialog'
 
 const ACTIVE_PROJECT_KEY = 'simplecut-active-project-name'
 
@@ -34,6 +35,7 @@ export default function App() {
   const audios = useEditor((s) => s.audios)
   const texts = useEditor((s) => s.texts)
   const selection = useEditor((s) => s.selection)
+  const selectedItems = useEditor((s) => s.selectedItems)
   const playhead = useEditor((s) => s.playhead)
   const isPlaying = useEditor((s) => s.isPlaying)
   const loop = useEditor((s) => s.loop)
@@ -47,6 +49,8 @@ export default function App() {
   const addMarker = useEditor((s) => s.addMarker)
   const deleteSelected = useEditor((s) => s.deleteSelected)
   const duplicateSelected = useEditor((s) => s.duplicateSelected)
+  const groupSelected = useEditor((s) => s.groupSelected)
+  const ungroupSelected = useEditor((s) => s.ungroupSelected)
   const setPlaying = useEditor((s) => s.setPlaying)
   const setPlayhead = useEditor((s) => s.setPlayhead)
   const setLoop = useEditor((s) => s.setLoop)
@@ -63,6 +67,7 @@ export default function App() {
   const libraryRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
   const [showExport, setShowExport] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   const [showProjectHome, setShowProjectHome] = useState(false)
   const [projectDialogMode, setProjectDialogMode] = useState<'manage' | 'saveAs' | null>(null)
   const [lastProjectName, setLastProjectName] = useState<string | null>(() => {
@@ -283,19 +288,39 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
+      const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable
+      const modalOpen = showExport || showHelp || showProjectHome || projectDialogMode !== null
+      if (e.key === 'Escape' && modalOpen) {
+        e.preventDefault()
+        if (showHelp) setShowHelp(false)
+        else if (showExport) setShowExport(false)
+        else if (projectDialogMode) setProjectDialogMode(null)
+        else setShowProjectHome(false)
+        return
+      }
+      if (modalOpen) return
+      if (!isTyping && e.key === '?') {
+        e.preventDefault()
+        setShowHelp(true)
+        return
+      }
       if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault()
         if (e.shiftKey) setProjectDialogMode('saveAs')
         else void saveCurrentProject()
         return
       }
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (isTyping) return
       if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault()
         if (e.shiftKey) redo(); else undo()
       } else if ((e.metaKey || e.ctrlKey) && (e.key === 'd' || e.key === 'D')) {
         e.preventDefault()
         duplicateSelected()
+      } else if ((e.metaKey || e.ctrlKey) && (e.key === 'g' || e.key === 'G')) {
+        e.preventDefault()
+        if (e.shiftKey) ungroupSelected()
+        else if (selectedItems.length > 1) groupSelected()
       } else if (e.code === 'Space') {
         e.preventDefault()
         if (hasContent) setPlaying(!isPlaying)
@@ -369,6 +394,7 @@ export default function App() {
           <button className={`iconbtn iconbtn--sm${mediaPanelOpen ? ' iconbtn--on' : ''}`} onClick={toggleMediaPanel} title="왼쪽 미디어 패널 열기·닫기" aria-label="왼쪽 미디어 패널 열기·닫기"><Icon name="library" /></button>
           <button className="btn btn--sm topbar__project-menu" onClick={() => setShowProjectHome(true)} title="프로젝트 홈·저장·열기" aria-label="프로젝트 홈 열기"><Icon name="project" /><span>프로젝트</span></button>
           <button className={`iconbtn iconbtn--sm${inspectorOpen ? ' iconbtn--on' : ''}`} onClick={toggleInspector} title="오른쪽 편집 패널 열기·닫기" aria-label="오른쪽 편집 패널 열기·닫기"><Icon name="panel" /></button>
+          <button className="iconbtn iconbtn--sm topbar__help" onClick={() => setShowHelp(true)} title="도움말과 단축키 (?)" aria-label="도움말 열기"><Icon name="help" /></button>
           <button className="btn btn--primary" onClick={() => setShowExport(true)} disabled={!hasClips}>
             내보내기
           </button>
@@ -428,6 +454,7 @@ export default function App() {
       <Timeline />
 
       {showExport && <ExportDialog onClose={() => setShowExport(false)} />}
+      {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
       {showProjectHome && <ProjectHome
         activeName={activeProjectName}
         lastProjectName={lastProjectName}

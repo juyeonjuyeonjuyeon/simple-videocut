@@ -3,7 +3,7 @@ import type { ReactNode, SVGProps } from 'react'
 export type IconName = 'brand' | 'plus' | 'folder' | 'play' | 'pause' | 'repeat' | 'split' | 'layers' |
   'music' | 'palette' | 'text' | 'undo' | 'redo' | 'copy' | 'trash' | 'download' | 'upload' | 'share' | 'close' |
   'warning' | 'screen' | 'video' | 'image' | 'mute' | 'rotate' | 'flipH' | 'flipV' | 'save' | 'panel' | 'crop' | 'lock' | 'unlock' | 'library' | 'search' |
-  'eye' | 'eyeOff' | 'zoomIn' | 'zoomOut' | 'fit' | 'marker' | 'grid' | 'list' | 'project'
+  'eye' | 'eyeOff' | 'zoomIn' | 'zoomOut' | 'fit' | 'marker' | 'grid' | 'list' | 'project' | 'help'
 
 const paths: Record<IconName, ReactNode> = {
   brand: <><path d="M7 9.5 5 7 3.5 9.5V15a4.5 4.5 0 0 0 9 0V9.5L11 7 9 9"/><circle cx="7" cy="13" r=".7"/><circle cx="11" cy="13" r=".7"/><path d="M8 16h2"/></>,
@@ -39,6 +39,7 @@ const paths: Record<IconName, ReactNode> = {
   grid: <><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="12" y="3" width="5" height="5" rx="1"/><rect x="3" y="12" width="5" height="5" rx="1"/><rect x="12" y="12" width="5" height="5" rx="1"/></>,
   list: <><path d="M7 5h10M7 10h10M7 15h10"/><circle cx="3.5" cy="5" r=".5"/><circle cx="3.5" cy="10" r=".5"/><circle cx="3.5" cy="15" r=".5"/></>,
   project: <><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M7 4v3h6V4M6 12h8"/></>,
+  help: <><circle cx="10" cy="10" r="7"/><path d="M7.8 7.7a2.4 2.4 0 0 1 4.6 1c0 1.8-2.4 2-2.4 3.6M10 15h.01"/></>,
 }
 
 export default function Icon({ name, ...props }: { name: IconName } & SVGProps<SVGSVGElement>) {

@@ -86,6 +86,7 @@ export default function Timeline() {
   const [fitMode, setFitMode] = useState(false)
   const [scrubbing, setScrubbing] = useState(false)
   const [timeDraft, setTimeDraft] = useState<string | null>(null)
+  const [multiSelectMode, setMultiSelectMode] = useState(false)
   const fittedRef = useRef(false)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragLeft, setDragLeft] = useState(0)
@@ -453,8 +454,8 @@ export default function Timeline() {
         if (cancelled) return
         if (menuOpened) return
         if (!moved) {
-          if (onName && wasSelected) startEdit('clip', id)
-          else select({ type: 'clip', id }, e.metaKey || e.ctrlKey)
+          if (!multiSelectMode && onName && wasSelected) startEdit('clip', id)
+          else select({ type: 'clip', id }, multiSelectMode || e.metaKey || e.ctrlKey)
           return
         }
         // Dropped on another track → move this clip to that layer.
@@ -545,8 +546,8 @@ export default function Timeline() {
         if (cancelled) return
         if (menuOpened) return
         if (!moved) {
-          if (onName && wasSelected) startEdit(kind, id)
-          else select({ type: kind, id }, e.metaKey || e.ctrlKey)
+          if (!multiSelectMode && onName && wasSelected) startEdit(kind, id)
+          else select({ type: kind, id }, multiSelectMode || e.metaKey || e.ctrlKey)
           return
         }
         if (locked) return
@@ -734,7 +735,8 @@ export default function Timeline() {
     <div className="timeline">
       <div className="timeline__bar">
         <button className="iconbtn iconbtn--xs" onClick={() => addMarker(playhead)} title="현재 위치에 마커 추가 (M)" aria-label="마커 추가"><Icon name="marker" /></button>
-        {selectedItems.length > 1 && !selectedIsActiveGroup && <button className="btn btn--sm" onClick={groupSelected}>그룹 만들기 ({selectedItems.length})</button>}
+        <button className={`btn btn--sm timeline__multi-select${multiSelectMode ? ' timeline__multi-select--on' : ''}`} aria-pressed={multiSelectMode} onClick={() => setMultiSelectMode((active) => !active)} title="터치에서는 이 버튼을 켠 뒤 항목을 차례로 누르세요"><Icon name="layers" />{multiSelectMode ? '선택 종료' : '여러 항목'}</button>
+        {selectedItems.length > 1 && !selectedIsActiveGroup && <button className="btn btn--sm" onClick={() => { groupSelected(); setMultiSelectMode(false) }}>그룹 만들기 ({selectedItems.length})</button>}
         {activeGroup && <span className="timeline__group-summary" title={`${activeGroup.members.length}개 항목이 연결되어 있습니다.`}>{activeGroup.name} · {activeGroup.members.length}개</span>}
         {activeGroup && selectedItems.length < activeGroup.members.length && <button className="btn btn--sm" onClick={() => selectGroup(activeGroup.id)}>그룹 전체 선택</button>}
         {selectedItems.some((item) => Boolean(groupFor(item))) && <button className="btn btn--sm" onClick={ungroupSelected}>그룹 해제</button>}
