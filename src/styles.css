@@ -344,12 +344,59 @@ button, input, textarea { font-family: inherit; }
 .preview__text--selected { outline: 2px dashed var(--accent); outline-offset: 3px; }
 .preview__resize--text { right: -9px; bottom: -9px; }
 
-/* Interactive crop editor (double-click a main clip) */
-.cropedit { position: absolute; inset: 0; z-index: 4000; }
+/* Dedicated crop editor */
+.crop-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(15, 17, 20, 0.82);
+  backdrop-filter: blur(10px);
+}
+.crop-dialog__panel {
+  width: min(1080px, 100%);
+  height: min(820px, calc(100dvh - 32px));
+  min-height: 520px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  background: #1d1b20;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.48);
+}
+.crop-dialog__head {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 15px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.crop-dialog__head > div { min-width: 0; }
+.crop-dialog__head h2 { margin: 0; color: #fff; font-size: 18px; }
+.crop-dialog__head p { margin: 4px 0 0; overflow: hidden; color: rgba(255, 255, 255, 0.62); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.crop-dialog__head .iconbtn { flex: 0 0 auto; color: #fff; background: rgba(255, 255, 255, 0.06); }
+.crop-dialog__workspace {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background-color: #101215;
+  background-image: linear-gradient(45deg, rgba(255,255,255,.025) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,.025) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(255,255,255,.025) 75%), linear-gradient(-45deg, transparent 75%, rgba(255,255,255,.025) 75%);
+  background-size: 24px 24px;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+}
+.crop-dialog__stage { position: relative; flex: 0 0 auto; overflow: hidden; background: #090a0c; box-shadow: 0 10px 34px rgba(0,0,0,.42); touch-action: none; }
+.crop-dialog__stage > img, .crop-dialog__stage > video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: fill; user-select: none; pointer-events: none; }
 .cropedit__rect {
   position: absolute;
+  z-index: 2;
   border: 2px solid var(--accent);
-  box-shadow: 0 0 0 9999px rgba(58, 50, 52, 0.5);
+  box-shadow: 0 0 0 9999px rgba(10, 11, 13, 0.62);
   cursor: move;
   touch-action: none;
 }
@@ -394,51 +441,38 @@ button, input, textarea { font-family: inherit; }
 .cropedit__grid i:nth-child(3), .cropedit__grid i:nth-child(4) { left: 0; right: 0; height: 1px; }
 .cropedit__grid i:nth-child(3) { top: 33.333%; }
 .cropedit__grid i:nth-child(4) { top: 66.666%; }
-.cropedit__toolbar {
-  position: absolute;
-  left: 50%;
-  bottom: 12px;
-  transform: translateX(-50%);
+.crop-dialog__controls {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: min(620px, calc(100vw - 24px));
-  max-width: calc(100vw - 24px);
-  min-height: 44px;
-  padding: 7px 9px;
-  border: 1px solid rgba(255,255,255,.25);
-  border-radius: 10px;
-  background: rgba(39, 35, 42, 0.92);
-  z-index: 10;
+  gap: 14px;
+  min-width: 0;
+  padding: 12px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: #252229;
 }
-.cropedit__toolbar button {
-  min-height: 30px;
-  padding: 5px 8px;
+.crop-dialog__ratios { flex: 0 1 auto; display: flex; gap: 5px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.crop-dialog__ratios::-webkit-scrollbar { display: none; }
+.crop-dialog__ratios button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 6px 10px;
   border: 1px solid rgba(255,255,255,.22);
-  border-radius: 6px;
+  border-radius: 7px;
   background: rgba(255,255,255,.07);
   color: #fff;
-  font-size: 11px;
+  font: inherit;
+  font-size: 12px;
   cursor: pointer;
 }
-.cropedit__toolbar button.is-active { border-color: var(--accent); background: var(--accent); }
-.cropedit__ratios, .cropedit__actions { display: flex; gap: 4px; }
-.cropedit__scale { display: flex; align-items: center; gap: 6px; flex: 1 1 120px; color: #fff; font-size: 11px; }
-.cropedit__scale input { width: 100%; min-width: 80px; }
-.cropedit__toolbar .cropedit__done { background: var(--accent); border-color: var(--accent); }
-.cropedit__hint {
-  position: absolute;
-  left: 50%;
-  top: 12px;
-  transform: translateX(-50%);
-  background: rgba(58, 50, 52, 0.8);
-  color: #fff;
-  font-size: 11px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  white-space: nowrap;
-  z-index: 4001;
-}
+.crop-dialog__ratios button.is-active { border-color: var(--accent); color: #fff; background: var(--accent); }
+.crop-dialog__zoom { flex: 1 1 220px; min-width: 160px; display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,.72); font-size: 12px; white-space: nowrap; }
+.crop-dialog__zoom input { flex: 1 1 auto; width: 100%; min-width: 80px; }
+.crop-dialog__zoom b { min-width: 32px; color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.crop-dialog__zoom .ui-icon { flex: 0 0 auto; width: 16px; height: 16px; }
+.crop-dialog__actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 16px; background: #1d1b20; }
+.crop-dialog__actions span { margin-right: auto; color: rgba(255,255,255,.5); font-size: 11px; }
+.crop-dialog__actions .btn { min-width: 84px; justify-content: center; }
 .preview__selection-tools { position: absolute; left: 50%; bottom: 10px; z-index: 4001; transform: translateX(-50%); }
 .preview__selection-tools button { display: flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 10px; border: 1px solid rgba(255,255,255,.35); border-radius: 8px; color: #fff; background: rgba(39,35,42,.88); cursor: pointer; }
 .preview__selection-tools .ui-icon { width: 16px; height: 16px; }
@@ -1904,11 +1938,16 @@ input[type='range']:disabled { opacity: 0.4; }
   .step { width: 44px; height: 40px; }
   .num--step, .num--time { height: 40px; }
   .inspector { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
-  .cropedit__toolbar { bottom: 8px; flex-wrap: wrap; gap: 6px; padding: 7px; }
-  .cropedit__ratios { order: 1; flex: 1 1 auto; overflow-x: auto; }
-  .cropedit__actions { order: 2; }
-  .cropedit__scale { order: 3; flex-basis: 100%; }
-  .cropedit__hint { display: none; }
+  .crop-dialog { padding: 0; }
+  .crop-dialog__panel { width: 100%; height: 100dvh; min-height: 0; border: 0; border-radius: 0; }
+  .crop-dialog__head { padding: 11px 12px; }
+  .crop-dialog__controls { align-items: stretch; flex-wrap: wrap; gap: 9px; padding: 10px 12px; }
+  .crop-dialog__ratios { flex: 1 1 100%; }
+  .crop-dialog__ratios button { min-height: 42px; }
+  .crop-dialog__zoom { flex: 1 1 calc(100% - 86px); min-height: 42px; }
+  .crop-dialog__controls > .btn { flex: 0 0 auto; min-height: 42px; }
+  .crop-dialog__actions { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .crop-dialog__actions .btn { min-height: 44px; }
 }
 
 @media (max-width: 700px), (pointer: coarse) {

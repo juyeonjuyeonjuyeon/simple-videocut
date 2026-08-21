@@ -180,22 +180,17 @@ function TransformRow({ rotate, flipH, flipV, onPatch }: { rotate: 0 | 90 | 180 
   )
 }
 
-const CROP_SIDES: { key: keyof Crop; label: string }[] = [
-  { key: 'top', label: '위' }, { key: 'bottom', label: '아래' },
-  { key: 'left', label: '왼쪽' }, { key: 'right', label: '오른쪽' },
-]
-function CropRow({ crop, onPatch }: { crop: Crop; onPatch: (p: Patch) => void }) {
+function CropRow({ crop, onPatch, onOpen }: { crop: Crop; onPatch: (p: Patch) => void; onOpen: () => void }) {
   const cropped = crop.top || crop.right || crop.bottom || crop.left
+  const kept = Math.round((1 - crop.left - crop.right) * (1 - crop.top - crop.bottom) * 100)
   return (
     <div className="inspector__group">
       <div className="field__label">
         <span>자르기 (크롭)</span>
         {cropped ? <button className="linkbtn" onClick={() => onPatch({ crop: NO_CROP })}>초기화</button> : null}
       </div>
-      {CROP_SIDES.map(({ key, label }) => (
-        <Range key={key} label={label} value={Math.round(crop[key] * 100)} min={0} max={45} step={1} unit="%"
-          onChange={(v) => onPatch({ crop: { ...crop, [key]: v / 100 } })} />
-      ))}
+      <div className="inspector__hint">{cropped ? `원본의 약 ${kept}% 영역을 사용 중입니다.` : '현재 원본 전체를 사용 중입니다.'}</div>
+      <button className="btn btn--primary" onClick={onOpen}><Icon name="crop" />자르기 편집창 열기</button>
     </div>
   )
 }
@@ -294,7 +289,7 @@ function PositionKeyframeRow({ frames = [], localTime, onToggle, onClear, onSeek
 }
 
 // ---- main clip ----
-function ClipInspector({ clip, tab }: { clip: Clip; tab: InspectorTab }) {
+function ClipInspector({ clip, tab, onOpenCrop }: { clip: Clip; tab: InspectorTab; onOpenCrop: () => void }) {
   const update = useEditor((s) => s.updateClip)
   const move = useEditor((s) => s.moveClip)
   const remove = useEditor((s) => s.removeClip)
@@ -364,7 +359,7 @@ function ClipInspector({ clip, tab }: { clip: Clip; tab: InspectorTab }) {
       </>}
       {tab === 'transform' && <>
         <InspectorBlock title="회전과 반전"><TransformRow rotate={clip.rotate} flipH={clip.flipH} flipV={clip.flipV} onPatch={patch} /></InspectorBlock>
-        <InspectorBlock title="자르기"><CropRow crop={clip.crop} onPatch={patch} /></InspectorBlock>
+        <InspectorBlock title="자르기"><CropRow crop={clip.crop} onPatch={patch} onOpen={onOpenCrop} /></InspectorBlock>
       </>}
       {tab === 'time' && <>
         <InspectorBlock title="트림">
@@ -388,7 +383,7 @@ function ClipInspector({ clip, tab }: { clip: Clip; tab: InspectorTab }) {
 }
 
 // ---- overlay ----
-function OverlayInspector({ ov, tab }: { ov: Overlay; tab: InspectorTab }) {
+function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: InspectorTab; onOpenCrop: () => void }) {
   const update = useEditor((s) => s.updateOverlay)
   const updatePosition = useEditor((s) => s.updateLayerPosition)
   const togglePositionKeyframe = useEditor((s) => s.togglePositionKeyframe)
@@ -448,7 +443,7 @@ function OverlayInspector({ ov, tab }: { ov: Overlay; tab: InspectorTab }) {
           <TransformRow rotate={ov.rotate} flipH={ov.flipH} flipV={ov.flipV} onPatch={patch} />
           <div className="inspector__group"><Range label="자유 회전" value={ov.angle || 0} min={-180} max={180} step={1} unit="°" onChange={(v) => update(ov.id, { angle: v })} /></div>
         </InspectorBlock>
-        <InspectorBlock title="자르기"><CropRow crop={ov.crop} onPatch={patch} /></InspectorBlock>
+        <InspectorBlock title="자르기"><CropRow crop={ov.crop} onPatch={patch} onOpen={onOpenCrop} /></InspectorBlock>
         <InspectorBlock title="움직임">
           <PositionKeyframeRow frames={ov.positionKeyframes} localTime={localTime}
             onToggle={() => togglePositionKeyframe('overlay', ov.id)}
@@ -630,7 +625,7 @@ function BackgroundInspector({ bg, tab }: { bg: Background; tab: InspectorTab })
   )
 }
 
-export default function Inspector() {
+export default function Inspector({ onOpenCrop }: { onOpenCrop: () => void }) {
   const selection = useEditor((s) => s.selection)
   const selectedItems = useEditor((s) => s.selectedItems)
   const clips = useEditor((s) => s.clips)
@@ -702,9 +697,9 @@ export default function Inspector() {
           <button className="btn btn--danger" onClick={deleteSelected}>선택 항목 삭제</button>
         </div>
       ) : selClip ? (
-        <ClipInspector clip={selClip} tab={activeTab} />
+        <ClipInspector clip={selClip} tab={activeTab} onOpenCrop={onOpenCrop} />
       ) : selOverlay ? (
-        <OverlayInspector ov={selOverlay} tab={activeTab} />
+        <OverlayInspector ov={selOverlay} tab={activeTab} onOpenCrop={onOpenCrop} />
       ) : selAudio ? (
         <AudioInspector audio={selAudio} tab={activeTab} />
       ) : selText ? (

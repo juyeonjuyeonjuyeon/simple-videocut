@@ -14,6 +14,7 @@ import Icon from './components/Icon'
 import { startPointerDrag } from './utils/pointer'
 import MediaPanel from './components/MediaPanel'
 import HelpDialog from './components/HelpDialog'
+import CropDialog from './components/CropDialog'
 
 const ACTIVE_PROJECT_KEY = 'simplecut-active-project-name'
 
@@ -68,6 +69,7 @@ export default function App() {
   const dragDepth = useRef(0)
   const [showExport, setShowExport] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
+  const [showCropEditor, setShowCropEditor] = useState(false)
   const [showProjectHome, setShowProjectHome] = useState(false)
   const [projectDialogMode, setProjectDialogMode] = useState<'manage' | 'saveAs' | null>(null)
   const [lastProjectName, setLastProjectName] = useState<string | null>(() => {
@@ -289,10 +291,11 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable
-      const modalOpen = showExport || showHelp || showProjectHome || projectDialogMode !== null
+      const modalOpen = showExport || showHelp || showCropEditor || showProjectHome || projectDialogMode !== null
       if (e.key === 'Escape' && modalOpen) {
         e.preventDefault()
-        if (showHelp) setShowHelp(false)
+        if (showCropEditor) setShowCropEditor(false)
+        else if (showHelp) setShowHelp(false)
         else if (showExport) setShowExport(false)
         else if (projectDialogMode) setProjectDialogMode(null)
         else setShowProjectHome(false)
@@ -415,7 +418,7 @@ export default function App() {
           onImport={() => libraryRef.current?.click()}
         />}
         <section className="stage__preview">
-          <Preview />
+          <Preview onOpenCrop={() => { setPlaying(false); setShowCropEditor(true) }} />
           <div className="transport">
             <button
               className="iconbtn iconbtn--play"
@@ -446,7 +449,7 @@ export default function App() {
             <button className="btn btn--sm btn--danger" onClick={deleteSelected} disabled={!selection} title="단축키: Delete"><Icon name="trash" />삭제</button>
           </div>
         </section>
-        {inspectorOpen && <Inspector />}
+        {inspectorOpen && <Inspector onOpenCrop={() => { setPlaying(false); setShowCropEditor(true) }} />}
         {inspectorOpen && <div className="resizer resizer--v" onPointerDown={startResize('w')} title="패널 너비 조절" />}
       </main>
 
@@ -454,6 +457,7 @@ export default function App() {
       <Timeline />
 
       {showExport && <ExportDialog onClose={() => setShowExport(false)} />}
+      {showCropEditor && <CropDialog onClose={() => setShowCropEditor(false)} />}
       {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
       {showProjectHome && <ProjectHome
         activeName={activeProjectName}

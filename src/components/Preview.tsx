@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useEditor } from '../store'
-import type { AspectRatio, Crop } from '../types'
+import type { AspectRatio } from '../types'
 import {
   resolveTimelineTime,
   totalDuration,
@@ -16,7 +16,6 @@ import { hexToRgba } from '../utils/color'
 import { normalizeVisualOrder, PREVIEW_Z, visualPreviewZ } from '../utils/layers'
 import { startPointerDrag } from '../utils/pointer'
 import { positionAt } from '../utils/motion'
-import { cropForAspect, cropSize, moveCrop, resizeCrop, sanitizeCrop, zoomCrop, type CropHandle } from '../utils/crop'
 import Icon from './Icon'
 
 const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
@@ -46,7 +45,7 @@ function fitBox(cw: number, ch: number, r: number): { w: number; h: number } {
   return { w: Math.floor(w), h: Math.floor(h) }
 }
 
-export default function Preview() {
+export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
   const clips = useEditor((s) => s.clips)
   const overlays = useEditor((s) => s.overlays)
   const audios = useEditor((s) => s.audios)
@@ -63,7 +62,6 @@ export default function Preview() {
   const updateOverlay = useEditor((s) => s.updateOverlay)
   const updateLayerPosition = useEditor((s) => s.updateLayerPosition)
   const updateText = useEditor((s) => s.updateText)
-  const updateClip = useEditor((s) => s.updateClip)
 
   const areaRef = useRef<HTMLDivElement>(null)
   const frameRef = useRef<HTMLDivElement>(null)
@@ -81,9 +79,6 @@ export default function Preview() {
   const audioCtx = useRef<AudioContext | null>(null)
   const gainNodes = useRef<Map<HTMLMediaElement, GainNode>>(new Map())
   const [box, setBox] = useState({ w: 0, h: 0 })
-  const [cropMode, setCropMode] = useState(false)
-  const [cropAspect, setCropAspect] = useState<number | null>(null)
-  const cropOriginal = useRef<{ kind: 'clip' | 'overlay'; id: string; crop: Crop } | null>(null)
   const [overlayControlHeight, setOverlayControlHeight] = useState(0)
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null })
   const [rotationReadout, setRotationReadout] = useState<{ type: 'overlay' | 'text'; id: string; angle: number } | null>(null)
@@ -92,10 +87,6 @@ export default function Preview() {
   const selOverlay = selOverlayId ? overlays.find((o) => o.id === selOverlayId) : null
   const selOverlayPosition = selOverlay ? positionAt(selOverlay, playhead - selOverlay.start) : null
   const visualOrder = normalizeVisualOrder(overlays, texts, storedVisualOrder)
-
-  // Leave crop mode when the selection changes.
-  const selectionKey = selection ? `${selection.type}:${selection.id}` : ''
-  useEffect(() => { setCropMode(false); setCropAspect(null); cropOriginal.current = null }, [selectionKey])
 
   // Keep editing controls above the content stack without changing the
   // selected overlay's actual compositing order.
@@ -112,150 +103,6 @@ export default function Preview() {
     measure()
     return () => observer.disconnect()
   }, [selOverlayId, box.w, box.h])
-
-  // ---- interactive crop / pan (works for the main clip and PiP overlays) ----
-  type CropKind = 'clip' | 'overlay'
-  const cropGeometryOf = (kind: CropKind, id: string) => {
-    const el = kind === 'clip' ? frameRef.current : wrapEls.current.get(id)
-    if (!el) return null
-    const bounds = el.getBoundingClientRect()
-    const width = kind === 'overlay' ? el.offsetWidth : bounds.width
-    const height = kind === 'overlay' ? el.offsetHeight : bounds.height
-    const angle = kind === 'overlay'
-      ? (useEditor.getState().overlays.find((overlay) => overlay.id === id)?.angle || 0) * Math.PI / 180
-      : 0
-    const centerX = bounds.left + bounds.width / 2
-    const centerY = bounds.top + bounds.height / 2
-    return {
-      width,
-      height,
-      point(clientX: number, clientY: number) {
-        if (kind === 'clip' || !angle) return { x: clientX - bounds.left, y: clientY - bounds.top }
-        const dx = clientX - centerX
-        const dy = clientY - centerY
-        return {
-          x: dx * Math.cos(angle) + dy * Math.sin(angle) + width / 2,
-          y: -dx * Math.sin(angle) + dy * Math.cos(angle) + height / 2,
-        }
-      },
-    }
-  }
-  const cropItem = (kind: CropKind, id: string) =>
-    kind === 'clip'
-      ? useEditor.getState().clips.find((c) => c.id === id)
-      : useEditor.getState().overlays.find((o) => o.id === id)
-  const cropUpdate = (kind: CropKind, id: string, crop: Crop) => {
-    const safeCrop = sanitizeCrop(crop)
-    if (kind === 'clip') updateClip(id, { crop: safeCrop })
-    else updateOverlay(id, { crop: safeCrop })
-  }
-
-  const beginCrop = (kind: CropKind, id: string) => {
-    const item = cropItem(kind, id)
-    if (!item) return
-    setPlaying(false)
-    cropOriginal.current = { kind, id, crop: { ...item.crop } }
-    setCropAspect(null)
-    setCropMode(true)
-  }
-  const finishCrop = () => { cropOriginal.current = null; setCropAspect(null); setCropMode(false) }
-  const cancelCrop = () => {
-    const original = cropOriginal.current
-    if (original) cropUpdate(original.kind, original.id, original.crop)
-    cropOriginal.current = null
-    setCropAspect(null)
-    setCropMode(false)
-  }
-
-  const withCropDrag = (onMove: (ev: PointerEvent) => void) => {
-    startPointerDrag(onMove)
-  }
-
-  const cropHandle = (kind: CropKind, id: string, handle: CropHandle) => (e: React.PointerEvent) => {
-    e.stopPropagation()
-    if (e.button !== 0) return
-    const geometry = cropGeometryOf(kind, id)
-    const initial = cropItem(kind, id)?.crop
-    if (!geometry || !initial) return
-    withCropDrag((ev) => {
-      const point = geometry.point(ev.clientX, ev.clientY)
-      const fx = Math.max(0, Math.min(point.x / geometry.width, 1))
-      const fy = Math.max(0, Math.min(point.y / geometry.height, 1))
-      cropUpdate(kind, id, resizeCrop(initial, handle, fx, fy, geometry.width / Math.max(1, geometry.height), cropAspect))
-    })
-  }
-
-  const cropPan = (kind: CropKind, id: string) => (e: React.PointerEvent) => {
-    e.stopPropagation()
-    if (e.button !== 0) return
-    const geometry = cropGeometryOf(kind, id)
-    const c0 = cropItem(kind, id)?.crop
-    if (!geometry || !c0) return
-    const start = geometry.point(e.clientX, e.clientY)
-    withCropDrag((ev) => {
-      const point = geometry.point(ev.clientX, ev.clientY)
-      const dx = (point.x - start.x) / geometry.width
-      const dy = (point.y - start.y) / geometry.height
-      cropUpdate(kind, id, moveCrop(c0, dx, dy))
-    })
-  }
-
-  // Uniformly grow/shrink the kept region about its center (zoom out / in).
-  const cropZoom = (kind: CropKind, id: string, factor: number) => {
-    const cur = cropItem(kind, id)
-    if (!cur) return
-    cropUpdate(kind, id, zoomCrop(cur.crop, factor))
-  }
-
-  const cropRatio = (kind: CropKind, id: string, ratio: number) => {
-    const cur = cropItem(kind, id)
-    const geometry = cropGeometryOf(kind, id)
-    if (!cur || !geometry) return
-    setCropAspect(ratio)
-    cropUpdate(kind, id, cropForAspect(cur.crop, geometry.width / Math.max(1, geometry.height), ratio))
-  }
-
-  const cropEditor = (kind: CropKind, id: string, crop: { top: number; right: number; bottom: number; left: number }) => (
-    <div className="cropedit" onPointerDown={(e) => e.stopPropagation()} onWheel={(event) => {
-      event.preventDefault()
-      cropZoom(kind, id, event.deltaY > 0 ? 1.06 : 0.94)
-    }}>
-      <div
-        className="cropedit__rect"
-        style={{ left: `${crop.left * 100}%`, top: `${crop.top * 100}%`, right: `${crop.right * 100}%`, bottom: `${crop.bottom * 100}%` }}
-        onPointerDown={cropPan(kind, id)}
-      >
-        <span className="cropedit__grid"><i /><i /><i /><i /></span>
-        {(['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'] as const).map((handle) => (
-          <span key={handle} className={`crophandle crophandle--${handle}`} onPointerDown={cropHandle(kind, id, handle)} />
-        ))}
-      </div>
-      <div className="cropedit__toolbar" style={kind === 'overlay' ? { rotate: `${-(useEditor.getState().overlays.find((overlay) => overlay.id === id)?.angle || 0)}deg` } : undefined} onPointerDown={(e) => e.stopPropagation()}>
-        <div className="cropedit__ratios" aria-label="자르기 비율">
-          <button type="button" className={cropAspect == null ? 'is-active' : ''} onClick={() => setCropAspect(null)}>자유</button>
-          <button type="button" className={cropAspect === 16 / 9 ? 'is-active' : ''} onClick={() => cropRatio(kind, id, 16 / 9)}>16:9</button>
-          <button type="button" className={cropAspect === 1 ? 'is-active' : ''} onClick={() => cropRatio(kind, id, 1)}>1:1</button>
-          <button type="button" className={cropAspect === 9 / 16 ? 'is-active' : ''} onClick={() => cropRatio(kind, id, 9 / 16)}>9:16</button>
-        </div>
-        <label className="cropedit__scale">
-          <span>확대</span>
-          <input type="range" min="0" max="90" step="1"
-            value={Math.round((1 - Math.min(1 - crop.left - crop.right, 1 - crop.top - crop.bottom)) * 100)}
-            onChange={(event) => {
-              const size = cropSize(crop)
-              const currentKept = Math.max(0.04, Math.min(size.width, size.height))
-              const wantedKept = Math.max(0.1, 1 - Number(event.target.value) / 100)
-              cropZoom(kind, id, wantedKept / currentKept)
-            }} />
-        </label>
-        <div className="cropedit__actions">
-          <button type="button" onClick={() => { setCropAspect(null); cropUpdate(kind, id, { top: 0, right: 0, bottom: 0, left: 0 }) }}>초기화</button>
-          <button type="button" onClick={cancelCrop}>취소</button>
-          <button type="button" className="cropedit__done" onClick={finishCrop}>적용</button>
-        </div>
-      </div>
-    </div>
-  )
 
   const ensureAudioGraph = () => {
     if (!audioCtx.current) {
@@ -340,12 +187,7 @@ export default function Preview() {
     const clip = res.clip
     const localTimeline = Math.max(0, time - clipStartOffsets(cur)[res.index])
     const clipOpacity = fadeLevel(localTimeline, clipTimelineDuration(clip), clip.fadeIn, clip.fadeOut)
-    // While crop-editing this clip we show the FULL frame (so the crop rect can be
-    // dragged); otherwise the kept region is scaled up to fill with no margins.
-    const editingCrop = cropMode && selection?.type === 'clip' && selection.id === clip.id
-    const tf = editingCrop
-      ? cssTransform(clip.rotate, clip.flipH, clip.flipV)
-      : `${cssCropFill(clip.crop)} ${cssTransform(clip.rotate, clip.flipH, clip.flipV)}`.trim()
+    const tf = `${cssCropFill(clip.crop)} ${cssTransform(clip.rotate, clip.flipH, clip.flipV)}`.trim()
     const cp = 'none'
     if (clip.kind === 'color') {
       if (colorEl) {
@@ -416,10 +258,7 @@ export default function Preview() {
       }
       const media = overlayEls.current.get(o.id)
       if (media) {
-        const editingCrop = cropMode && selection?.type === 'overlay' && selection.id === o.id
-        media.style.transform = editingCrop
-          ? cssTransform(o.rotate, o.flipH, o.flipV)
-          : `${cssCropFill(o.crop)} ${cssTransform(o.rotate, o.flipH, o.flipV)}`.trim()
+        media.style.transform = `${cssCropFill(o.crop)} ${cssTransform(o.rotate, o.flipH, o.flipV)}`.trim()
         media.style.clipPath = 'none'
       }
       if (o.kind === 'image') continue
@@ -526,7 +365,7 @@ export default function Preview() {
     if (isPlaying) return
     syncAll(playhead, false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playhead, isPlaying, clips, overlays, audios, backgrounds, aspectRatio, cropMode, selection])
+  }, [playhead, isPlaying, clips, overlays, audios, backgrounds, aspectRatio, selection])
 
   // ---- playing: a master clock advances the playhead in real time ----
   useEffect(() => {
@@ -744,7 +583,7 @@ export default function Preview() {
         className="preview__frame"
         ref={frameRef}
         style={{ width: box.w, height: box.h }}
-        onDoubleClick={() => { if (selClip) { if (cropMode) finishCrop(); else beginCrop('clip', selClip.id) } }}
+        onDoubleClick={() => { if (selClip && selClip.kind !== 'color') onOpenCrop() }}
       >
         {backgrounds.map((b) => (
           <div
@@ -791,7 +630,7 @@ export default function Preview() {
                 zIndex: visualPreviewZ(visualOrder, { type: 'overlay', id: o.id }),
               }}
               onPointerDown={(e) => onOverlayDown(e, o.id)}
-              onDoubleClick={(e) => { e.stopPropagation(); if (sel) { if (cropMode) finishCrop(); else beginCrop('overlay', o.id) } }}
+              onDoubleClick={(e) => { e.stopPropagation(); if (sel) onOpenCrop() }}
             >
               <div className="preview__overlay-clip">
                 {o.kind === 'video' ? (
@@ -826,15 +665,14 @@ export default function Preview() {
               zIndex: PREVIEW_Z.editor,
             }}
             onPointerDown={(event) => onOverlayDown(event, selOverlay.id)}
-            onDoubleClick={(event) => { event.stopPropagation(); if (cropMode) finishCrop(); else beginCrop('overlay', selOverlay.id) }}
+            onDoubleClick={(event) => { event.stopPropagation(); onOpenCrop() }}
           >
-            {!cropMode && !selOverlay.locked && (['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'] as const).map((handle) => (
+            {!selOverlay.locked && (['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'] as const).map((handle) => (
               <span key={handle} className={`preview__resize preview__resize--${handle}`} onPointerDown={(event) => onResizeDown(event, selOverlay.id, handle)} />
             ))}
-            {!cropMode && !selOverlay.locked && (
+            {!selOverlay.locked && (
               <span className="preview__rotate" title="끌어서 회전" onPointerDown={onRotateDown('overlay', selOverlay.id)}><Icon name="rotate" /></span>
             )}
-            {cropMode && !selOverlay.locked && cropEditor('overlay', selOverlay.id, selOverlay.crop)}
           </div>
         )}
 
@@ -883,19 +721,9 @@ export default function Preview() {
         {guides.y != null && <div className="preview-guide preview-guide--y" style={{ top: `${guides.y * 100}%` }} />}
         {rotationReadout && <div className="preview__rotation-readout">{rotationReadout.angle}°</div>}
 
-        {cropMode && selClip && (
-          <>
-            {cropEditor('clip', selClip.id, selClip.crop)}
-            <div className="cropedit__hint">테두리로 영역 조절 · 안쪽 드래그로 이동 · 스크롤로 확대</div>
-          </>
-        )}
-        {cropMode && selOverlayId && (
-          <div className="cropedit__hint">테두리로 영역 조절 · 안쪽 드래그로 이동 · 스크롤로 확대</div>
-        )}
-
-        {!cropMode && (selClip || selOverlay) && !(selOverlay?.locked) && (
+        {((selClip && selClip.kind !== 'color') || selOverlay) && !(selOverlay?.locked) && (
           <div className="preview__selection-tools" onPointerDown={(event) => event.stopPropagation()}>
-            <button type="button" onClick={() => selClip ? beginCrop('clip', selClip.id) : selOverlay && beginCrop('overlay', selOverlay.id)}><Icon name="crop" />자르기</button>
+            <button type="button" onClick={onOpenCrop}><Icon name="crop" />자르기</button>
           </div>
         )}
       </div>
