@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { validateFFmpegArgs } from './ffmpeg-args.mjs'
 import { createNativeProjectStore } from './native-project-store.mjs'
+import { listSystemFontFamilies } from './font-catalog.mjs'
 
 const require = createRequire(import.meta.url)
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
@@ -18,6 +19,7 @@ let quitReady = false
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 let projectStore = null
 let videoEncoderPromise = null
+let fontFamiliesPromise = null
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'simplecut-media',
@@ -67,6 +69,10 @@ async function clearWorkspace() {
 
 ipcMain.handle('native-ffmpeg:available', () => Boolean(ffmpegPath))
 ipcMain.handle('native-ffmpeg:video-encoder', () => detectVideoEncoder())
+ipcMain.handle('native-fonts:list', () => {
+  if (!fontFamiliesPromise) fontFamiliesPromise = listSystemFontFamilies()
+  return fontFamiliesPromise
+})
 ipcMain.handle('native-media:register', async (_event, sourcePath, name) => nativeProjects().registerMedia(sourcePath, name))
 ipcMain.handle('native-media:import', async (_event, name, data) => nativeProjects().importMedia(name, data))
 ipcMain.handle('native-media:read', async (_event, id) => new Uint8Array(await readFile(nativeProjects().mediaPath(id))))

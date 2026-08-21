@@ -23,6 +23,8 @@ try {
   const result = await page.evaluate(async (inputBytes) => {
     const bridge = globalThis.simplecutDesktop
     if (!bridge || !await bridge.available()) throw new Error('네이티브 FFmpeg 연결을 찾지 못했습니다.')
+    const fonts = await bridge.listFonts()
+    if (fonts.length < 10) throw new Error(`설치된 글꼴을 충분히 찾지 못했습니다: ${fonts.length}개`)
     await bridge.writeFile('smoke-input.mp4', new Uint8Array(inputBytes))
     const encoder = await bridge.videoEncoder()
     if (encoder !== 'h264_videotoolbox') throw new Error(`VideoToolbox 인코더를 찾지 못했습니다: ${encoder}`)
@@ -33,7 +35,7 @@ try {
     ])
     const bytes = await bridge.readFile('smoke.mp4')
     await bridge.terminate()
-    return { code, bytes: bytes.byteLength, encoder, title: globalThis.document.title }
+    return { code, bytes: bytes.byteLength, encoder, fonts: fonts.length, title: globalThis.document.title }
   }, sourceBytes)
   if (result.code !== 0 || result.bytes < 1000) throw new Error(`네이티브 렌더링 결과가 잘못되었습니다: ${JSON.stringify(result)}`)
   process.stdout.write(`${JSON.stringify(result)}\n`)

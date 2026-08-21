@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useEditor } from '../store'
 import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop, PositionKeyframe, KeyframeEasing } from '../types'
-import { NO_CROP, FONT_OPTIONS } from '../types'
+import { NO_CROP } from '../types'
 import { formatTime, formatClock, parseClock, clipTimelineDuration, overlayLength, audioLength, totalDuration, exactDurationPatch } from '../utils/time'
 import { rotateBy } from '../utils/transform'
 import Icon from './Icon'
 import { keyframeAt, positionAt } from '../utils/motion'
 import { normalizeVisualOrder } from '../utils/layers'
+import FontPicker from './FontPicker'
 
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
@@ -541,9 +542,7 @@ function TextInspector({ text, tab }: { text: TextOverlay; tab: InspectorTab }) 
           <div className="inspector__group"><textarea className="textarea" rows={3} value={text.text} onChange={(e) => set({ text: e.target.value })} aria-label="텍스트 내용" /></div>
         </InspectorBlock>
         <InspectorBlock title="글꼴">
-          <div className="inspector__group"><div className="chips">{FONT_OPTIONS.map((font) => (
-            <button key={font.label} className={`chip${text.font === font.value ? ' chip--on' : ''}`} style={{ fontFamily: font.value }} onClick={() => set({ font: font.value })}>{font.label}</button>
-          ))}</div></div>
+          <div className="inspector__group"><FontPicker value={text.font} onChange={(font) => set({ font })} /></div>
         </InspectorBlock>
         <InspectorBlock title="정렬">
           <div className="inspector__group"><div className="chips">{ALIGNS.map((align) => (

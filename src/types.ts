@@ -225,13 +225,28 @@ export interface TextOverlay {
 
 export type TextAlign = TextOverlay['align']
 
-export const FONT_OPTIONS: { label: string; value: string }[] = [
-  { label: '기본', value: "'Noto Sans KR', system-ui, sans-serif" },
-  { label: '명조', value: "'Noto Serif KR', Georgia, serif" },
-  { label: '굵게', value: "'Black Han Sans', sans-serif" },
-  { label: '둥근', value: "'Jua', sans-serif" },
-  { label: '손글씨', value: "'Nanum Pen Script', cursive" },
-  { label: '고정폭', value: "'Courier New', monospace" },
+export interface FontOption { label: string; family: string; value: string; note: string }
+
+export const FONT_OPTIONS: FontOption[] = [
+  { label: '기본 고딕', family: 'Noto Sans KR', value: "'Noto Sans KR', system-ui, sans-serif", note: '단정한 본문·자막' },
+  { label: '기본 명조', family: 'Noto Serif KR', value: "'Noto Serif KR', Georgia, serif", note: '차분한 본문·제목' },
+  { label: '검은고딕', family: 'Black Han Sans', value: "'Black Han Sans', sans-serif", note: '굵고 강한 제목' },
+  { label: '주아', family: 'Jua', value: "'Jua', sans-serif", note: '둥글고 친근한 제목' },
+  { label: '도현', family: 'Do Hyeon', value: "'Do Hyeon', sans-serif", note: '또렷한 영상 자막' },
+  { label: '고운돋움', family: 'Gowun Dodum', value: "'Gowun Dodum', sans-serif", note: '부드러운 고딕' },
+  { label: '고운바탕', family: 'Gowun Batang', value: "'Gowun Batang', serif", note: '부드러운 바탕체' },
+  { label: '송명', family: 'Song Myung', value: "'Song Myung', serif", note: '힘 있는 명조 제목' },
+  { label: '해바라기', family: 'Sunflower', value: "'Sunflower', sans-serif", note: '단정한 둥근 고딕' },
+  { label: '스타일리시', family: 'Stylish', value: "'Stylish', sans-serif", note: '개성 있는 제목' },
+  { label: '구기', family: 'Gugi', value: "'Gugi', sans-serif", note: '기하학적인 장식체' },
+  { label: '귀여운 글씨', family: 'Cute Font', value: "'Cute Font', cursive", note: '가볍고 귀여운 손글씨' },
+  { label: '나눔펜', family: 'Nanum Pen Script', value: "'Nanum Pen Script', cursive", note: '자연스러운 펜글씨' },
+  { label: '개구', family: 'Gaegu', value: "'Gaegu', cursive", note: '장난스러운 손글씨' },
+  { label: '감자꽃', family: 'Gamja Flower', value: "'Gamja Flower', cursive", note: '또박또박한 손글씨' },
+  { label: '하이멜로디', family: 'Hi Melody', value: "'Hi Melody', cursive", note: '가느다란 손글씨' },
+  { label: '푸어스토리', family: 'Poor Story', value: "'Poor Story', cursive", note: '편안한 이야기체' },
+  { label: '싱글데이', family: 'Single Day', value: "'Single Day', cursive", note: '가볍고 경쾌한 손글씨' },
+  { label: '독도', family: 'Dokdo', value: "'Dokdo', cursive", note: '거친 붓글씨 제목' },
 ]
 
 export type Selection =
