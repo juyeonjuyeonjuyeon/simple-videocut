@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { fileURLToPath } from 'node:url'
 
-const dog = fileURLToPath(new URL('../public/dog.svg', import.meta.url))
+const appIcon = fileURLToPath(new URL('../public/app-icon.svg', import.meta.url))
 
 test('help is available from the toolbar and keyboard without editing behind dialogs', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Keyboard help flow is covered once on desktop')
@@ -26,9 +26,9 @@ test('touch users can select several timeline items and reach large trim handles
   test.skip(testInfo.project.name !== 'mobile', 'Touch interaction is covered on the mobile project')
 
   await page.goto('/')
-  await page.locator('header input[type=file]').nth(3).setInputFiles(dog)
+  await page.locator('header input[type=file]').nth(3).setInputFiles(appIcon)
   await page.getByRole('button', { name: '왼쪽 미디어 패널 열기·닫기' }).click()
-  const asset = page.locator('.media-asset').filter({ hasText: 'dog.svg' })
+  const asset = page.locator('.media-asset').filter({ hasText: 'app-icon.svg' })
   await asset.click()
   await asset.getByRole('button', { name: '메인에 추가' }).click()
   await asset.getByRole('button', { name: '레이어에 추가' }).click()

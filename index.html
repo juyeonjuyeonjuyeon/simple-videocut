@@ -4,11 +4,11 @@
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob: simplecut-media:; connect-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'" />
     <meta name="referrer" content="no-referrer" />
-    <link rel="icon" type="image/svg+xml" href="%BASE_URL%dog.svg" />
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%app-icon.svg" />
     <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
     <link rel="apple-touch-icon" href="%BASE_URL%icon-192.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#FAF7F5" />
+    <meta name="theme-color" content="#171A1F" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="SimpleCut" />
@@ -23,7 +23,7 @@
   <body>
     <div id="root"></div>
     <div id="splash">
-      <img class="splash__logo" src="%BASE_URL%dog.svg" alt="" />
+      <img class="splash__logo" src="%BASE_URL%app-icon.svg" alt="" />
       <div class="splash__name">SimpleCut</div>
       <div class="splash__spin"></div>
     </div>
@@ -31,16 +31,16 @@
       #splash {
         position: fixed; inset: 0; z-index: 9999;
         display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
-        background: #FAF7F5; color: #3A3234;
+        background: #111315; color: #F2F3F5;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
         transition: opacity 0.35s ease;
       }
       #splash.hide { opacity: 0; pointer-events: none; }
-      .splash__logo { width: 52px; height: 52px; }
+      .splash__logo { width: 68px; height: 68px; border-radius: 15px; box-shadow: 0 16px 38px rgba(0,0,0,.28); }
       .splash__name { font-size: 20px; font-weight: 700; letter-spacing: 0.3px; }
       .splash__spin {
         width: 30px; height: 30px; margin-top: 6px;
-        border: 3px solid #E8D3D1; border-top-color: #8E5D5E; border-radius: 50%;
+        border: 3px solid #343A43; border-top-color: #D07A7D; border-radius: 50%;
         animation: splashspin 0.8s linear infinite;
       }
       @keyframes splashspin { to { transform: rotate(360deg); } }
