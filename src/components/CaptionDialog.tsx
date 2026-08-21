@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useEditor } from '../store'
 import Icon from './Icon'
 import { formatClock, formatTimeFine } from '../utils/time'
 import { translate, useLanguage } from '../i18n'
+import { parseSrt, stringifySrt } from '../utils/srt'
+import { saveBlob } from '../utils/io'
 
 export default function CaptionDialog({ onClose }: { onClose: () => void }) {
   useLanguage()
@@ -14,6 +16,7 @@ export default function CaptionDialog({ onClose }: { onClose: () => void }) {
   const updateTrack = useEditor((state) => state.updateCaptionTrack)
   const removeTrack = useEditor((state) => state.removeCaptionTrack)
   const addCue = useEditor((state) => state.addCaptionCue)
+  const importCues = useEditor((state) => state.importCaptionCues)
   const updateCue = useEditor((state) => state.updateCaptionCue)
   const removeCue = useEditor((state) => state.removeCaptionCue)
   const selection = useEditor((state) => state.selection)
@@ -21,6 +24,9 @@ export default function CaptionDialog({ onClose }: { onClose: () => void }) {
     ? tracks.find((track) => track.cues.some((cue) => cue.id === selection.id))?.id
     : undefined
   const [activeTrackId, setActiveTrackId] = useState(() => selectedTrackId ?? tracks[0]?.id ?? '')
+  const fileRef = useRef<HTMLInputElement>(null)
+  const importMode = useRef<'append' | 'replace'>('append')
+  const [notice, setNotice] = useState('')
 
   useEffect(() => {
     if (selectedTrackId) setActiveTrackId(selectedTrackId)
@@ -44,6 +50,32 @@ export default function CaptionDialog({ onClose }: { onClose: () => void }) {
     const cueId = addCue(track.id, playhead)
     if (cueId) select({ type: 'caption', id: cueId })
   }
+  const openSrt = (mode: 'append' | 'replace') => {
+    importMode.current = mode
+    fileRef.current?.click()
+  }
+  const importSrt = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !track) return
+    try {
+      if (file.size > 5 * 1024 * 1024) throw new Error(translate('SRT 파일은 5MB 이하만 가져올 수 있습니다.', 'SRT files must be 5MB or smaller.'))
+      const parsed = parseSrt(await file.text())
+      const count = importCues(track.id, parsed, importMode.current === 'replace')
+      const first = useEditor.getState().captionTracks.find((candidate) => candidate.id === track.id)?.cues[0]
+      if (first) { select({ type: 'caption', id: first.id }); setPlayhead(first.start) }
+      setNotice(translate(`${count}개 자막을 가져왔습니다.`, `Imported ${count} captions.`))
+    } catch (error) {
+      alert(translate('SRT 가져오기 실패: ', 'SRT import failed: ') + (error as Error).message)
+    }
+  }
+  const exportSrt = async () => {
+    if (!track?.cues.length) return
+    const safeName = (track.name.trim() || translate('자막', 'captions')).replace(/[\\/:*?"<>|]/g, '_')
+    const blob = new Blob(['\uFEFF', stringifySrt(track.cues)], { type: 'application/x-subrip;charset=utf-8' })
+    await saveBlob(blob, `${safeName}.srt`)
+    setNotice(translate('UTF-8 SRT 파일을 만들었습니다.', 'Created a UTF-8 SRT file.'))
+  }
 
   return (
     <div className="modal caption-dialog" onClick={onClose}>
@@ -64,7 +96,15 @@ export default function CaptionDialog({ onClose }: { onClose: () => void }) {
             <button className="caption-dialog__add-track" onClick={createTrack}><Icon name="plus" />{translate('트랙', 'Track')}</button>
           </div>
           <button className="btn btn--primary" onClick={createCue} disabled={Boolean(track?.locked)}><Icon name="plus" />{translate('현재 위치에 자막', 'Caption at playhead')}</button>
+          {track && <>
+            <button className="btn btn--sm" onClick={() => openSrt('append')} disabled={track.locked}><Icon name="download" />{translate('SRT 추가', 'Add SRT')}</button>
+            {track.cues.length > 0 && <button className="btn btn--sm" onClick={() => openSrt('replace')} disabled={track.locked}>{translate('SRT로 교체', 'Replace with SRT')}</button>}
+            <button className="btn btn--sm" onClick={() => void exportSrt()} disabled={!track.cues.length}><Icon name="upload" />{translate('SRT 내보내기', 'Export SRT')}</button>
+          </>}
+          <input ref={fileRef} type="file" accept=".srt,application/x-subrip,text/plain" hidden onChange={(event) => void importSrt(event)} />
         </div>
+
+        {notice && <div className="caption-dialog__notice" role="status">{notice}<button onClick={() => setNotice('')} aria-label={translate('알림 닫기', 'Dismiss notice')}><Icon name="close" /></button></div>}
 
         {track ? <>
           <div className="caption-dialog__track-settings">

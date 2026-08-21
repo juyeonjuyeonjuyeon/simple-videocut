@@ -203,6 +203,19 @@ describe('timeline splitting', () => {
     expect(useEditor.getState().captionTracks[0].cues[0].id).toBe(cueId)
   })
 
+  it('imports SRT cues in append or replace mode as one track edit', () => {
+    const trackId = useEditor.getState().addCaptionTrack('SRT')
+    const manualId = useEditor.getState().addCaptionCue(trackId, 0)!
+    useEditor.getState().select({ type: 'caption', id: manualId })
+
+    expect(useEditor.getState().importCaptionCues(trackId, [{ text: '추가', start: 1, end: 2 }])).toBe(1)
+    expect(useEditor.getState().captionTracks[0].cues.map((cue) => cue.origin)).toEqual(['manual', 'imported'])
+
+    expect(useEditor.getState().importCaptionCues(trackId, [{ text: '교체', start: 3, end: 4 }], true)).toBe(1)
+    expect(useEditor.getState().captionTracks[0].cues).toMatchObject([{ text: '교체', start: 3, end: 4, origin: 'imported' }])
+    expect(useEditor.getState().selection).toBeNull()
+  })
+
   it('migrates older projects to an empty dedicated caption collection', () => {
     const legacyProject: ProjectState = {
       clips: [clip(1)], overlays: [], audios: [], backgrounds: [], texts: [],

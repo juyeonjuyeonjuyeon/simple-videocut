@@ -87,6 +87,7 @@ interface EditorState {
   updateCaptionTrack: (id: string, patch: Partial<Pick<CaptionTrack, 'name' | 'language' | 'hidden' | 'locked'>> & { style?: Partial<CaptionStyle> }) => void
   removeCaptionTrack: (id: string) => void
   addCaptionCue: (trackId: string, at?: number) => string | null
+  importCaptionCues: (trackId: string, cues: Array<Pick<CaptionCue, 'text' | 'start' | 'end'>>, replace?: boolean) => number
   updateCaptionCue: (trackId: string, cueId: string, patch: Partial<Omit<CaptionCue, 'id'>>) => void
   removeCaptionCue: (trackId: string, cueId: string) => void
 
@@ -865,6 +866,28 @@ export const useEditor = create<EditorState>((set, get) => ({
         : candidate),
     }))
     return cue.id
+  },
+
+  importCaptionCues: (trackId, cues, replace = false) => {
+    const track = get().captionTracks.find((candidate) => candidate.id === trackId)
+    if (!track || track.locked) return 0
+    const capacity = Math.max(0, 10_000 - (replace ? 0 : track.cues.length))
+    const replacedIds = replace ? new Set(track.cues.map((cue) => cue.id)) : new Set<string>()
+    const imported = cues.slice(0, capacity).map((cue) => normalizeCaptionCue({
+      id: uid(), text: cue.text, start: cue.start, end: cue.end, origin: 'imported',
+    }))
+    set((s) => ({
+      captionTracks: s.captionTracks.map((candidate) => candidate.id === trackId
+        ? { ...candidate, cues: [...(replace ? [] : candidate.cues), ...imported].sort((a, b) => a.start - b.start || a.end - b.end) }
+        : candidate),
+      ...(replace ? {
+        groups: s.groups.map((group) => ({ ...group, members: group.members.filter((member) => member.type !== 'caption' || !replacedIds.has(member.id)) }))
+          .filter((group) => group.members.length >= 2),
+        selection: s.selection?.type === 'caption' && replacedIds.has(s.selection.id) ? null : s.selection,
+        selectedItems: s.selectedItems.filter((item) => item.type !== 'caption' || !replacedIds.has(item.id)),
+      } : {}),
+    }))
+    return imported.length
   },
 
   updateCaptionCue: (trackId, cueId, patch) =>
