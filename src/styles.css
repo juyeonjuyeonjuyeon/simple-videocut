@@ -1081,7 +1081,6 @@ img[data-background-removal='on'][aria-busy='true'] { opacity: .68; }
 /* Icon-only controls expose their accessible name as a quick, consistent tooltip. */
 @media (hover: hover) and (pointer: fine) {
   .iconbtn[aria-label]::after,
-  .timeline__track-action[aria-label]::after,
   .chip--icon[aria-label]::after {
     content: attr(aria-label);
     position: absolute;
@@ -1109,8 +1108,6 @@ img[data-background-removal='on'][aria-busy='true'] { opacity: .68; }
   }
   .iconbtn[aria-label]:hover::after,
   .iconbtn[aria-label]:focus-visible::after,
-  .timeline__track-action[aria-label]:hover::after,
-  .timeline__track-action[aria-label]:focus-visible::after,
   .chip--icon[aria-label]:hover::after,
   .chip--icon[aria-label]:focus-visible::after {
     opacity: 1;

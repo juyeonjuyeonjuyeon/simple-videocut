@@ -714,25 +714,29 @@ export default function Timeline() {
     label: string,
     target?: TimelineItemRef,
     state?: { locked?: boolean; hidden?: boolean; muted?: boolean },
-  ) => (
-    <div className="timeline__track-header" onPointerDown={(event) => event.stopPropagation()}>
-      <button type="button" className="timeline__track-name" title={label} onClick={() => target && select(target)}>{label}</button>
-      {target && (target.type === 'overlay' || target.type === 'text' || target.type === 'background') && (
-        <button type="button" className="timeline__track-action" aria-label={state?.hidden ? translate('레이어 표시', 'Show layer') : translate('레이어 숨기기', 'Hide layer')} onClick={() => {
-          if (target.type === 'overlay') updateOverlay(target.id, { hidden: !state?.hidden })
-          else if (target.type === 'text') updateText(target.id, { hidden: !state?.hidden })
-          else updateBackground(target.id, { hidden: !state?.hidden })
-        }}><Icon name={state?.hidden ? 'eyeOff' : 'eye'} /></button>
-      )}
-      {target && target.type !== 'clip' && target.type !== 'audio' && (
-        <button type="button" className="timeline__track-action" aria-label={state?.locked ? translate('잠금 해제', 'Unlock') : translate('레이어 잠금', 'Lock layer')} onClick={() => {
-          if (target.type === 'overlay') updateOverlay(target.id, { locked: !state?.locked })
-          else if (target.type === 'text') updateText(target.id, { locked: !state?.locked })
-          else updateBackground(target.id, { locked: !state?.locked })
-        }}><Icon name={state?.locked ? 'lock' : 'unlock'} /></button>
-      )}
-    </div>
-  )
+  ) => {
+    const visibilityLabel = state?.hidden ? translate('레이어 표시', 'Show layer') : translate('레이어 숨기기', 'Hide layer')
+    const lockLabel = state?.locked ? translate('잠금 해제', 'Unlock') : translate('레이어 잠금', 'Lock layer')
+    return (
+      <div className="timeline__track-header" onPointerDown={(event) => event.stopPropagation()}>
+        <button type="button" className="timeline__track-name" title={label} onClick={() => target && select(target)}>{label}</button>
+        {target && (target.type === 'overlay' || target.type === 'text' || target.type === 'background') && (
+          <button type="button" className="timeline__track-action" aria-label={visibilityLabel} title={visibilityLabel} onClick={() => {
+            if (target.type === 'overlay') updateOverlay(target.id, { hidden: !state?.hidden })
+            else if (target.type === 'text') updateText(target.id, { hidden: !state?.hidden })
+            else updateBackground(target.id, { hidden: !state?.hidden })
+          }}><Icon name={state?.hidden ? 'eyeOff' : 'eye'} /></button>
+        )}
+        {target && target.type !== 'clip' && target.type !== 'audio' && (
+          <button type="button" className="timeline__track-action" aria-label={lockLabel} title={lockLabel} onClick={() => {
+            if (target.type === 'overlay') updateOverlay(target.id, { locked: !state?.locked })
+            else if (target.type === 'text') updateText(target.id, { locked: !state?.locked })
+            else updateBackground(target.id, { locked: !state?.locked })
+          }}><Icon name={state?.locked ? 'lock' : 'unlock'} /></button>
+        )}
+      </div>
+    )
+  }
 
   const activeGroup = selection ? groupFor(selection) : undefined
   const selectedIsActiveGroup = Boolean(activeGroup && selectedItems.length > 1 && selectedItems.every((item) =>
