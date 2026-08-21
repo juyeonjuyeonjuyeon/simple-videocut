@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { assertMediaCapacity, MEDIA_LIMITS } from './media'
 import { assertPortableMediaBudget, assertPortableProject, PROJECT_LIMITS } from './project'
+import { CAPTION_STYLE_DEFAULTS } from './captions'
 
 const validProject = (): {
   version: number; name: string; savedAt: number; aspectRatio: string
   exportSettings: { height: number; format: string; filename: string }
-  clips: unknown[]; overlays: unknown[]; audios: unknown[]; backgrounds: unknown[]; texts: unknown[]; media: unknown[]
+  clips: unknown[]; overlays: unknown[]; audios: unknown[]; backgrounds: unknown[]; texts: unknown[]; captionTracks?: unknown[]; media: unknown[]
 } => ({
   version: 1,
   name: 'test',
@@ -82,5 +83,16 @@ describe('portable project schema', () => {
     addMedia(project)
     project.clips = [{ id: 'c0', name: 'clip.mp4', kind: 'video', mediaId: 'm0' }]
     expect(() => assertPortableProject(project)).toThrow(/길이|트림|속도|필수/)
+  })
+
+  it('rejects invalid dedicated caption timing and style data', () => {
+    const project = validProject()
+    project.captionTracks = [{
+      id: 'captions-1', name: '한국어', language: 'ko', hidden: false, locked: false,
+      style: { ...CAPTION_STYLE_DEFAULTS },
+      cues: [{ id: 'cue-1', text: '잘못된 자막', start: 3, end: 2, origin: 'manual' }],
+    }]
+
+    expect(() => assertPortableProject(project)).toThrow(/자막 시간 범위/)
   })
 })

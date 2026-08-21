@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup, VisualLayerRef, MediaAsset, ShapeKind } from './types'
+import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup, VisualLayerRef, MediaAsset, ShapeKind, CaptionTrack, CaptionCue, CaptionStyle } from './types'
 import { NO_CROP, FONT_OPTIONS } from './types'
 import type { ProjectState } from './utils/project'
 import { assertMediaCapacity, probeVideo, probeImage, probeAudio, nextClipColor, isVideoFile, isImageFile, isAudioFile } from './utils/media'
@@ -8,6 +8,7 @@ import { keyframeAt, positionAt } from './utils/motion'
 import { normalizeVisualOrder } from './utils/layers'
 import { OVERLAY_STYLE_DEFAULTS } from './utils/overlay-style'
 import { createShapePlaceholderFile, resolveShapeStyle, shapeLabel, SHAPE_STYLE_DEFAULTS } from './utils/shape'
+import { CAPTION_STYLE_DEFAULTS, normalizeCaptionCue, normalizeCaptionTrack, resolveCaptionStyle } from './utils/captions'
 import { translate } from './i18n'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
@@ -26,6 +27,7 @@ interface EditorState {
   overlays: Overlay[]
   audios: AudioClip[]
   texts: TextOverlay[]
+  captionTracks: CaptionTrack[]
   backgrounds: Background[]
   markers: TimelineMarker[]
   groups: TimelineGroup[]
@@ -79,6 +81,14 @@ interface EditorState {
   updateText: (id: string, patch: Partial<TextOverlay>) => void
   removeText: (id: string) => void
   raiseText: (id: string, dir: -1 | 1) => void
+
+  // ---- dedicated captions ----
+  addCaptionTrack: (name?: string) => string
+  updateCaptionTrack: (id: string, patch: Partial<Pick<CaptionTrack, 'name' | 'language' | 'hidden' | 'locked'>> & { style?: Partial<CaptionStyle> }) => void
+  removeCaptionTrack: (id: string) => void
+  addCaptionCue: (trackId: string, at?: number) => string | null
+  updateCaptionCue: (trackId: string, cueId: string, patch: Partial<Omit<CaptionCue, 'id'>>) => void
+  removeCaptionCue: (trackId: string, cueId: string) => void
 
   // ---- timeline markers ----
   addMarker: (time?: number) => void
@@ -190,6 +200,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   overlays: [],
   audios: [],
   texts: [],
+  captionTracks: [],
   backgrounds: [],
   markers: [],
   groups: [],
@@ -796,6 +807,79 @@ export const useEditor = create<EditorState>((set, get) => ({
       return { visualOrder }
     }),
 
+  // ---------- dedicated captions ----------
+  addCaptionTrack: (name) => {
+    const id = uid()
+    const track: CaptionTrack = {
+      id,
+      name: name?.trim() || translate(`자막 ${get().captionTracks.length + 1}`, `Captions ${get().captionTracks.length + 1}`),
+      language: 'und',
+      hidden: false,
+      locked: false,
+      style: { ...CAPTION_STYLE_DEFAULTS },
+      cues: [],
+    }
+    set((s) => ({ captionTracks: [...s.captionTracks, track] }))
+    return id
+  },
+
+  updateCaptionTrack: (id, patch) =>
+    set((s) => ({
+      captionTracks: s.captionTracks.map((track) => track.id === id
+        ? normalizeCaptionTrack({
+          ...track,
+          ...patch,
+          style: patch.style ? resolveCaptionStyle({ ...track.style, ...patch.style }) : track.style,
+        })
+        : track),
+    })),
+
+  removeCaptionTrack: (id) =>
+    set((s) => ({ captionTracks: s.captionTracks.filter((track) => track.id !== id) })),
+
+  addCaptionCue: (trackId, at) => {
+    const state = get()
+    const track = state.captionTracks.find((candidate) => candidate.id === trackId)
+    if (!track || track.locked) return null
+    const total = projectDuration(state.clips, state.overlays, state.audios, state.texts, state.backgrounds)
+    const start = Math.max(0, Math.min(at ?? state.playhead, Math.max(0, total - 0.05)))
+    const cue = normalizeCaptionCue({
+      id: uid(),
+      text: translate('자막을 입력하세요', 'Enter a caption'),
+      start,
+      end: total > 0 ? Math.min(total, start + 2.5) : start + 2.5,
+      origin: 'manual',
+    })
+    set((s) => ({
+      captionTracks: s.captionTracks.map((candidate) => candidate.id === trackId
+        ? { ...candidate, cues: [...candidate.cues, cue].sort((a, b) => a.start - b.start || a.end - b.end) }
+        : candidate),
+    }))
+    return cue.id
+  },
+
+  updateCaptionCue: (trackId, cueId, patch) =>
+    set((s) => ({
+      captionTracks: s.captionTracks.map((track) => {
+        if (track.id !== trackId || track.locked) return track
+        const cues = track.cues.map((cue) => cue.id === cueId
+          ? normalizeCaptionCue({
+            ...cue,
+            ...patch,
+            style: patch.style ? { ...(cue.style ?? {}), ...patch.style } : cue.style,
+          })
+          : cue)
+        return { ...track, cues: cues.sort((a, b) => a.start - b.start || a.end - b.end) }
+      }),
+    })),
+
+  removeCaptionCue: (trackId, cueId) =>
+    set((s) => ({
+      captionTracks: s.captionTracks.map((track) => track.id === trackId && !track.locked
+        ? { ...track, cues: track.cues.filter((cue) => cue.id !== cueId) }
+        : track),
+    })),
+
   // ---------- timeline markers ----------
   addMarker: (time) => {
     const marker: TimelineMarker = {
@@ -1006,17 +1090,18 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   replaceProject: (p) => replaceEditorProject(p),
   resetProject: () => replaceEditorProject({
-    mediaLibrary: [], clips: [], overlays: [], audios: [], backgrounds: [], texts: [], markers: [], groups: [], visualOrder: [],
+    mediaLibrary: [], clips: [], overlays: [], audios: [], backgrounds: [], texts: [], captionTracks: [], markers: [], groups: [], visualOrder: [],
     aspectRatio: '16:9', exportSettings: { height: 720, format: 'mp4', filename: 'simplecut' },
   }),
 }))
 
 type EditorSnapshot = Pick<EditorState,
-  'mediaLibrary' | 'clips' | 'overlays' | 'audios' | 'texts' | 'backgrounds' | 'markers' | 'groups' | 'visualOrder' | 'aspectRatio' | 'exportSettings'>
+  'mediaLibrary' | 'clips' | 'overlays' | 'audios' | 'texts' | 'captionTracks' | 'backgrounds' | 'markers' | 'groups' | 'visualOrder' | 'aspectRatio' | 'exportSettings'>
 
 const takeSnapshot = (s: EditorState): EditorSnapshot => ({
   mediaLibrary: s.mediaLibrary,
   clips: s.clips, overlays: s.overlays, audios: s.audios, texts: s.texts,
+  captionTracks: s.captionTracks,
   backgrounds: s.backgrounds, markers: s.markers, groups: s.groups, visualOrder: s.visualOrder, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
 })
 
@@ -1032,6 +1117,7 @@ const historyKey = (a: EditorState, b: EditorState) => {
   if (a.overlays !== b.overlays) return 'overlays'
   if (a.audios !== b.audios) return 'audios'
   if (a.texts !== b.texts) return 'texts'
+  if (a.captionTracks !== b.captionTracks) return 'captionTracks'
   if (a.backgrounds !== b.backgrounds) return 'backgrounds'
   if (a.markers !== b.markers) return 'markers'
   if (a.groups !== b.groups) return 'groups'
@@ -1101,6 +1187,7 @@ function replaceEditorProject(p: ProjectState) {
       locked: t.locked ?? false, hidden: t.hidden ?? false,
       fadeIn: t.fadeIn ?? 0, fadeOut: t.fadeOut ?? 0, positionKeyframes: t.positionKeyframes ?? [],
     })),
+    captionTracks: (p.captionTracks ?? []).map(normalizeCaptionTrack),
     clips: p.clips.map((c) => ({ ...c, assetId: linkedAssetId(c), fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 })),
     markers: p.markers ?? [],
     groups: p.groups ?? [],

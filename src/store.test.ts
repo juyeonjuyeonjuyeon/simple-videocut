@@ -17,7 +17,7 @@ const clip = (repeat = 1): Clip => ({
 describe('timeline splitting', () => {
   beforeEach(() => {
     useEditor.setState({
-      mediaLibrary: [], clips: [clip(3)], overlays: [], audios: [], backgrounds: [], texts: [], markers: [], groups: [], selectedItems: [],
+      mediaLibrary: [], clips: [clip(3)], overlays: [], audios: [], backgrounds: [], texts: [], captionTracks: [], markers: [], groups: [], selectedItems: [],
       playhead: 2.5, selection: { type: 'clip', id: 'clip-1' },
       isPlaying: false,
     })
@@ -166,6 +166,34 @@ describe('timeline splitting', () => {
     expect(useEditor.getState().texts).toEqual([text])
     expect(useEditor.getState().visualOrder).toEqual([{ type: 'text', id: text.id }])
     expect(useEditor.getState().selection).toBeNull()
+  })
+
+  it('edits dedicated caption cues without turning them into regular text layers', () => {
+    const trackId = useEditor.getState().addCaptionTrack('한국어 자막')
+    const cueId = useEditor.getState().addCaptionCue(trackId, 0.5)
+    expect(cueId).not.toBeNull()
+
+    useEditor.getState().updateCaptionCue(trackId, cueId!, {
+      text: '첫 번째 자막', start: 0.75, end: 2.25, style: { color: '#ffccdd' },
+    })
+
+    const state = useEditor.getState()
+    expect(state.texts).toHaveLength(0)
+    expect(state.captionTracks[0]).toMatchObject({ name: '한국어 자막', language: 'und', hidden: false, locked: false })
+    expect(state.captionTracks[0].cues[0]).toMatchObject({
+      id: cueId, text: '첫 번째 자막', start: 0.75, end: 2.25, origin: 'manual', style: { color: '#ffccdd' },
+    })
+  })
+
+  it('migrates older projects to an empty dedicated caption collection', () => {
+    const legacyProject: ProjectState = {
+      clips: [clip(1)], overlays: [], audios: [], backgrounds: [], texts: [],
+      aspectRatio: '16:9', exportSettings: { height: 720, format: 'mp4', filename: 'legacy' },
+    }
+
+    useEditor.getState().replaceProject(legacyProject)
+
+    expect(useEditor.getState().captionTracks).toEqual([])
   })
 
   it('reuses one media-bin source on multiple tracks without deleting timeline instances', () => {

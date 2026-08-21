@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ProjectState } from './project'
 import { saveProject } from './project'
 import type { Clip } from '../types'
+import { CAPTION_STYLE_DEFAULTS } from './captions'
 
 const makeProject = (): ProjectState => {
   const file = new File(['desktop-media'], 'source.png', { type: 'image/png' })
@@ -17,6 +18,11 @@ const makeProject = (): ProjectState => {
   }
   return {
     clips: [clip], overlays: [], audios: [], backgrounds: [], texts: [],
+    captionTracks: [{
+      id: 'captions-1', name: '한국어', language: 'ko', hidden: false, locked: false,
+      style: { ...CAPTION_STYLE_DEFAULTS },
+      cues: [{ id: 'cue-1', text: '저장되는 자막', start: 0.2, end: 1.5, origin: 'manual' }],
+    }],
     aspectRatio: '16:9', exportSettings: { height: 720, format: 'mp4', filename: 'desktop' },
   }
 }
@@ -39,7 +45,11 @@ describe('desktop project persistence', () => {
 
     expect(registerMedia).toHaveBeenCalledOnce()
     expect(projectSave).toHaveBeenCalledOnce()
-    const stored = projectSave.mock.calls[0][1] as { media: Array<Record<string, unknown>>; clips: Array<Record<string, unknown>> }
+    const stored = projectSave.mock.calls[0][1] as {
+      media: Array<Record<string, unknown>>
+      clips: Array<Record<string, unknown>>
+      captionTracks: Array<Record<string, unknown>>
+    }
     expect(stored.media[0]).toMatchObject({ nativeMediaId: managedId, size: 13 })
     expect(stored.media[0]).not.toHaveProperty('blob')
     expect(stored.clips[0]).toMatchObject({
@@ -51,6 +61,9 @@ describe('desktop project persistence', () => {
       canvasAngle: 12,
       backgroundRemovalEnabled: true,
       backgroundRemovalSensitivity: 42,
+    })
+    expect(stored.captionTracks[0]).toMatchObject({
+      id: 'captions-1', language: 'ko', cues: [{ id: 'cue-1', text: '저장되는 자막', start: 0.2, end: 1.5 }],
     })
   })
 })

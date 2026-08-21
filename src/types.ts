@@ -270,6 +270,68 @@ export interface TextOverlay {
 
 export type TextAlign = TextOverlay['align']
 
+/** Shared visual style for a dedicated subtitle/caption track. */
+export interface CaptionStyle {
+  /** CSS font-family stack. */
+  font: string
+  /** Font size as a fraction of the output frame height. */
+  size: number
+  color: string
+  colorAlpha: number
+  box: boolean
+  boxColor: string
+  boxAlpha: number
+  /** Padding and corner radius as fractions of the font size. */
+  boxPadding: number
+  boxRadius: number
+  /** Outline width as a fraction of the font size. */
+  strokeWidth: number
+  strokeColor: string
+  shadow: boolean
+  shadowColor: string
+  shadowBlur: number
+  shadowDist: number
+  align: 'left' | 'center' | 'right'
+  /** Caption block centre position and maximum width, relative to the frame. */
+  x: number
+  y: number
+  maxWidth: number
+  /** Multiples of the font size. */
+  lineHeight: number
+  lineLimit: 1 | 2 | 3
+}
+
+export interface CaptionSourceBinding {
+  type: 'clip' | 'audio'
+  id: string
+  /** Time inside the source timeline item represented by this cue. */
+  offsetStart: number
+  offsetEnd: number
+}
+
+/** One timed cue. Per-cue style values override the owning track style. */
+export interface CaptionCue {
+  id: string
+  text: string
+  start: number
+  end: number
+  origin: 'manual' | 'imported' | 'generated'
+  style?: Partial<CaptionStyle>
+  source?: CaptionSourceBinding
+}
+
+/** Dedicated captions stay separate from freely positioned title/text layers. */
+export interface CaptionTrack {
+  id: string
+  name: string
+  /** BCP-47 language tag, or `und` when it is not specified. */
+  language: string
+  hidden: boolean
+  locked: boolean
+  style: CaptionStyle
+  cues: CaptionCue[]
+}
+
 export interface FontOption { label: string; labelEn: string; family: string; value: string; note: string; noteEn: string }
 
 export const FONT_OPTIONS: FontOption[] = [

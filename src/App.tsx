@@ -27,7 +27,7 @@ function snapshotProject() {
   const s = useEditor.getState()
   return {
     mediaLibrary: s.mediaLibrary,
-    clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
+    clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts, captionTracks: s.captionTracks,
     markers: s.markers, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
     groups: s.groups,
     visualOrder: s.visualOrder,
@@ -41,6 +41,7 @@ export default function App() {
   const overlays = useEditor((s) => s.overlays)
   const audios = useEditor((s) => s.audios)
   const texts = useEditor((s) => s.texts)
+  const captionTracks = useEditor((s) => s.captionTracks)
   const selection = useEditor((s) => s.selection)
   const selectedItems = useEditor((s) => s.selectedItems)
   const playhead = useEditor((s) => s.playhead)
@@ -178,12 +179,12 @@ export default function App() {
       return JSON.stringify({
         ml: strip(s.mediaLibrary),
         c: strip(s.clips), o: strip(s.overlays), a: strip(s.audios), b: strip(s.backgrounds),
-        t: s.texts, m: s.markers, g: s.groups, vo: s.visualOrder, ar: s.aspectRatio, es: s.exportSettings,
+        t: s.texts, ct: s.captionTracks, m: s.markers, g: s.groups, vo: s.visualOrder, ar: s.aspectRatio, es: s.exportSettings,
       })
     }
     const saveNow = async () => {
       const s = useEditor.getState()
-      if (!(s.mediaLibrary.length || s.clips.length || s.overlays.length || s.audios.length || s.backgrounds.length || s.texts.length)) return
+      if (!(s.mediaLibrary.length || s.clips.length || s.overlays.length || s.audios.length || s.backgrounds.length || s.texts.length || s.captionTracks.length)) return
       const sig = signature()
       if (sig === lastSig.current) { dirty = false; return }
       if (inFlight) {
@@ -197,7 +198,7 @@ export default function App() {
       try {
         await saveProject(AUTOSAVE_KEY, {
           mediaLibrary: s.mediaLibrary,
-          clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
+          clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts, captionTracks: s.captionTracks,
           markers: s.markers,
           groups: s.groups,
           visualOrder: s.visualOrder,
@@ -271,7 +272,7 @@ export default function App() {
   const backgrounds = useEditor((s) => s.backgrounds)
   const total = projectDuration(clips, overlays, audios, texts, backgrounds)
   const hasClips = clips.length > 0
-  const hasContent = mediaLibrary.length > 0 || hasClips || overlays.length > 0 || audios.length > 0 || backgrounds.length > 0 || texts.length > 0
+  const hasContent = mediaLibrary.length > 0 || hasClips || overlays.length > 0 || audios.length > 0 || backgrounds.length > 0 || texts.length > 0 || captionTracks.length > 0
 
   const openProject = async (name: string) => {
     const project = await loadProject(name)

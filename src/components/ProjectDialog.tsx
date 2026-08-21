@@ -13,7 +13,7 @@ function snapshot(): ProjectState {
   const s = useEditor.getState()
   return {
     mediaLibrary: s.mediaLibrary,
-    clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
+    clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts, captionTracks: s.captionTracks,
     markers: s.markers,
     groups: s.groups,
     visualOrder: s.visualOrder,
