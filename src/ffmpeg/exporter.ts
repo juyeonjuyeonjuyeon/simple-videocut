@@ -1,7 +1,7 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
 import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, Crop, Rotation } from '../types'
-import { aspectToWH, projectDuration, overlayLength, audioLength, clipTimelineDuration } from '../utils/time'
+import { aspectToWH, projectDuration, overlayLength, audioLength, clipTimelineDuration, clipBaseLength, repeatCountFor } from '../utils/time'
 import { hexToRgba } from '../utils/color'
 import { hasNativeFFmpeg, NativeFFmpeg } from './native'
 import { positionExpression } from '../utils/motion'
@@ -300,6 +300,11 @@ function ovLen(o: Overlay): number {
   return overlayLength(o)
 }
 
+const visualLoopCount = (item: Clip | Overlay | Background) =>
+  repeatCountFor((item.trimEnd - item.trimStart) / item.speed, 'x' in item ? overlayLength(item) : clipTimelineDuration(item))
+
+const audioLoopCount = (item: AudioClip) => repeatCountFor(item.trimEnd - item.trimStart, audioLength(item))
+
 export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
   const { clips, aspect, height, onProgress, onLog } = opts
   const texts = opts.texts.filter((text) => !text.hidden)
@@ -352,7 +357,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       // looping the whole original. Materialize one trimmed cycle first.
       const nativeDesktop = Boolean(fp.fileSize)
       const needsNormalization = item.kind === 'video'
-        ? shouldNormalizeInput(info, W, H, nativeDesktop) || item.repeat > 1
+        ? shouldNormalizeInput(info, W, H, nativeDesktop) || visualLoopCount(item) > 1
         : oversizedImage && !nativeDesktop
       const stageStart = 0.05 + (0.2 * visualIndex) / Math.max(1, visualCount)
       visualIndex++
@@ -469,7 +474,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     for (let k = 0; k < audios.length; k++) {
       if (!audios[k].sourceSize) throw new Error(`원본 음성 파일이 비어 있습니다: ${audios[k].name}`)
       await stageMedia(`audio${k}`, audios[k])
-      if (audios[k].repeat > 1) {
+      if (audioLoopCount(audios[k]) > 1) {
         const normalizedName = `normaudio${k}.m4a`
         logBuffer = []
         const normalizeExitCode = await fp.exec([
@@ -498,7 +503,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     let inputCount = 0
     clips.forEach((c, fileIndex) => {
       if (c.kind === 'color') { inputIdxOf.push(-1); return }
-      const repeat = Math.max(1, c.repeat)
+      const repeat = repeatCountFor(clipBaseLength(c), clipTimelineDuration(c))
       const sourceDuration = c.trimEnd - c.trimStart
       if (c.kind === 'image') {
         args.push('-loop', '1', '-t', String(clipTimelineDuration(c)), '-i', inputFiles[fileIndex])
@@ -515,8 +520,9 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     overlays.forEach((o, k) => {
       if (o.kind === 'image') args.push('-loop', '1', '-t', String(ovLen(o)), '-i', overlayFiles[k])
       else {
-        if (o.repeat > 1) args.push('-stream_loop', String(o.repeat - 1))
-        args.push('-ss', String(overlayTrimStarts[k]), '-t', String((o.trimEnd - o.trimStart) * Math.max(1, o.repeat)), '-i', overlayFiles[k])
+        const repeat = repeatCountFor((o.trimEnd - o.trimStart) / o.speed, overlayLength(o))
+        if (repeat > 1) args.push('-stream_loop', String(repeat - 1))
+        args.push('-ss', String(overlayTrimStarts[k]), '-t', String((o.trimEnd - o.trimStart) * repeat), '-i', overlayFiles[k])
       }
     })
     const bgBase = ovBase + overlays.length
@@ -524,17 +530,18 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     let freeInputCount = bgBase
     backgrounds.forEach((b, k) => {
       if (b.kind === 'color') { bgInputIdx.push(-1); return }
-      const sourceDuration = (b.trimEnd - b.trimStart) * Math.max(1, b.repeat)
+      const repeat = repeatCountFor(clipBaseLength(b), clipTimelineDuration(b))
+      const sourceDuration = (b.trimEnd - b.trimStart) * repeat
       if (b.kind === 'image') args.push('-loop', '1', '-t', String(clipTimelineDuration(b)), '-i', backgroundFiles[k])
       else {
-        if (b.repeat > 1) args.push('-stream_loop', String(b.repeat - 1))
+        if (repeat > 1) args.push('-stream_loop', String(repeat - 1))
         args.push('-ss', String(backgroundTrimStarts[k]), '-t', String(sourceDuration), '-i', backgroundFiles[k])
       }
       bgInputIdx.push(freeInputCount++)
     })
     const audioBase = freeInputCount
     audios.forEach((a, k) => {
-      args.push('-stream_loop', String(Math.max(0, a.repeat - 1)), '-ss', String(audioTrimStarts[k]), '-t', String(audioLength(a)), '-i', audioFiles[k])
+      args.push('-stream_loop', String(Math.max(0, audioLoopCount(a) - 1)), '-ss', String(audioTrimStarts[k]), '-t', String(audioLength(a)), '-i', audioFiles[k])
       freeInputCount++
     })
 
@@ -555,7 +562,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
           ? `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}`
           : `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
         filters.push(
-          `[${inputIdxOf[p]}:v]setpts=PTS/${sp},${spatialFilters(c)}${fit},setsar=1,fps=30,format=rgba,` +
+          `[${inputIdxOf[p]}:v]setpts=PTS/${sp},trim=duration=${segDur.toFixed(3)},setpts=PTS-STARTPTS,${spatialFilters(c)}${fit},setsar=1,fps=30,format=rgba,` +
             `${videoEnvelope(segDur, c.fadeIn, c.fadeOut)}null[v${p}]`,
         )
       }
@@ -614,6 +621,9 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       const len = ovLen(o)
       const shift = o.start
       const ovW = Math.max(2, Math.round((o.scale * W) / 2) * 2)
+      const ovH = o.scaleY != null && !(o.aspectLocked ?? true)
+        ? Math.max(2, Math.round((o.scaleY * H) / 2) * 2)
+        : null
       // Pad the overlay's START with `shift` seconds (instead of shifting PTS) so
       // its timestamps begin at 0 like the base — avoids an overlay-sync deadlock.
       const speedF = o.kind === 'video' ? `setpts=PTS/${o.speed},` : ''
@@ -624,7 +634,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         ? `rotate=a=${rad.toFixed(5)}:ow=rotw(${rad.toFixed(5)}):oh=roth(${rad.toFixed(5)}):c=0x00000000,`
         : ''
       filters.push(
-        `[${ovIdx}:v]${speedF}${spatialFilters(o)}scale=${ovW}:-2,format=rgba,${rotF}` +
+        `[${ovIdx}:v]${speedF}${spatialFilters(o)}scale=${ovW}:${ovH ?? -2},format=rgba,${rotF}` +
           `${videoEnvelope(len, o.fadeIn, o.fadeOut, o.opacity ?? 1)}` +
           `tpad=start_duration=${shift.toFixed(3)}:start_mode=add:color=0x00000000[ovv${k}]`,
       )
@@ -669,7 +679,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       if (!overlayAudioFlags[k] || o.muted || o.volume <= 0 || o.kind !== 'video') return
       const label = `aov${k}`
       filters.push(
-        `[${ovBase + k}:a]${buildAtempo(o.speed)}volume=${o.volume},${audioEnvelope(ovLen(o), o.fadeIn, o.fadeOut)}aresample=44100,` +
+        `[${ovBase + k}:a]${buildAtempo(o.speed)}atrim=0:${ovLen(o).toFixed(3)},volume=${o.volume},${audioEnvelope(ovLen(o), o.fadeIn, o.fadeOut)}aresample=44100,` +
         `aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${Math.round(o.start * 1000)}:all=1,` +
         `apad=whole_dur=${duration.toFixed(3)},atrim=0:${duration.toFixed(3)}[${label}]`,
       )
@@ -679,7 +689,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       if (!backgroundAudioFlags[k] || b.muted || b.volume <= 0 || b.kind !== 'video') return
       const label = `abg${k}`
       filters.push(
-        `[${bgInputIdx[k]}:a]${buildAtempo(b.speed)}volume=${b.volume},${audioEnvelope(clipTimelineDuration(b), b.fadeIn, b.fadeOut)}aresample=44100,` +
+        `[${bgInputIdx[k]}:a]${buildAtempo(b.speed)}atrim=0:${clipTimelineDuration(b).toFixed(3)},volume=${b.volume},${audioEnvelope(clipTimelineDuration(b), b.fadeIn, b.fadeOut)}aresample=44100,` +
         `aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${Math.round(b.start * 1000)}:all=1,` +
         `apad=whole_dur=${duration.toFixed(3)},atrim=0:${duration.toFixed(3)}[${label}]`,
       )
@@ -689,7 +699,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       if (a.muted || a.volume <= 0) return
       const label = `amusic${k}`
       filters.push(
-        `[${audioBase + k}:a]volume=${a.volume},${audioEnvelope(audioLength(a), a.fadeIn, a.fadeOut)}aresample=44100,` +
+        `[${audioBase + k}:a]atrim=0:${audioLength(a).toFixed(3)},volume=${a.volume},${audioEnvelope(audioLength(a), a.fadeIn, a.fadeOut)}aresample=44100,` +
         `aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${Math.round(a.start * 1000)}:all=1,` +
         `apad=whole_dur=${duration.toFixed(3)},atrim=0:${duration.toFixed(3)}[${label}]`,
       )

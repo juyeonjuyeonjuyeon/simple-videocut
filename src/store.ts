@@ -1,9 +1,9 @@
 import { create } from 'zustand'
-import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing } from './types'
+import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup } from './types'
 import { NO_CROP, FONT_OPTIONS } from './types'
 import type { ProjectState } from './utils/project'
 import { assertMediaCapacity, probeVideo, probeImage, probeAudio, nextClipColor, isVideoFile, isImageFile, isAudioFile } from './utils/media'
-import { clipTimelineDuration, clipStartOffsets, projectDuration, overlayLength, audioLength } from './utils/time'
+import { clipTimelineDuration, clipStartOffsets, projectDuration, overlayLength, audioLength, exactDurationPatch } from './utils/time'
 import { keyframeAt, positionAt } from './utils/motion'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
@@ -23,7 +23,9 @@ interface EditorState {
   texts: TextOverlay[]
   backgrounds: Background[]
   markers: TimelineMarker[]
+  groups: TimelineGroup[]
   selection: Selection
+  selectedItems: TimelineItemRef[]
   aspectRatio: AspectRatio
   playhead: number
   isPlaying: boolean
@@ -77,7 +79,10 @@ interface EditorState {
   setPositionKeyframeEasing: (type: 'overlay' | 'text', id: string, keyframeId: string, easing: KeyframeEasing) => void
 
   // ---- misc ----
-  select: (sel: Selection) => void
+  select: (sel: Selection, additive?: boolean) => void
+  groupSelected: () => void
+  ungroupSelected: () => void
+  moveTimelineItems: (items: TimelineItemRef[], delta: number) => void
   setAspectRatio: (r: AspectRatio) => void
   setPlayhead: (t: number) => void
   setPlaying: (p: boolean) => void
@@ -128,6 +133,20 @@ const clampFades = <T extends { fadeIn?: number; fadeOut?: number }>(item: T, le
   return item
 }
 
+const DURATION_KEYS = ['trimStart', 'trimEnd', 'speed', 'repeat'] as const
+const normalizeExactDuration = (
+  item: { timelineDuration?: number; repeat: number },
+  patch: object,
+  baseLength: number,
+) => {
+  const changedDurationInput = DURATION_KEYS.some((key) => Object.prototype.hasOwnProperty.call(patch, key))
+  const suppliedExact = Object.prototype.hasOwnProperty.call(patch, 'timelineDuration')
+  if (changedDurationInput && !suppliedExact) delete item.timelineDuration
+  if (item.timelineDuration != null) {
+    item.timelineDuration = Math.max(0.1, Math.min(item.timelineDuration, Math.max(0.1, baseLength * item.repeat)))
+  }
+}
+
 const TRANSFORM_DEFAULTS = { rotate: 0 as const, flipH: false, flipV: false, crop: NO_CROP }
 
 export const useEditor = create<EditorState>((set, get) => ({
@@ -137,7 +156,9 @@ export const useEditor = create<EditorState>((set, get) => ({
   texts: [],
   backgrounds: [],
   markers: [],
+  groups: [],
   selection: null,
+  selectedItems: [],
   aspectRatio: '16:9',
   playhead: 0,
   isPlaying: false,
@@ -193,8 +214,12 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   updateClip: (id, patch) =>
-    set((s) => ({
-      clips: s.clips.map((c) => {
+    set((s) => {
+      const anchorIndex = s.clips.findIndex((clip) => clip.id === id)
+      const anchorBefore = s.clips[anchorIndex]
+      const anchorStart = anchorIndex >= 0 ? clipStartOffsets(s.clips)[anchorIndex] : 0
+      const beforeLength = anchorBefore ? clipTimelineDuration(anchorBefore) : 0
+      const clips = s.clips.map((c) => {
         if (c.id !== id) return c
         const next = { ...c, ...patch }
         clampTrim(next)
@@ -202,10 +227,41 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.volume = Math.max(0, Math.min(next.volume, 2))
         next.crop = clampCrop(next.crop)
         next.repeat = Math.max(1, Math.min(Math.round(next.repeat), 99))
+        normalizeExactDuration(next, patch, (next.trimEnd - next.trimStart) / next.speed)
         clampFades(next, clipTimelineDuration(next))
         return next
-      }),
-    })),
+      })
+      const anchorAfter = clips[anchorIndex]
+      const afterLength = anchorAfter ? clipTimelineDuration(anchorAfter) : beforeLength
+      const ratio = beforeLength > 0 ? afterLength / beforeLength : 1
+      const anchoredGroups = s.groups.filter((group) => group.members.some((member) => member.type === 'clip' && member.id === id))
+      if (!anchoredGroups.length || Math.abs(ratio - 1) < 1e-6) return { clips }
+      const grouped = (type: TimelineItemRef['type'], itemId: string) => anchoredGroups.some((group) => group.members.some((member) => member.type === type && member.id === itemId))
+      const scaleStart = (start: number) => Math.max(0, anchorStart + (start - anchorStart) * ratio)
+      return {
+        clips,
+        overlays: s.overlays.map((item) => grouped('overlay', item.id) ? {
+          ...item,
+          start: scaleStart(item.start),
+          ...exactDurationPatch((item.trimEnd - item.trimStart) / item.speed, overlayLength(item) * ratio),
+        } : item),
+        audios: s.audios.map((item) => grouped('audio', item.id) ? {
+          ...item,
+          start: scaleStart(item.start),
+          ...exactDurationPatch(item.trimEnd - item.trimStart, audioLength(item) * ratio),
+        } : item),
+        backgrounds: s.backgrounds.map((item) => grouped('background', item.id) ? {
+          ...item,
+          start: scaleStart(item.start),
+          ...exactDurationPatch((item.trimEnd - item.trimStart) / item.speed, clipTimelineDuration(item) * ratio),
+        } : item),
+        texts: s.texts.map((item) => {
+          if (!grouped('text', item.id)) return item
+          const start = scaleStart(item.start)
+          return { ...item, start, end: start + (item.end - item.start) * ratio }
+        }),
+      }
+    }),
 
   moveClip: (id, dir) =>
     set((s) => {
@@ -279,7 +335,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (c.kind === 'color') return
     const start = clipStartOffsets(s.clips)[i]
     const ov: Overlay = {
-      ...c, start, x: 0.5, y: 0.5, scale: 0.5, angle: 0,
+      ...c, start, x: 0.5, y: 0.5, scale: 0.5, scaleY: undefined, aspectLocked: true, angle: 0,
       opacity: 1, locked: false, hidden: false, positionKeyframes: [],
     }
     set({
@@ -327,6 +383,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.start = Math.max(0, next.start)
         next.crop = clampCrop(next.crop)
         next.opacity = Math.max(0, Math.min(next.opacity ?? 1, 1))
+        normalizeExactDuration(next, patch, (next.trimEnd - next.trimStart) / next.speed)
         clampFades(next, clipTimelineDuration(next))
         return next
       }),
@@ -355,9 +412,12 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (!b) return s
       const { start: _s, opacity: _o, locked: _l, hidden: _h, ...clip } = b
       void _s; void _o; void _l; void _h
+      const offsets = clipStartOffsets(s.clips)
+      const insertAt = offsets.findIndex((offset) => offset >= b.start - 1e-6)
+      const index = insertAt < 0 ? s.clips.length : insertAt
       return {
         backgrounds: s.backgrounds.filter((x) => x.id !== id),
-        clips: [...s.clips, clip as Clip],
+        clips: [...s.clips.slice(0, index), clip as Clip, ...s.clips.slice(index)],
         selection: { type: 'clip', id: clip.id },
       }
     }),
@@ -373,7 +433,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         const base = {
           id: uid(), name: file.name, file, color: nextClipColor(),
           sourceSize: file.size, nativeMediaId: await registerNativeMedia(file),
-          start, x: 0.5, y: 0.5, scale: 0.4, angle: 0, speed: 1, volume: 1, muted: false,
+          start, x: 0.5, y: 0.5, scale: 0.4, scaleY: undefined, aspectLocked: true, angle: 0, speed: 1, volume: 1, muted: false,
           ...TRANSFORM_DEFAULTS, repeat: 1, opacity: 1, locked: false, hidden: false,
           fadeIn: 0, fadeOut: 0, positionKeyframes: [],
         }
@@ -403,9 +463,12 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.x = Math.max(0, Math.min(next.x, 1))
         next.y = Math.max(0, Math.min(next.y, 1))
         next.scale = Math.max(0.1, Math.min(next.scale, 1))
+        if (next.scaleY != null) next.scaleY = Math.max(0.05, Math.min(next.scaleY, 1))
+        next.aspectLocked = next.aspectLocked ?? true
         next.start = Math.max(0, next.start)
         next.crop = clampCrop(next.crop)
         next.repeat = Math.max(1, Math.min(Math.round(next.repeat), 99))
+        normalizeExactDuration(next, patch, (next.trimEnd - next.trimStart) / next.speed)
         next.opacity = Math.max(0, Math.min(next.opacity ?? 1, 1))
         clampFades(next, overlayLength(next))
         next.positionKeyframes = (next.positionKeyframes ?? [])
@@ -438,13 +501,16 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (!o) return s
       // Drop the overlay-only fields; the rest is a Clip.
       const {
-        start: _s, x: _x, y: _y, scale: _sc, angle: _a,
+        start: _s, x: _x, y: _y, scale: _sc, scaleY: _sy, aspectLocked: _al, angle: _a,
         opacity: _o, locked: _l, hidden: _h, positionKeyframes: _pk, ...clip
       } = o
-      void _s; void _x; void _y; void _sc; void _a; void _o; void _l; void _h; void _pk
+      void _s; void _x; void _y; void _sc; void _sy; void _al; void _a; void _o; void _l; void _h; void _pk
+      const offsets = clipStartOffsets(s.clips)
+      const insertAt = offsets.findIndex((offset) => offset >= o.start - 1e-6)
+      const index = insertAt < 0 ? s.clips.length : insertAt
       return {
         overlays: s.overlays.filter((x) => x.id !== id),
-        clips: [...s.clips, clip as Clip],
+        clips: [...s.clips.slice(0, index), clip as Clip, ...s.clips.slice(index)],
         selection: { type: 'clip', id: clip.id },
       }
     }),
@@ -480,6 +546,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.volume = Math.max(0, Math.min(next.volume, 2))
         next.start = Math.max(0, next.start)
         next.repeat = Math.max(1, Math.min(Math.round(next.repeat), 99))
+        normalizeExactDuration(next, patch, next.trimEnd - next.trimStart)
         clampFades(next, audioLength(next))
         return next
       }),
@@ -637,7 +704,41 @@ export const useEditor = create<EditorState>((set, get) => ({
     }),
 
   // ---------- misc ----------
-  select: (sel) => set({ selection: sel }),
+  select: (sel, additive = false) => set((s) => {
+    if (!sel) return { selection: null, selectedItems: [] }
+    if (!additive) return { selection: sel, selectedItems: [sel] }
+    const exists = s.selectedItems.some((item) => item.type === sel.type && item.id === sel.id)
+    const selectedItems = exists
+      ? s.selectedItems.filter((item) => item.type !== sel.type || item.id !== sel.id)
+      : [...s.selectedItems, sel]
+    return { selection: selectedItems[selectedItems.length - 1] ?? null, selectedItems }
+  }),
+  groupSelected: () => set((s) => {
+    if (s.selectedItems.length < 2) return s
+    const chosen = s.selectedItems
+    const includesChosen = (group: TimelineGroup) => group.members.some((member) => chosen.some((item) => item.type === member.type && item.id === member.id))
+    const groups = s.groups.filter((group) => !includesChosen(group))
+    return { groups: [...groups, { id: uid(), name: `그룹 ${groups.length + 1}`, members: chosen }] }
+  }),
+  ungroupSelected: () => set((s) => ({
+    groups: s.groups.filter((group) => !group.members.some((member) => s.selectedItems.some((item) => item.type === member.type && item.id === member.id))),
+  })),
+  moveTimelineItems: (items, delta) => set((s) => {
+    const free = items.filter((item) => item.type !== 'clip')
+    if (!free.length || !Number.isFinite(delta) || Math.abs(delta) < 1e-9) return s
+    const starts = free.map((item) => item.type === 'overlay' ? s.overlays.find((x) => x.id === item.id)?.start
+      : item.type === 'audio' ? s.audios.find((x) => x.id === item.id)?.start
+      : item.type === 'background' ? s.backgrounds.find((x) => x.id === item.id)?.start
+      : s.texts.find((x) => x.id === item.id)?.start).filter((value): value is number => value != null)
+    const applied = Math.max(delta, -(starts.length ? Math.min(...starts) : 0))
+    const has = (type: TimelineItemRef['type'], id: string) => free.some((item) => item.type === type && item.id === id)
+    return {
+      overlays: s.overlays.map((item) => has('overlay', item.id) ? { ...item, start: item.start + applied } : item),
+      audios: s.audios.map((item) => has('audio', item.id) ? { ...item, start: item.start + applied } : item),
+      backgrounds: s.backgrounds.map((item) => has('background', item.id) ? { ...item, start: item.start + applied } : item),
+      texts: s.texts.map((item) => has('text', item.id) ? { ...item, start: item.start + applied, end: item.end + applied } : item),
+    }
+  }),
   setAspectRatio: (r) => set({ aspectRatio: r }),
   setPlayhead: (t) => set({ playhead: Math.max(0, t) }),
   setPlaying: (p) => set({ isPlaying: p }),
@@ -645,13 +746,20 @@ export const useEditor = create<EditorState>((set, get) => ({
   setExportSettings: (patch) => set((s) => ({ exportSettings: { ...s.exportSettings, ...patch } })),
 
   deleteSelected: () => {
-    const { selection } = get()
-    if (!selection) return
-    if (selection.type === 'clip') get().removeClip(selection.id)
-    else if (selection.type === 'overlay') get().removeOverlay(selection.id)
-    else if (selection.type === 'audio') get().removeAudio(selection.id)
-    else if (selection.type === 'text') get().removeText(selection.id)
-    else if (selection.type === 'background') get().removeBackground(selection.id)
+    const s = get()
+    const chosen = s.selectedItems.length ? s.selectedItems : s.selection ? [s.selection] : []
+    if (!chosen.length) return
+    const has = (type: TimelineItemRef['type'], id: string) => chosen.some((item) => item.type === type && item.id === id)
+    const groups = s.groups.map((group) => ({ ...group, members: group.members.filter((member) => !has(member.type, member.id)) }))
+      .filter((group) => group.members.length >= 2)
+    set({
+      clips: s.clips.filter((item) => !has('clip', item.id)),
+      overlays: s.overlays.filter((item) => !has('overlay', item.id)),
+      audios: s.audios.filter((item) => !has('audio', item.id)),
+      texts: s.texts.filter((item) => !has('text', item.id)),
+      backgrounds: s.backgrounds.filter((item) => !has('background', item.id)),
+      groups, selection: null, selectedItems: [],
+    })
   },
 
   duplicateSelected: () => {
@@ -691,11 +799,11 @@ export const useEditor = create<EditorState>((set, get) => ({
 }))
 
 type EditorSnapshot = Pick<EditorState,
-  'clips' | 'overlays' | 'audios' | 'texts' | 'backgrounds' | 'markers' | 'aspectRatio' | 'exportSettings'>
+  'clips' | 'overlays' | 'audios' | 'texts' | 'backgrounds' | 'markers' | 'groups' | 'aspectRatio' | 'exportSettings'>
 
 const takeSnapshot = (s: EditorState): EditorSnapshot => ({
   clips: s.clips, overlays: s.overlays, audios: s.audios, texts: s.texts,
-  backgrounds: s.backgrounds, markers: s.markers, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
+  backgrounds: s.backgrounds, markers: s.markers, groups: s.groups, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
 })
 
 const past: EditorSnapshot[] = []
@@ -711,6 +819,7 @@ const historyKey = (a: EditorState, b: EditorState) => {
   if (a.texts !== b.texts) return 'texts'
   if (a.backgrounds !== b.backgrounds) return 'backgrounds'
   if (a.markers !== b.markers) return 'markers'
+  if (a.groups !== b.groups) return 'groups'
   if (a.aspectRatio !== b.aspectRatio) return 'aspectRatio'
   if (a.exportSettings !== b.exportSettings) return 'exportSettings'
   return ''
@@ -751,8 +860,9 @@ function replaceEditorProject(p: ProjectState) {
     })),
     clips: p.clips.map((c) => ({ ...c, fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 })),
     markers: p.markers ?? [],
+    groups: p.groups ?? [],
     aspectRatio: p.aspectRatio, exportSettings: p.exportSettings,
-    selection: null, playhead: 0, isPlaying: false, canUndo: false, canRedo: false,
+    selection: null, selectedItems: [], playhead: 0, isPlaying: false, canUndo: false, canRedo: false,
   })
   applyingHistory = false
   for (const snapshot of discarded) releaseSnapshotMedia(snapshot)
@@ -763,7 +873,7 @@ function undoEditor() {
   if (!target) return
   future.push(takeSnapshot(useEditor.getState()))
   applyingHistory = true
-  useEditor.setState({ ...target, selection: null, isPlaying: false, canUndo: past.length > 0, canRedo: true })
+  useEditor.setState({ ...target, selection: null, selectedItems: [], isPlaying: false, canUndo: past.length > 0, canRedo: true })
   applyingHistory = false
 }
 
@@ -772,11 +882,14 @@ function redoEditor() {
   if (!target) return
   past.push(takeSnapshot(useEditor.getState()))
   applyingHistory = true
-  useEditor.setState({ ...target, selection: null, isPlaying: false, canUndo: true, canRedo: future.length > 0 })
+  useEditor.setState({ ...target, selection: null, selectedItems: [], isPlaying: false, canUndo: true, canRedo: future.length > 0 })
   applyingHistory = false
 }
 
 useEditor.subscribe((state, previous) => {
+  if (state.selection !== previous.selection && state.selectedItems === previous.selectedItems) {
+    useEditor.setState({ selectedItems: state.selection ? [state.selection] : [] })
+  }
   if (applyingHistory) return
   const key = historyKey(state, previous)
   if (!key) return

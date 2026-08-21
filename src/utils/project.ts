@@ -1,4 +1,4 @@
-import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, ExportSettings, TimelineMarker } from '../types'
+import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, ExportSettings, TimelineMarker, TimelineGroup } from '../types'
 
 const DB_NAME = 'simplecut-db'
 const STORE = 'projects'
@@ -21,6 +21,7 @@ export interface ProjectState {
   backgrounds: Background[]
   texts: TextOverlay[]
   markers?: TimelineMarker[]
+  groups?: TimelineGroup[]
   aspectRatio: AspectRatio
   exportSettings: ExportSettings
 }
@@ -37,6 +38,7 @@ interface SerializedProject {
   backgrounds: object[]
   texts: TextOverlay[]
   markers?: TimelineMarker[]
+  groups?: TimelineGroup[]
   media: MediaBlob[]
 }
 
@@ -87,6 +89,7 @@ function serialize(name: string, s: ProjectState): SerializedProject {
     backgrounds: s.backgrounds.map((b) => strip(b as unknown as WithMedia)),
     texts: s.texts,
     markers: s.markers ?? [],
+    groups: s.groups ?? [],
     media,
   }
 }
@@ -135,6 +138,7 @@ function deserialize(p: SerializedProject): ProjectState {
     backgrounds: p.backgrounds.map((b) => restore<Background>(b)),
     texts: p.texts,
     markers: p.markers ?? [],
+    groups: p.groups ?? [],
   }
 }
 
@@ -414,13 +418,23 @@ export async function projectToFileBlob(name: string, s: ProjectState): Promise<
   return new Blob([JSON.stringify({ ...p, media })], { type: 'application/json' })
 }
 export async function fileBlobToProject(file: File): Promise<ProjectState> {
+  return (await fileBlobToProjectWithMeta(file)).project
+}
+
+export interface ImportedProject {
+  name: string
+  project: ProjectState
+}
+
+/** Opens a portable project while preserving the name stored inside it. */
+export async function fileBlobToProjectWithMeta(file: File): Promise<ImportedProject> {
   if (file.size > PROJECT_LIMITS.maxPortableBytes) throw new Error('프로젝트 파일은 512MB 이하만 열 수 있습니다.')
   const json: unknown = JSON.parse(await file.text())
   assertPortableProject(json)
   const media: MediaBlob[] = (json.media || []).map((m: { id: string; name: string; type: string; data: string }) => ({
     id: m.id, name: m.name, type: m.type, blob: base64ToBlob(m.data, m.type), size: Math.floor(m.data.length * 0.75),
   }))
-  return verifyProjectMedia(deserialize({ ...json, media }))
+  return { name: json.name, project: await verifyProjectMedia(deserialize({ ...json, media })) }
 }
 
 type PortableProject = Omit<SerializedProject, 'media'> & {
@@ -497,6 +511,7 @@ const validateItem = (value: unknown, track: string) => {
   text(item.color, 64, `${track} 색상`)
   finite(item.repeat, 1, 99, `${track} 반복`)
   if (!Number.isInteger(item.repeat as number)) throw new Error(`${track} 반복 값이 잘못되었습니다.`)
+  if ('timelineDuration' in item) finite(item.timelineDuration, 0.1, PROJECT_LIMITS.maxDurationSeconds, `${track} 타임라인 길이`)
   if ('fadeIn' in item) finite(item.fadeIn, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 시작 페이드`)
   if ('fadeOut' in item) finite(item.fadeOut, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 끝 페이드`)
 
@@ -523,6 +538,8 @@ const validateItem = (value: unknown, track: string) => {
     finite(item.x, 0, 1, `${track} 가로 위치`)
     finite(item.y, 0, 1, `${track} 세로 위치`)
     finite(item.scale, 0.1, 1, `${track} 크기`)
+    if ('scaleY' in item && item.scaleY !== undefined) finite(item.scaleY, 0.05, 1, `${track} 세로 크기`)
+    if ('aspectLocked' in item && item.aspectLocked !== undefined) bool(item.aspectLocked, `${track} 비율 고정`)
     if ('angle' in item) finite(item.angle, -180, 180, `${track} 회전`)
     if ('opacity' in item) finite(item.opacity, 0, 1, `${track} 투명도`)
     if ('locked' in item) bool(item.locked, `${track} 잠금`)
@@ -565,6 +582,20 @@ function assertBaseProject(value: unknown): Record<string, unknown> {
     if (!Array.isArray(p.markers) || p.markers.length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error('프로젝트의 markers 항목이 잘못되었습니다.')
     for (const marker of p.markers) validateMarker(marker)
   }
+  if (p.groups !== undefined) {
+    if (!Array.isArray(p.groups) || p.groups.length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error('프로젝트의 그룹 정보가 잘못되었습니다.')
+    for (const candidate of p.groups) {
+      const group = record(candidate, '그룹')
+      text(group.id, 100, '그룹 ID')
+      text(group.name, 120, '그룹 이름')
+      if (!Array.isArray(group.members) || group.members.length < 2 || group.members.length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error('그룹 구성 정보가 잘못되었습니다.')
+      for (const memberCandidate of group.members) {
+        const member = record(memberCandidate, '그룹 구성')
+        if (!['clip', 'overlay', 'audio', 'text', 'background'].includes(String(member.type))) throw new Error('그룹 항목 종류가 잘못되었습니다.')
+        text(member.id, 100, '그룹 항목 ID')
+      }
+    }
+  }
   for (const item of p.clips as unknown[]) validateItem(item, '클립')
   for (const item of p.overlays as unknown[]) validateItem(item, '오버레이')
   for (const item of p.audios as unknown[]) validateItem(item, '오디오')
@@ -577,7 +608,9 @@ function assertBaseProject(value: unknown): Record<string, unknown> {
     const trimEnd = typeof item.trimEnd === 'number' ? item.trimEnd : Number(item.duration || 0)
     const speed = typeof item.speed === 'number' ? item.speed : 1
     const repeat = typeof item.repeat === 'number' ? item.repeat : 1
-    return ((trimEnd - trimStart) / speed) * repeat
+    const repeated = ((trimEnd - trimStart) / speed) * repeat
+    const exact = typeof item.timelineDuration === 'number' ? item.timelineDuration : repeated
+    return Math.min(exact, repeated)
   }
   const mainDuration = (p.clips as unknown[]).reduce<number>((sum, item) => sum + clipDuration(item), 0)
   if (mainDuration > PROJECT_LIMITS.maxDurationSeconds) throw new Error('프로젝트 전체 길이는 6시간을 넘을 수 없습니다.')

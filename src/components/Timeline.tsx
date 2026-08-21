@@ -9,11 +9,13 @@ import {
   packLanes,
   formatTime,
   formatTimeFine,
+  totalDuration,
+  exactDurationPatch,
 } from '../utils/time'
 import { contrastText } from '../utils/color'
 import { packVisualLanes } from '../utils/layers'
 import { startPointerDrag as startDrag } from '../utils/pointer'
-import type { Clip, Selection, PositionKeyframe } from '../types'
+import type { Clip, Selection, PositionKeyframe, TimelineItemRef } from '../types'
 import { AudioWaveform, ClipThumbnailStrip } from './TimelineMedia'
 
 const clipBg = (c: Clip) => (c.kind === 'color' ? c.bgColor ?? '#000000' : c.color)
@@ -42,7 +44,10 @@ export default function Timeline() {
   const backgrounds = useEditor((s) => s.backgrounds)
   const markers = useEditor((s) => s.markers)
   const selection = useEditor((s) => s.selection)
+  const selectedItems = useEditor((s) => s.selectedItems)
+  const groups = useEditor((s) => s.groups)
   const playhead = useEditor((s) => s.playhead)
+  const isPlaying = useEditor((s) => s.isPlaying)
   const select = useEditor((s) => s.select)
   const setPlayhead = useEditor((s) => s.setPlayhead)
   const setPlaying = useEditor((s) => s.setPlaying)
@@ -65,10 +70,14 @@ export default function Timeline() {
   const addMarker = useEditor((s) => s.addMarker)
   const updateMarker = useEditor((s) => s.updateMarker)
   const removeMarker = useEditor((s) => s.removeMarker)
+  const groupSelected = useEditor((s) => s.groupSelected)
+  const ungroupSelected = useEditor((s) => s.ungroupSelected)
+  const moveTimelineItems = useEditor((s) => s.moveTimelineItems)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [trackW, setTrackW] = useState(0)
   const [pxPerSec, setPxPerSec] = useState(DEFAULT_PX_PER_SEC)
+  const [fitMode, setFitMode] = useState(false)
   const fittedRef = useRef(false)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragLeft, setDragLeft] = useState(0)
@@ -97,13 +106,16 @@ export default function Timeline() {
     setPlaying(false)
     setMarkerMenu(null)
     setTransitionMenu(null)
-    select(target)
+    if (!selectedItems.some((item) => item.type === target.type && item.id === target.id)) select(target)
     setMenu({
       target,
       x: Math.max(12, Math.min(x, window.innerWidth - 242)),
       y: Math.max(12, Math.min(y, window.innerHeight - 452)),
     })
   }
+
+  const isSelected = (target: TimelineItemRef) => selectedItems.some((item) => item.type === target.type && item.id === target.id)
+  const groupFor = (target: TimelineItemRef) => groups.find((group) => group.members.some((item) => item.type === target.type && item.id === target.id))
 
   const openMarkerMenu = (id: string, x: number, y: number) => {
     setPlaying(false)
@@ -191,9 +203,9 @@ export default function Timeline() {
   const fitPps = trackW > 0 ? clampPps(trackW / Math.max(total, 1)) : DEFAULT_PX_PER_SEC
   // The time axis always extends well past the content so it reads as (nearly) endless.
   const viewSec = pxPerSec > 0 ? trackW / pxPerSec : 0
-  const spanSec = Math.max(total, viewSec) + Math.max(viewSec, 30)
-  const contentW = Math.max(trackW, spanSec * pxPerSec)
-  const atFit = Math.abs(pxPerSec - fitPps) < 0.5
+  const spanSec = fitMode ? Math.max(total, viewSec) : Math.max(total, viewSec) + Math.max(viewSec, 30)
+  const contentW = fitMode ? trackW : Math.max(trackW, spanSec * pxPerSec)
+  const atFit = fitMode && Math.abs(pxPerSec - fitPps) < 0.5
   const atMin = pxPerSec <= MIN_PX_PER_SEC * 1.001
   const atMax = pxPerSec >= MAX_PX_PER_SEC * 0.999
 
@@ -201,9 +213,19 @@ export default function Timeline() {
   useEffect(() => {
     if (!fittedRef.current && total > 0 && trackW > 0) {
       fittedRef.current = true
+      setFitMode(true)
       setPxPerSec(clampPps(trackW / Math.max(total, 1)))
     }
   }, [total, trackW])
+
+  // 전체보기 is a persistent viewport mode, not a one-time zoom value. Keep
+  // fitting when a trim/edit changes the project length and never add overflow.
+  useEffect(() => {
+    if (!fitMode || trackW <= 0) return
+    setPxPerSec(fitPps)
+    const el = scrollRef.current
+    if (el) el.scrollLeft = 0
+  }, [fitMode, fitPps, trackW])
 
   // Lane packing for the free tracks.
   const overlayLanes = packVisualLanes(overlays.map((o) => ({ start: o.start, end: o.start + overlayLength(o) })))
@@ -215,15 +237,16 @@ export default function Timeline() {
   const nTextLanes = textLanes.length ? Math.max(...textLanes) + 1 : 0
   const nBgLanes = bgLanes.length ? Math.max(...bgLanes) + 1 : 0
 
-  // Keep the playhead in view while playing.
+  // Keep the playhead in view only during playback. Manual keyframe/playhead
+  // edits must not unexpectedly move a fitted or manually positioned viewport.
   useEffect(() => {
     const el = scrollRef.current
-    if (!el) return
+    if (!el || !isPlaying || fitMode) return
     const x = playhead * pxPerSec
     const margin = 80
     if (x < el.scrollLeft + margin) el.scrollLeft = Math.max(0, x - margin)
     else if (x > el.scrollLeft + el.clientWidth - margin) el.scrollLeft = x - el.clientWidth + margin
-  }, [playhead, pxPerSec])
+  }, [fitMode, isPlaying, playhead, pxPerSec])
 
   // Scroll / trackpad to zoom (toward cursor); horizontal to pan.
   useEffect(() => {
@@ -236,6 +259,7 @@ export default function Timeline() {
         return
       }
       e.preventDefault()
+      setFitMode(false)
       const rect = el.getBoundingClientRect()
       const cursorX = e.clientX - rect.left
       const anchorTime = (cursorX + el.scrollLeft) / pxPerSec
@@ -286,7 +310,9 @@ export default function Timeline() {
     return best
   }
 
-  const scrub = (clientX: number) => setPlayhead(snap(timeAt(clientX)))
+  // Playhead scrubbing is deliberately continuous. Snapping belongs to clip
+  // edits; forcing it here made precise seeking feel sticky and tiring.
+  const scrub = (clientX: number) => setPlayhead(timeAt(clientX))
 
   // Which visual track is the pointer over (for cross-track drag-and-drop)?
   const trackAt = (clientY: number): 'overlay' | 'main' | 'bg' | null => {
@@ -380,7 +406,7 @@ export default function Timeline() {
         if (menuOpened) return
         if (!moved) {
           if (onName && wasSelected) startEdit('clip', id)
-          else select({ type: 'clip', id })
+          else select({ type: 'clip', id }, e.metaKey || e.ctrlKey)
           return
         }
         // Dropped on another track → move this clip to that layer.
@@ -437,16 +463,16 @@ export default function Timeline() {
       : st.texts.find((t) => t.id === id)
     if (!item) return
     const locked = 'locked' in item && Boolean(item.locked)
-    const len =
-      kind === 'overlay' ? overlayLength(item as never)
-      : kind === 'audio' ? audioLength(item as never)
-      : kind === 'background' ? clipTimelineDuration(item as never)
-      : (item as { end: number; start: number }).end - (item as { start: number }).start
     const s0 = item.start
     const startX = e.clientX
     const startY = e.clientY
     const onName = (e.target as HTMLElement).classList?.contains('tlclip__body') ?? false
     const wasSelected = selection?.type === kind && selection.id === id
+    const target = { type: kind, id } as TimelineItemRef
+    const selectedAtStart = isSelected(target)
+    const grouped = groupFor(target)
+    const dragItems = selectedAtStart && selectedItems.length > 1 ? selectedItems : grouped?.members ?? [target]
+    let lastDelta = 0
     let moved = false
     let menuOpened = false
     const longPress = e.pointerType === 'touch'
@@ -462,10 +488,9 @@ export default function Timeline() {
         if (locked) return
         // Move freely from 0; the project just grows if dragged past the end.
         const ns = Math.max(0, snap(s0 + (ev.clientX - startX) / pxPerSec, id))
-        if (kind === 'overlay') updateOverlay(id, { start: ns })
-        else if (kind === 'audio') updateAudio(id, { start: ns })
-        else if (kind === 'background') updateBackground(id, { start: ns })
-        else updateText(id, { start: ns, end: ns + len })
+        const desiredDelta = ns - s0
+        moveTimelineItems(dragItems, desiredDelta - lastDelta)
+        lastDelta = desiredDelta
       },
       (ev, cancelled) => {
         window.clearTimeout(longPress)
@@ -473,7 +498,7 @@ export default function Timeline() {
         if (menuOpened) return
         if (!moved) {
           if (onName && wasSelected) startEdit(kind, id)
-          else select({ type: kind, id })
+          else select({ type: kind, id }, e.metaKey || e.ctrlKey)
           return
         }
         if (locked) return
@@ -556,6 +581,7 @@ export default function Timeline() {
   const zoomBy = (factor: number) => {
     const el = scrollRef.current
     const anchorTime = el ? (el.scrollLeft + el.clientWidth / 2) / pxPerSec : 0
+    setFitMode(false)
     setPxPerSec((p) => {
       const np = clampPps(p * factor)
       requestAnimationFrame(() => {
@@ -568,6 +594,7 @@ export default function Timeline() {
   }
 
   const fitView = () => {
+    setFitMode(true)
     setPxPerSec(fitPps)
     const el = scrollRef.current
     if (el) { el.scrollLeft = 0; el.scrollTop = 0 }
@@ -626,13 +653,15 @@ export default function Timeline() {
         <button className="btn btn--sm" onClick={fitView} disabled={atFit} title="전체를 한 화면에">전체보기</button>
         <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1.5)} disabled={atMax} title="확대">＋</button>
         <button className="btn btn--sm timeline__marker-add" onClick={() => addMarker(playhead)} title="현재 위치에 마커 추가 (M)">마커 추가</button>
+        {selectedItems.length > 1 && <button className="btn btn--sm" onClick={groupSelected}>그룹 만들기 ({selectedItems.length})</button>}
+        {selectedItems.some((item) => Boolean(groupFor(item))) && <button className="btn btn--sm" onClick={ungroupSelected}>그룹 해제</button>}
         <span className="timeline__zoom">{Math.round((pxPerSec / fitPps) * 100)}%</span>
         <span className="timeline__hint">스크롤=확대 · Shift+스크롤=이동</span>
         <div className="timeline__bar-spacer" />
         <span className="timeline__total">{formatTime(playhead)} / {formatTime(total)}</span>
       </div>
 
-      <div className="timeline__scroll" ref={scrollRef}>
+      <div className={`timeline__scroll${fitMode ? ' timeline__scroll--fit' : ''}`} ref={scrollRef}>
         <div className="timeline__content" style={{ width: contentW }}>
           <div className="timeline__ruler" onPointerDown={onRulerDown} onDoubleClick={(event) => addMarker(timeAt(event.clientX))}>
             {ticks.map((t) => (
@@ -669,7 +698,7 @@ export default function Timeline() {
               {texts.map((t, i) =>
                 freeChip('text', t.id, t.start, t.end - t.start, textLanes[i], TXT_LANE_H, '#3a4250',
                   `T ${t.text}`,
-                  selection?.type === 'text' && selection.id === t.id,
+                  isSelected({ type: 'text', id: t.id }),
                   <>{fadeVisual(t.fadeIn, t.fadeOut, t.end - t.start)}{keyframeVisual(t.positionKeyframes, t.end - t.start)}</>,
                   { hidden: t.hidden, locked: t.locked }),
               )}
@@ -686,7 +715,7 @@ export default function Timeline() {
               {overlays.map((o, i) =>
                 freeChip('overlay', o.id, o.start, overlayLength(o), overlayLanes[i], OV_LANE_H, o.color,
                   `${o.kind === 'image' ? '이미지' : '오버레이'} · ${o.name}${o.repeat > 1 ? ` · 반복 ${o.repeat}회` : ''}${o.kind === 'video' && o.muted ? ' · 음소거' : ''}`,
-                  selection?.type === 'overlay' && selection.id === o.id,
+                  isSelected({ type: 'overlay', id: o.id }),
                   <>{fadeVisual(o.fadeIn, o.fadeOut, overlayLength(o))}{keyframeVisual(o.positionKeyframes, overlayLength(o))}</>,
                   { hidden: o.hidden, locked: o.locked }),
               )}
@@ -700,7 +729,7 @@ export default function Timeline() {
           >
             {clips.length === 0 && <div className="timeline__placeholder">＋ 동영상·사진을 추가하세요</div>}
             {clips.map((c, i) => {
-              const isSel = selection?.type === 'clip' && selection.id === c.id
+              const isSel = isSelected({ type: 'clip', id: c.id })
               const isDragging = dragId === c.id
               const clipWidth = Math.max(2, clipTimelineDuration(c) * pxPerSec)
               return (
@@ -767,7 +796,7 @@ export default function Timeline() {
               {audios.map((a, i) =>
                 freeChip('audio', a.id, a.start, audioLength(a), audioLanes[i], AUD_LANE_H, a.color,
                   `음악 · ${a.name}${a.repeat > 1 ? ` · 반복 ${a.repeat}회` : ''}${a.muted ? ' · 음소거' : ''}`,
-                  selection?.type === 'audio' && selection.id === a.id,
+                  isSelected({ type: 'audio', id: a.id }),
                   <><AudioWaveform media={a} />{fadeVisual(a.fadeIn, a.fadeOut, audioLength(a))}</>),
               )}
             </div>
@@ -783,15 +812,16 @@ export default function Timeline() {
               {backgrounds.map((b, i) =>
                 freeChip('background', b.id, b.start, clipTimelineDuration(b), bgLanes[i], AUD_LANE_H, clipBg(b),
                   `배경 · ${b.name}${b.kind === 'video' && b.muted ? ' · 음소거' : ''}`,
-                  selection?.type === 'background' && selection.id === b.id,
+                  isSelected({ type: 'background', id: b.id }),
                   fadeVisual(b.fadeIn, b.fadeOut, clipTimelineDuration(b)),
                   { hidden: b.hidden, locked: b.locked }),
               )}
             </div>
           )}
 
-          <div className="timeline__playhead" style={{ left: playhead * pxPerSec }}>
-            <span className="timeline__playhead-grab" onPointerDown={onRulerDown} />
+          <div className="timeline__playhead" style={{ left: playhead * pxPerSec }} onPointerDown={onRulerDown} title={`${formatTimeFine(playhead)} · 끌어서 이동`}>
+            <span className="timeline__playhead-time">{formatTimeFine(playhead)}</span>
+            <span className="timeline__playhead-grab" />
           </div>
         </div>
       </div>
@@ -809,6 +839,33 @@ export default function Timeline() {
         const canMute = target.type === 'audio'
           || (target.type === 'overlay' && st.overlays.find((x) => x.id === target.id)?.kind === 'video')
           || (target.type === 'background' && st.backgrounds.find((x) => x.id === target.id)?.kind === 'video')
+        const layerItems = target.type === 'overlay' ? st.overlays
+          : target.type === 'background' ? st.backgrounds
+          : target.type === 'text' ? st.texts
+          : []
+        const layerIndex = layerItems.findIndex((entry) => entry.id === target.id)
+        const mainLength = totalDuration(st.clips)
+        const itemStart = item?.start ?? visualItem?.start ?? 0
+        const targetGroup = groupFor(target)
+        const fitSpan = (start: number, length: number) => {
+          const safeLength = Math.max(0.1, length)
+          if (target.type === 'text') updateText(target.id, { start, end: start + safeLength })
+          else if (target.type === 'overlay' && item && 'speed' in item) {
+            const media = item as { trimStart: number; trimEnd: number; speed: number }
+            updateOverlay(target.id, { start, ...exactDurationPatch((media.trimEnd - media.trimStart) / media.speed, safeLength) })
+          } else if (target.type === 'background' && item && 'speed' in item) {
+            const media = item as { trimStart: number; trimEnd: number; speed: number }
+            updateBackground(target.id, { start, ...exactDurationPatch((media.trimEnd - media.trimStart) / media.speed, safeLength) })
+          } else if (target.type === 'audio' && item) {
+            updateAudio(target.id, { start, ...exactDurationPatch(item.trimEnd - item.trimStart, safeLength) })
+          }
+        }
+        const playheadClipSpan = () => {
+          const offsets = clipStartOffsets(st.clips)
+          const index = st.clips.findIndex((clip, i) => st.playhead >= offsets[i] && st.playhead <= offsets[i] + clipTimelineDuration(clip))
+          if (index < 0) return null
+          return { start: offsets[index], length: clipTimelineDuration(st.clips[index]) }
+        }
         const moveToPlayhead = () => {
           const p = useEditor.getState().playhead
           if (target.type === 'overlay') updateOverlay(target.id, { start: p })
@@ -826,10 +883,20 @@ export default function Timeline() {
               <button role="menuitem" onClick={() => withTarget(target, () => moveClip(target.id, -1))}>← 왼쪽으로 이동</button>
               <button role="menuitem" onClick={() => withTarget(target, () => moveClip(target.id, 1))}>오른쪽으로 이동 →</button>
             </>}
+            {selectedItems.length > 1 && <button role="menuitem" onClick={() => { groupSelected(); setMenu(null) }}>선택 항목 그룹 만들기 ({selectedItems.length})</button>}
+            {targetGroup && <button role="menuitem" onClick={() => withTarget(target, ungroupSelected)}>그룹 해제</button>}
             {target.type !== 'clip' && <button role="menuitem" onClick={() => withTarget(target, moveToPlayhead)}>재생 헤드 위치로 이동</button>}
+            {target.type !== 'clip' && mainLength > 0 && <>
+              <button role="menuitem" onClick={() => withTarget(target, () => fitSpan(0, mainLength))}>메인 트랙 전체 길이에 맞춤</button>
+              <button role="menuitem" disabled={!playheadClipSpan()} onClick={() => withTarget(target, () => {
+                const span = playheadClipSpan()
+                if (span) fitSpan(span.start, span.length)
+              })}>재생 헤드의 클립 구간에 맞춤</button>
+              <button role="menuitem" disabled={itemStart >= mainLength} onClick={() => withTarget(target, () => fitSpan(itemStart, mainLength - itemStart))}>현재 위치부터 메인 끝까지</button>
+            </>}
             {(target.type === 'overlay' || target.type === 'background' || target.type === 'text') && <>
-              <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, 1) : target.type === 'background' ? raiseBackground(target.id, 1) : raiseText(target.id, 1))}>앞으로 가져오기</button>
-              <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, -1) : target.type === 'background' ? raiseBackground(target.id, -1) : raiseText(target.id, -1))}>뒤로 보내기</button>
+              <button role="menuitem" disabled={layerIndex < 0 || layerIndex >= layerItems.length - 1} onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, 1) : target.type === 'background' ? raiseBackground(target.id, 1) : raiseText(target.id, 1))}>레이어 한 단계 위로</button>
+              <button role="menuitem" disabled={layerIndex <= 0} onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, -1) : target.type === 'background' ? raiseBackground(target.id, -1) : raiseText(target.id, -1))}>레이어 한 단계 아래로</button>
             </>}
             {target.type === 'clip' && <>
               <button role="menuitem" onClick={() => withTarget(target, () => moveClipToOverlay(target.id))}>오버레이로 이동</button>

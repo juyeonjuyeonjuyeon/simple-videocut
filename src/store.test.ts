@@ -17,7 +17,7 @@ const clip = (repeat = 1): Clip => ({
 describe('timeline splitting', () => {
   beforeEach(() => {
     useEditor.setState({
-      clips: [clip(3)], overlays: [], audios: [], backgrounds: [], texts: [], markers: [],
+      clips: [clip(3)], overlays: [], audios: [], backgrounds: [], texts: [], markers: [], groups: [], selectedItems: [],
       playhead: 2.5, selection: { type: 'clip', id: 'clip-1' },
       isPlaying: false,
     })
@@ -88,5 +88,24 @@ describe('timeline splitting', () => {
     expect(result.positionKeyframes).toHaveLength(2)
     expect(positionAt(result, 0.5).x).toBeGreaterThan(0.2)
     expect(positionAt(result, 1)).toMatchObject({ x: 0.8, y: 0.7 })
+  })
+
+  it('moves grouped free layers together and follows a grouped main clip trim', () => {
+    const overlay: Overlay = {
+      ...clip(1), id: 'overlay-1', start: 0.5, x: 0.2, y: 0.3, scale: 0.5, angle: 0,
+      positionKeyframes: [],
+    }
+    useEditor.setState({ clips: [clip(1)], overlays: [overlay], groups: [], selectedItems: [], selection: null })
+    useEditor.getState().select({ type: 'clip', id: 'clip-1' })
+    useEditor.getState().select({ type: 'overlay', id: 'overlay-1' }, true)
+    useEditor.getState().groupSelected()
+
+    useEditor.getState().moveTimelineItems([{ type: 'overlay', id: 'overlay-1' }], 1)
+    expect(useEditor.getState().overlays[0].start).toBeCloseTo(1.5)
+
+    useEditor.getState().updateClip('clip-1', { trimEnd: 1 })
+    const resized = useEditor.getState().overlays[0]
+    expect(resized.start).toBeCloseTo(0.75)
+    expect(resized.timelineDuration).toBeCloseTo(1)
   })
 })

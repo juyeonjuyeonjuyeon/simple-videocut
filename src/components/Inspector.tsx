@@ -2,14 +2,14 @@ import { useState, type ReactNode } from 'react'
 import { useEditor } from '../store'
 import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop, PositionKeyframe, KeyframeEasing } from '../types'
 import { NO_CROP, FONT_OPTIONS } from '../types'
-import { formatTime, formatClock, parseClock, clipTimelineDuration, overlayLength, audioLength, totalDuration } from '../utils/time'
+import { formatTime, formatClock, parseClock, clipTimelineDuration, overlayLength, audioLength, totalDuration, exactDurationPatch } from '../utils/time'
 import { rotateBy } from '../utils/transform'
 import Icon from './Icon'
 import { keyframeAt, positionAt } from '../utils/motion'
 
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
-  'fadeIn' | 'fadeOut' | 'opacity' | 'locked' | 'hidden'>>
+  'timelineDuration' | 'fadeIn' | 'fadeOut' | 'opacity' | 'locked' | 'hidden' | 'scaleY' | 'aspectLocked'>>
 
 const decimalsOf = (step: number) => {
   const s = String(step)
@@ -123,13 +123,10 @@ function AlignIcon({ a }: { a: TextOverlay['align'] }) {
   )
 }
 
-function RepeatRow({ repeat, onPatch, fitTo }: { repeat: number; onPatch: (p: { repeat: number }) => void; fitTo?: number }) {
+function RepeatRow({ repeat, onPatch }: { repeat: number; onPatch: (p: { repeat: number }) => void }) {
   return (
     <Stepper label="반복 늘이기" badge={`×${repeat}`} value={repeat} min={1} max={99} step={1} fixed={0}
-      onChange={(v) => onPatch({ repeat: Math.round(v) })}
-      extra={fitTo !== undefined && fitTo > 0
-        ? <button className="btn btn--sm" onClick={() => onPatch({ repeat: Math.max(1, Math.ceil(fitTo)) })}>영상 길이에 맞춤</button>
-        : undefined} />
+      onChange={(v) => onPatch({ repeat: Math.round(v) })} />
   )
 }
 
@@ -330,10 +327,7 @@ function ClipInspector({ clip }: { clip: Clip }) {
       <RepeatRow repeat={clip.repeat} onPatch={patch} />
       <DurationRow
         seconds={clipTimelineDuration(clip)}
-        onSet={(t) => {
-          if (clip.kind === 'image') update(clip.id, { trimEnd: clip.trimStart + t })
-          else update(clip.id, { repeat: Math.max(1, Math.round(t / ((clip.trimEnd - clip.trimStart) / clip.speed))) })
-        }}
+        onSet={(t) => update(clip.id, exactDurationPatch((clip.trimEnd - clip.trimStart) / clip.speed, t))}
       />
 
       <div className="inspector__group btnrow">
@@ -375,7 +369,13 @@ function OverlayInspector({ ov }: { ov: Overlay }) {
       <div className="inspector__group">
         <Range label="가로 위치" value={Math.round(position.x * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('overlay', ov.id, { x: v / 100 })} />
         <Range label="세로 위치" value={Math.round(position.y * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => updatePosition('overlay', ov.id, { y: v / 100 })} />
-        <Range label="크기" value={Math.round(ov.scale * 100)} min={10} max={100} step={1} unit="%" onChange={(v) => update(ov.id, { scale: v / 100 })} />
+        <Range label="가로 크기" value={Math.round(ov.scale * 100)} min={10} max={100} step={1} unit="%" onChange={(v) => update(ov.id, { scale: v / 100 })} />
+        {ov.scaleY != null && !(ov.aspectLocked ?? true) && <Range label="세로 크기" value={Math.round(ov.scaleY * 100)} min={5} max={100} step={1} unit="%" onChange={(v) => update(ov.id, { scaleY: v / 100 })} />}
+        <button className={`btn btn--sm${ov.aspectLocked ?? true ? ' btn--on' : ''}`} onClick={() => update(ov.id, ov.aspectLocked ?? true
+          ? { aspectLocked: false }
+          : { aspectLocked: true, scaleY: undefined })}>
+          <Icon name={ov.aspectLocked ?? true ? 'lock' : 'unlock'} />비율 {ov.aspectLocked ?? true ? '고정' : '자유'}
+        </button>
       </div>
       <LayerStateRow opacity={ov.opacity} locked={ov.locked} hidden={ov.hidden} onPatch={patch}
         onCenter={(axis) => updatePosition('overlay', ov.id, { ...(axis !== 'y' ? { x: 0.5 } : {}), ...(axis !== 'x' ? { y: 0.5 } : {}) })} />
@@ -403,10 +403,7 @@ function OverlayInspector({ ov }: { ov: Overlay }) {
       <RepeatRow repeat={ov.repeat} onPatch={patch} />
       <DurationRow
         seconds={overlayLength(ov)}
-        onSet={(t) => {
-          if (ov.kind === 'image') update(ov.id, { trimEnd: ov.trimStart + t })
-          else update(ov.id, { repeat: Math.max(1, Math.round(t / ((ov.trimEnd - ov.trimStart) / ov.speed))) })
-        }}
+        onSet={(t) => update(ov.id, exactDurationPatch((ov.trimEnd - ov.trimStart) / ov.speed, t))}
       />
 
       <div className="inspector__group btnrow">
@@ -425,7 +422,7 @@ function AudioInspector({ audio }: { audio: AudioClip }) {
   const remove = useEditor((s) => s.removeAudio)
   const clips = useEditor((s) => s.clips)
   const base = audio.trimEnd - audio.trimStart
-  const fitTo = base > 0 ? totalDuration(clips) / base : 0
+  const mainLength = totalDuration(clips)
 
   return (
     <div className="inspector__body">
@@ -443,8 +440,9 @@ function AudioInspector({ audio }: { audio: AudioClip }) {
 
       <VolumeRow volume={audio.volume} muted={audio.muted} onPatch={(p) => update(audio.id, p)} />
       <FadeRow length={audioLength(audio)} fadeIn={audio.fadeIn} fadeOut={audio.fadeOut} onPatch={(p) => update(audio.id, p)} label="소리 페이드" />
-      <RepeatRow repeat={audio.repeat} onPatch={(p) => update(audio.id, p)} fitTo={fitTo} />
-      <DurationRow seconds={audioLength(audio)} onSet={(t) => update(audio.id, { repeat: Math.max(1, Math.round(t / Math.max(0.1, base))) })} />
+      <RepeatRow repeat={audio.repeat} onPatch={(p) => update(audio.id, p)} />
+      {mainLength > 0 && <button className="btn btn--sm" onClick={() => update(audio.id, { start: 0, ...exactDurationPatch(Math.max(0.1, base), mainLength) })}>메인 트랙 전체 길이에 맞춤</button>}
+      <DurationRow seconds={audioLength(audio)} onSet={(t) => update(audio.id, exactDurationPatch(Math.max(0.1, base), t))} />
       <button className="btn btn--danger" onClick={() => remove(audio.id)}>음악 삭제</button>
     </div>
   )
@@ -607,10 +605,7 @@ function BackgroundInspector({ bg }: { bg: Background }) {
       <RepeatRow repeat={bg.repeat} onPatch={patch} />
       <DurationRow
         seconds={clipTimelineDuration(bg)}
-        onSet={(t) => {
-          if (bg.kind === 'video') update(bg.id, { repeat: Math.max(1, Math.round(t / ((bg.trimEnd - bg.trimStart) / bg.speed))) })
-          else update(bg.id, { trimEnd: bg.trimStart + t })
-        }}
+        onSet={(t) => update(bg.id, exactDurationPatch((bg.trimEnd - bg.trimStart) / bg.speed, t))}
       />
 
       <div className="inspector__group btnrow">

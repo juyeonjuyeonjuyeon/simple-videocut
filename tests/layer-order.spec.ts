@@ -39,7 +39,7 @@ test('selecting a lower overlay never changes the rendered layer order', async (
   const lowerPreview = page.locator('.preview__overlay[data-layer-name="lower-red.svg"]')
   const upperPreview = page.locator('.preview__overlay[data-layer-name="upper-blue.svg"]')
   await page.locator('.tlclip', { hasText: 'upper-blue.svg' }).click({ button: 'right' })
-  await page.getByRole('menuitem', { name: '뒤로 보내기' }).click()
+  await page.getByRole('menuitem', { name: '레이어 한 단계 아래로' }).click()
   await expect.poll(async () => ({
     lower: Number.parseInt(await lowerPreview.evaluate((element) => getComputedStyle(element).zIndex), 10),
     upper: Number.parseInt(await upperPreview.evaluate((element) => getComputedStyle(element).zIndex), 10),

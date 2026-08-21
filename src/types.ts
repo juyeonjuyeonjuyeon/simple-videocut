@@ -75,6 +75,8 @@ export interface Clip {
   crop: Crop
   /** Number of times the trimmed segment repeats back-to-back (>=1). */
   repeat: number
+  /** Exact occupied timeline length. When set, the final repeat is cut short. */
+  timelineDuration?: number
   /** Non-destructive fade at the beginning/end of this timeline segment. */
   fadeIn?: number
   fadeOut?: number
@@ -106,6 +108,10 @@ export interface Overlay {
   y: number
   /** Width as a fraction of the frame width, 0..1. */
   scale: number
+  /** Optional height as a fraction of frame height for free-aspect resizing. */
+  scaleY?: number
+  /** Defaults to true for projects created before free-aspect resizing. */
+  aspectLocked?: boolean
   rotate: Rotation
   /** Free rotation in degrees (-180..180), on top of the 90° `rotate`. */
   angle: number
@@ -113,6 +119,8 @@ export interface Overlay {
   flipV: boolean
   crop: Crop
   repeat: number
+  /** Exact occupied timeline length. When set, the final repeat is cut short. */
+  timelineDuration?: number
   /** Whole-layer opacity; separate from media pixels and audio volume. */
   opacity?: number
   /** Locked layers remain visible but cannot be moved/resized accidentally. */
@@ -150,6 +158,8 @@ export interface AudioClip {
   /** Timeline start time (seconds). */
   start: number
   repeat: number
+  /** Exact occupied timeline length. When set, the final repeat is cut short. */
+  timelineDuration?: number
   fadeIn?: number
   fadeOut?: number
 }
@@ -214,6 +224,15 @@ export type Selection =
   | { type: 'text'; id: string }
   | { type: 'background'; id: string }
   | null
+
+export type TimelineItemRef = Exclude<Selection, null>
+
+/** Persistent timeline group. Members keep their individual layer identity. */
+export interface TimelineGroup {
+  id: string
+  name: string
+  members: TimelineItemRef[]
+}
 
 export type ExportHeight = 480 | 720 | 1080 | 1440 | 2160
 

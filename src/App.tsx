@@ -11,6 +11,18 @@ import type { ProjectMeta } from './utils/project'
 import { AUDIO_ACCEPT, isAudioFile, isImageFile, isVideoFile } from './utils/media'
 import Icon from './components/Icon'
 import { startPointerDrag } from './utils/pointer'
+import MediaPanel from './components/MediaPanel'
+
+const ACTIVE_PROJECT_KEY = 'simplecut-active-project-name'
+
+function snapshotProject() {
+  const s = useEditor.getState()
+  return {
+    clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
+    markers: s.markers, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
+    groups: s.groups,
+  }
+}
 
 export default function App() {
   const clips = useEditor((s) => s.clips)
@@ -44,10 +56,17 @@ export default function App() {
   const audioRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
   const [showExport, setShowExport] = useState(false)
-  const [showProject, setShowProject] = useState(false)
+  const [projectDialogMode, setProjectDialogMode] = useState<'manage' | 'saveAs' | null>(null)
+  const [activeProjectName, setActiveProjectNameState] = useState<string | null>(() => {
+    try { return localStorage.getItem(ACTIVE_PROJECT_KEY) }
+    catch { return null }
+  })
   const [dragging, setDragging] = useState(false)
   const [restorable, setRestorable] = useState<ProjectMeta | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [manualSaveStatus, setManualSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [inspectorOpen, setInspectorOpen] = useState(true)
+  const [mediaPanelOpen, setMediaPanelOpen] = useState(() => window.innerWidth > 1000)
   // Resizable panels (desktop).
   const [inspectorW, setInspectorW] = useState(320)
   const [timelineH, setTimelineH] = useState<number | null>(null)
@@ -63,9 +82,34 @@ export default function App() {
     })
   }
   const appStyle = {
-    ['--inspector-w' as string]: `${inspectorW}px`,
+    ['--inspector-w' as string]: inspectorOpen ? `${inspectorW}px` : '0px',
+    ['--media-panel-w' as string]: mediaPanelOpen ? '260px' : '0px',
     ...(timelineH != null ? { ['--tl-h' as string]: `${timelineH}px` } : {}),
   } as React.CSSProperties
+
+  const setActiveProjectName = (name: string | null) => {
+    setActiveProjectNameState(name)
+    try {
+      if (name) localStorage.setItem(ACTIVE_PROJECT_KEY, name)
+      else localStorage.removeItem(ACTIVE_PROJECT_KEY)
+    } catch { /* storage can be unavailable in private browsing */ }
+  }
+
+  const saveCurrentProject = async () => {
+    if (!activeProjectName) {
+      setProjectDialogMode('saveAs')
+      return
+    }
+    setManualSaveStatus('saving')
+    try {
+      await saveProject(activeProjectName, snapshotProject())
+      setManualSaveStatus('saved')
+      window.setTimeout(() => setManualSaveStatus('idle'), 1800)
+    } catch (error) {
+      setManualSaveStatus('error')
+      alert('프로젝트 저장 실패: ' + (error as Error).message)
+    }
+  }
 
   // Offer to restore the last auto-saved session on startup.
   useEffect(() => { autosaveMeta().then(setRestorable).catch(() => {}) }, [])
@@ -83,7 +127,7 @@ export default function App() {
       const strip = (arr: { file?: File; src?: string }[]) => arr.map(({ file: _f, src: _s, ...r }) => { void _f; void _s; return r })
       return JSON.stringify({
         c: strip(s.clips), o: strip(s.overlays), a: strip(s.audios), b: strip(s.backgrounds),
-        t: s.texts, m: s.markers, ar: s.aspectRatio, es: s.exportSettings,
+        t: s.texts, m: s.markers, g: s.groups, ar: s.aspectRatio, es: s.exportSettings,
       })
     }
     const saveNow = async () => {
@@ -103,6 +147,7 @@ export default function App() {
         await saveProject(AUTOSAVE_KEY, {
           clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
           markers: s.markers,
+          groups: s.groups,
           aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
         })
         lastSig.current = sig
@@ -134,6 +179,10 @@ export default function App() {
     const onVisibility = () => { if (document.visibilityState === 'hidden') void saveNow() }
     const onPageHide = () => { void saveNow() }
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      // A desktop window must close immediately like a normal macOS window.
+      // The frequent native autosave remains the recovery path there; browser
+      // tabs still receive the accidental-navigation warning while dirty.
+      if (window.simplecutDesktop) return
       if (!dirty && !inFlight) return
       event.preventDefault()
       event.returnValue = ''
@@ -179,6 +228,10 @@ export default function App() {
       } else if ((e.metaKey || e.ctrlKey) && (e.key === 'd' || e.key === 'D')) {
         e.preventDefault()
         duplicateSelected()
+      } else if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault()
+        if (e.shiftKey) setProjectDialogMode('saveAs')
+        else void saveCurrentProject()
       } else if (e.code === 'Space') {
         e.preventDefault()
         if (hasContent) setPlaying(!isPlaying)
@@ -189,9 +242,19 @@ export default function App() {
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         deleteSelected()
       } else if (e.key === 'ArrowLeft') {
-        setPlayhead(Math.max(0, playhead - 0.1))
+        e.preventDefault()
+        const step = e.altKey ? 1 / 30 : e.shiftKey ? 1 : 0.1
+        setPlayhead(Math.max(0, playhead - step))
       } else if (e.key === 'ArrowRight') {
-        setPlayhead(Math.min(total, playhead + 0.1))
+        e.preventDefault()
+        const step = e.altKey ? 1 / 30 : e.shiftKey ? 1 : 0.1
+        setPlayhead(Math.min(total, playhead + step))
+      } else if (e.key === 'Home') {
+        e.preventDefault()
+        setPlayhead(0)
+      } else if (e.key === 'End') {
+        e.preventDefault()
+        setPlayhead(total)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -233,13 +296,17 @@ export default function App() {
         <div className="topbar__brand">
           <span className="topbar__logo"><Icon name="brand" /></span>
           <span className="topbar__name">SimpleCut</span>
+          <span className="topbar__project" title={activeProjectName || '저장되지 않은 프로젝트'}>{activeProjectName || '저장되지 않음'}</span>
         </div>
         <div className="topbar__actions">
           <span className={`save-status save-status--${saveStatus}`} role="status">
-            {saveStatus === 'saving' ? '저장 중…' : saveStatus === 'saved' ? '저장됨' : saveStatus === 'error' ? '저장 실패' : ''}
+            {manualSaveStatus === 'saving' ? '프로젝트 저장 중…' : manualSaveStatus === 'saved' ? '프로젝트 저장됨' : manualSaveStatus === 'error' ? '저장 실패' : saveStatus === 'saving' ? '자동 저장 중…' : saveStatus === 'saved' ? '자동 저장됨' : saveStatus === 'error' ? '자동 저장 실패' : ''}
           </span>
-          <button className="btn topbar__add" onClick={() => fileRef.current?.click()}><Icon name="plus" /><span className="topbar__add-label"> 파일 추가</span></button>
-          <button className="iconbtn iconbtn--sm" onClick={() => setShowProject(true)} title="프로젝트 저장·불러오기" aria-label="프로젝트"><Icon name="folder" /></button>
+          <button className="btn topbar__add" onClick={() => fileRef.current?.click()} aria-label="파일 추가"><Icon name="plus" /><span className="topbar__add-label"> 파일 추가</span></button>
+          <button className={`iconbtn iconbtn--sm${mediaPanelOpen ? ' iconbtn--on' : ''}`} onClick={() => setMediaPanelOpen((open) => !open)} title="왼쪽 미디어 패널 열기·닫기" aria-label="왼쪽 미디어 패널 열기·닫기"><Icon name="library" /></button>
+          <button className="iconbtn iconbtn--sm" onClick={() => void saveCurrentProject()} title={activeProjectName ? `${activeProjectName} 저장 (⌘S)` : '프로젝트 저장'} aria-label="프로젝트 저장"><Icon name="save" /></button>
+          <button className="iconbtn iconbtn--sm" onClick={() => setProjectDialogMode('manage')} title="프로젝트 열기·관리" aria-label="프로젝트 열기·관리"><Icon name="folder" /></button>
+          <button className={`iconbtn iconbtn--sm${inspectorOpen ? ' iconbtn--on' : ''}`} onClick={() => setInspectorOpen((open) => !open)} title="오른쪽 편집 패널 열기·닫기" aria-label="오른쪽 편집 패널 열기·닫기"><Icon name="panel" /></button>
           <button className="btn btn--primary" onClick={() => setShowExport(true)} disabled={!hasClips}>
             내보내기
           </button>
@@ -252,7 +319,13 @@ export default function App() {
           onChange={(e) => { if (e.target.files) addAudioFiles(e.target.files); e.target.value = '' }} />
       </header>
 
-      <main className="stage">
+      <main className={`stage${inspectorOpen ? '' : ' stage--inspector-hidden'}${mediaPanelOpen ? '' : ' stage--media-hidden'}`}>
+        {mediaPanelOpen && <MediaPanel
+          onClose={() => setMediaPanelOpen(false)}
+          onPickFiles={() => fileRef.current?.click()}
+          onPickOverlay={() => overlayRef.current?.click()}
+          onPickAudio={() => audioRef.current?.click()}
+        />}
         <section className="stage__preview">
           <Preview />
           <div className="transport">
@@ -287,15 +360,24 @@ export default function App() {
             <button className="btn btn--sm btn--danger" onClick={deleteSelected} disabled={!selection} title="단축키: Delete"><Icon name="trash" />삭제</button>
           </div>
         </section>
-        <Inspector />
-        <div className="resizer resizer--v" onPointerDown={startResize('w')} title="패널 너비 조절" />
+        {inspectorOpen && <Inspector />}
+        {inspectorOpen && <div className="resizer resizer--v" onPointerDown={startResize('w')} title="패널 너비 조절" />}
       </main>
 
       <div className="resizer resizer--h" onPointerDown={startResize('h')} title="타임라인 높이 조절" />
       <Timeline />
 
       {showExport && <ExportDialog onClose={() => setShowExport(false)} />}
-      {showProject && <ProjectDialog onClose={() => setShowProject(false)} />}
+      {projectDialogMode && <ProjectDialog
+        onClose={() => setProjectDialogMode(null)}
+        activeName={activeProjectName}
+        initialMode={projectDialogMode}
+        onActiveProjectChange={setActiveProjectName}
+        onSaved={() => {
+          setManualSaveStatus('saved')
+          window.setTimeout(() => setManualSaveStatus('idle'), 1800)
+        }}
+      />}
 
       {restorable && !hasContent && (
         <div className="restore-banner">

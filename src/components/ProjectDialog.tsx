@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useEditor } from '../store'
 import {
   listProjects, saveProject, loadProject, deleteProject,
-  projectToFileBlob, fileBlobToProject,
+  projectToFileBlob, fileBlobToProjectWithMeta,
 } from '../utils/project'
 import type { ProjectMeta, ProjectState } from '../utils/project'
 import { saveBlob } from '../utils/io'
@@ -13,35 +13,65 @@ function snapshot(): ProjectState {
   return {
     clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
     markers: s.markers,
+    groups: s.groups,
     aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
   }
 }
 
-export default function ProjectDialog({ onClose }: { onClose: () => void }) {
+interface Props {
+  onClose: () => void
+  activeName: string | null
+  initialMode?: 'manage' | 'saveAs'
+  onActiveProjectChange: (name: string | null) => void
+  onSaved?: (name: string) => void
+}
+
+export default function ProjectDialog({ onClose, activeName, initialMode = 'manage', onActiveProjectChange, onSaved }: Props) {
   const replaceProject = useEditor((s) => s.replaceProject)
   const [projects, setProjects] = useState<ProjectMeta[]>([])
-  const [name, setName] = useState('내 프로젝트')
+  const [name, setName] = useState(activeName ? `${activeName} 복사본` : '내 프로젝트')
+  const [saveAs, setSaveAs] = useState(initialMode === 'saveAs' || !activeName)
   const [busy, setBusy] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   const refresh = () => listProjects().then(setProjects).catch(() => {})
   useEffect(() => { refresh() }, [])
 
-  const doSave = async () => {
+  const persist = async (projectName: string) => {
     setBusy('저장 중…')
-    try { await saveProject(name.trim() || '무제', snapshot()); await refresh() }
+    try {
+      await saveProject(projectName, snapshot())
+      onActiveProjectChange(projectName)
+      onSaved?.(projectName)
+      await refresh()
+      setSaveAs(false)
+    }
     catch (error) { alert('저장 실패: ' + (error as Error).message) }
     finally { setBusy('') }
   }
+  const doSave = async () => {
+    if (!activeName) { setSaveAs(true); return }
+    await persist(activeName)
+  }
+  const doSaveAs = async () => {
+    const projectName = name.trim() || '무제'
+    const exists = projects.some((project) => project.name === projectName)
+    if (exists && projectName !== activeName && !confirm(`'${projectName}' 프로젝트를 덮어쓸까요?`)) return
+    await persist(projectName)
+  }
   const doLoad = async (n: string) => {
     setBusy('불러오는 중…')
-    try { const p = await loadProject(n); if (p) { replaceProject(p); onClose() } }
+    try { const p = await loadProject(n); if (p) { replaceProject(p); onActiveProjectChange(n); onClose() } }
     catch (error) { alert('복원 실패: ' + (error as Error).message) }
     finally { setBusy('') }
   }
   const doDelete = async (n: string) => {
     if (!confirm(`'${n}' 프로젝트를 삭제할까요?`)) return
-    try { await deleteProject(n); await refresh() }
+    try {
+      await deleteProject(n)
+      if (activeName === n) onActiveProjectChange(null)
+      await refresh()
+    }
     catch (error) { alert('삭제 실패: ' + (error as Error).message) }
   }
   const doExportFile = async () => {
@@ -70,7 +100,12 @@ export default function ProjectDialog({ onClose }: { onClose: () => void }) {
     e.target.value = ''
     if (!f) return
     setBusy('가져오는 중…')
-    try { const p = await fileBlobToProject(f); replaceProject(p); onClose() }
+    try {
+      const imported = await fileBlobToProjectWithMeta(f)
+      replaceProject(imported.project)
+      onActiveProjectChange(imported.name)
+      onClose()
+    }
     catch (err) { alert('가져오기 실패: ' + (err as Error).message) }
     finally { setBusy('') }
   }
@@ -83,12 +118,27 @@ export default function ProjectDialog({ onClose }: { onClose: () => void }) {
           {!busy && <button className="iconbtn" onClick={onClose} aria-label="닫기"><Icon name="close" /></button>}
         </div>
 
-        <div className="modal__field">
-          <span>현재 프로젝트 저장</span>
-          <div className="filename">
-            <input className="filename__input" value={name} onChange={(e) => setName(e.target.value)} />
-            <button className="btn btn--primary" onClick={doSave} disabled={!!busy}><Icon name="folder" />저장</button>
+        <div className="modal__field project-save">
+          <span>현재 프로젝트</span>
+          <div className="project-save__current">
+            <div>
+              <b>{activeName || '아직 이름 없음'}</b>
+              <small>{activeName ? '저장을 누르면 이 프로젝트에 덮어씁니다.' : '처음 저장할 이름을 정해주세요.'}</small>
+            </div>
+            {activeName && <button className="btn btn--primary" onClick={doSave} disabled={!!busy}><Icon name="save" />저장</button>}
           </div>
+          {!saveAs && activeName && (
+            <button className="btn btn--sm project-save__as" onClick={() => { setName(`${activeName} 복사본`); setSaveAs(true) }} disabled={!!busy}>
+              다른 이름으로 저장…
+            </button>
+          )}
+          {saveAs && (
+            <div className="filename">
+              <input className="filename__input" value={name} onChange={(e) => setName(e.target.value)} autoFocus aria-label="새 프로젝트 이름" />
+              <button className="btn btn--primary" onClick={doSaveAs} disabled={!!busy || !name.trim()}><Icon name="save" />{activeName ? '새로 저장' : '저장'}</button>
+              {activeName && <button className="btn btn--sm" onClick={() => setSaveAs(false)} disabled={!!busy}>취소</button>}
+            </div>
+          )}
         </div>
 
         <div className="modal__field">
@@ -100,7 +150,7 @@ export default function ProjectDialog({ onClose }: { onClose: () => void }) {
               {projects.map((p) => (
                 <div className="projrow" key={p.name}>
                   <div className="projrow__info">
-                    <b>{p.name}</b>
+                    <b>{p.name}{p.name === activeName && <span className="projrow__current">현재 열림</span>}</b>
                     <small>{new Date(p.savedAt).toLocaleString()} · {(p.size / 1024 / 1024).toFixed(1)}MB</small>
                   </div>
                   <button className="btn btn--sm" onClick={() => doLoad(p.name)} disabled={!!busy}>열기</button>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Clip, Overlay, AudioClip } from '../types'
-import { audioLength, clipTimelineDuration, fadeLevel, overlayLength, packLanes, parseClock } from './time'
+import { audioLength, clipTimelineDuration, exactDurationPatch, fadeLevel, overlayLength, packLanes, parseClock, repeatCountFor } from './time'
 
 const clip = { trimStart: 2, trimEnd: 12, speed: 2, repeat: 3 } as Clip
 const overlay = { trimStart: 1, trimEnd: 5, speed: 0.5, repeat: 2 } as Overlay
@@ -11,6 +11,12 @@ describe('timeline duration helpers', () => {
     expect(clipTimelineDuration(clip)).toBe(15)
     expect(overlayLength(overlay)).toBe(16)
     expect(audioLength(audio)).toBe(20)
+  })
+
+  it('cuts the final repeat to an exact requested timeline length', () => {
+    expect(exactDurationPatch(43, 100)).toEqual({ repeat: 3, timelineDuration: 100 })
+    expect(repeatCountFor(43, 100)).toBe(3)
+    expect(audioLength({ ...audio, trimStart: 0, trimEnd: 43, repeat: 3, timelineDuration: 100 })).toBe(100)
   })
 
   it('packs only overlapping items into separate lanes', () => {

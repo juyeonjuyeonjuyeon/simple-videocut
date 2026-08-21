@@ -7,17 +7,35 @@ export function clipBaseLength(clip: Clip): number {
 
 /** Length this clip occupies on the timeline (trim + speed × repeat). */
 export function clipTimelineDuration(clip: Clip): number {
-  return clipBaseLength(clip) * Math.max(1, clip.repeat)
+  return exactOrRepeated(clipBaseLength(clip), clip.repeat, clip.timelineDuration)
 }
 
 /** Timeline length of an overlay (trim + speed × repeat). */
 export function overlayLength(o: Overlay): number {
-  return ((o.trimEnd - o.trimStart) / o.speed) * Math.max(1, o.repeat)
+  return exactOrRepeated((o.trimEnd - o.trimStart) / o.speed, o.repeat, o.timelineDuration)
 }
 
 /** Timeline length of an audio clip (trim × repeat). */
 export function audioLength(a: AudioClip): number {
-  return (a.trimEnd - a.trimStart) * Math.max(1, a.repeat)
+  return exactOrRepeated(a.trimEnd - a.trimStart, a.repeat, a.timelineDuration)
+}
+
+function exactOrRepeated(baseLength: number, repeat: number, exact?: number): number {
+  const repeated = baseLength * Math.max(1, repeat)
+  if (!Number.isFinite(exact) || exact == null || exact <= 0) return repeated
+  return Math.min(exact, repeated)
+}
+
+/** Number of source cycles required to cover an exact timeline length. */
+export function repeatCountFor(baseLength: number, timelineLength: number): number {
+  if (!Number.isFinite(baseLength) || baseLength <= 0) return 1
+  return Math.max(1, Math.min(99, Math.ceil(timelineLength / baseLength - 1e-9)))
+}
+
+/** Patch used by duration controls so the last repeated cycle ends exactly. */
+export function exactDurationPatch(baseLength: number, timelineLength: number): { repeat: number; timelineDuration: number } {
+  const safe = Math.max(0.1, timelineLength)
+  return { repeat: repeatCountFor(baseLength, safe), timelineDuration: safe }
 }
 
 /** Linear non-destructive fade envelope for a local timeline position. */
@@ -102,7 +120,7 @@ export function resolveTimelineTime(
       const base = clipBaseLength(clip)
       const into = Math.max(0, Math.min(time - acc, dur))
       // Wrap within a single playthrough when the clip repeats.
-      const localInto = clip.repeat > 1 && base > 0 ? into % base : into
+      const localInto = dur > base && base > 0 ? into % base : into
       const localTime = clip.trimStart + localInto * clip.speed
       return { index: i, clip, localTime }
     }
