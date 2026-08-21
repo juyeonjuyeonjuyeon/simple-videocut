@@ -45,9 +45,24 @@ export interface Transform {
   crop: Crop
 }
 
+/** A reusable source kept in the project media bin independently of timeline usage. */
+export interface MediaAsset {
+  id: string
+  kind: 'video' | 'image' | 'audio'
+  name: string
+  src: string
+  file: File
+  sourceSize: number
+  nativeMediaId?: string
+  duration: number
+  hasAudio: boolean
+}
+
 /** A clip on the MAIN track: video or image, packed sequentially, full-frame. */
 export interface Clip {
   id: string
+  /** Source in the project media bin, when available. */
+  assetId?: string
   kind: VisualKind
   name: string
   /** Object URL for the source File. */
@@ -87,6 +102,7 @@ export interface Clip {
 /** A picture-in-picture overlay (video or image) floating over the main track. */
 export interface Overlay {
   id: string
+  assetId?: string
   kind: VisualKind
   name: string
   src: string
@@ -144,6 +160,7 @@ export interface Background extends Clip {
 /** A music / audio clip mixed into the timeline. */
 export interface AudioClip {
   id: string
+  assetId?: string
   name: string
   src: string
   file: File

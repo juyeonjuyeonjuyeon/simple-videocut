@@ -1,4 +1,4 @@
-import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, ExportSettings, TimelineMarker, TimelineGroup, VisualLayerRef } from '../types'
+import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, ExportSettings, TimelineMarker, TimelineGroup, VisualLayerRef, MediaAsset } from '../types'
 
 const DB_NAME = 'simplecut-db'
 const STORE = 'projects'
@@ -15,6 +15,7 @@ interface MediaBlob {
 
 /** The editable slice of state that a project captures. */
 export interface ProjectState {
+  mediaLibrary?: MediaAsset[]
   clips: Clip[]
   overlays: Overlay[]
   audios: AudioClip[]
@@ -38,6 +39,7 @@ interface SerializedProject {
   audios: object[]
   backgrounds: object[]
   texts: TextOverlay[]
+  mediaLibrary?: object[]
   markers?: TimelineMarker[]
   groups?: TimelineGroup[]
   visualOrder?: VisualLayerRef[]
@@ -90,6 +92,7 @@ function serialize(name: string, s: ProjectState): SerializedProject {
     audios: s.audios.map((a) => strip(a as unknown as WithMedia)),
     backgrounds: s.backgrounds.map((b) => strip(b as unknown as WithMedia)),
     texts: s.texts,
+    mediaLibrary: (s.mediaLibrary ?? []).map((asset) => strip(asset as unknown as WithMedia)),
     markers: s.markers ?? [],
     groups: s.groups ?? [],
     visualOrder: s.visualOrder ?? [],
@@ -140,6 +143,7 @@ function deserialize(p: SerializedProject): ProjectState {
     audios: p.audios.map((a) => restore<AudioClip>(a)),
     backgrounds: p.backgrounds.map((b) => restore<Background>(b)),
     texts: p.texts,
+    mediaLibrary: (p.mediaLibrary ?? []).map((asset) => restore<MediaAsset>(asset)),
     markers: p.markers ?? [],
     groups: p.groups ?? [],
     visualOrder: p.visualOrder ?? [],
@@ -200,6 +204,7 @@ async function verifyProjectMedia(p: ProjectState): Promise<ProjectState> {
   for (const o of p.overlays) await verify(o, o.kind === 'image' ? 'image' : 'video')
   for (const b of p.backgrounds) if (b.kind !== 'color') await verify(b, b.kind === 'image' ? 'image' : 'video')
   for (const a of p.audios) await verify(a, 'audio')
+  for (const asset of p.mediaLibrary ?? []) await verify(asset, asset.kind)
   return p
 }
 
@@ -373,13 +378,13 @@ export async function autosaveMeta(): Promise<ProjectMeta | null> {
     for (const candidate of await bridge.projectLoad(AUTOSAVE_KEY)) {
       try {
         assertStoredProject(candidate)
-        if (!candidate.clips.length && !candidate.overlays.length && !candidate.audios.length && !candidate.backgrounds.length && !candidate.texts.length) continue
+        if (!candidate.clips.length && !candidate.overlays.length && !candidate.audios.length && !candidate.backgrounds.length && !candidate.texts.length && !(candidate.mediaLibrary?.length)) continue
         return { name: candidate.name, savedAt: candidate.savedAt, size: candidate.media.reduce((a, m) => a + mediaSize(m), 0) }
       } catch { /* try an older atomic autosave generation */ }
     }
   }
   const p = await getWebProject(AUTOSAVE_KEY)
-  if (!p || (!p.clips.length && !p.overlays.length && !p.audios.length && !p.backgrounds.length && !p.texts.length)) return null
+  if (!p || (!p.clips.length && !p.overlays.length && !p.audios.length && !p.backgrounds.length && !p.texts.length && !(p.mediaLibrary?.length))) return null
   assertStoredProject(p)
   return { name: p.name, savedAt: p.savedAt, size: p.media.reduce((a, m) => a + mediaSize(m), 0) }
 }
@@ -468,6 +473,15 @@ const validatePositionKeyframes = (value: unknown, length: number, label: string
     finite(frame.y, 0, 1, `${label} 키프레임 세로 위치`)
     if (!['linear', 'ease-in-out'].includes(String(frame.easing))) throw new Error(`${label} 키프레임 움직임이 잘못되었습니다.`)
   }
+}
+const validateLibraryAsset = (value: unknown) => {
+  const asset = record(value, '미디어 보관함')
+  text(asset.id, 100, '미디어 보관함 ID')
+  text(asset.name, PROJECT_LIMITS.maxNameLength, '미디어 보관함 이름')
+  if (!['video', 'image', 'audio'].includes(String(asset.kind))) throw new Error('미디어 보관함 종류가 잘못되었습니다.')
+  finite(asset.duration, 0.01, PROJECT_LIMITS.maxDurationSeconds, '미디어 보관함 길이')
+  bool(asset.hasAudio, '미디어 보관함 오디오 정보')
+  text(asset.mediaId, 100, '미디어 보관함 연결')
 }
 const validateItem = (value: unknown, track: string) => {
   const item = record(value, track)
@@ -582,6 +596,10 @@ function assertBaseProject(value: unknown): Record<string, unknown> {
     if (!Array.isArray(p[key])) throw new Error(`프로젝트의 ${key} 항목이 잘못되었습니다.`)
     if ((p[key] as unknown[]).length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error(`프로젝트의 ${key} 항목 수가 너무 많습니다.`)
   }
+  if (p.mediaLibrary !== undefined) {
+    if (!Array.isArray(p.mediaLibrary) || p.mediaLibrary.length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error('프로젝트의 미디어 보관함 항목이 잘못되었습니다.')
+    for (const asset of p.mediaLibrary) validateLibraryAsset(asset)
+  }
   if (p.markers !== undefined) {
     if (!Array.isArray(p.markers) || p.markers.length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error('프로젝트의 markers 항목이 잘못되었습니다.')
     for (const marker of p.markers) validateMarker(marker)
@@ -635,6 +653,10 @@ function assertMediaReferences(p: Record<string, unknown>, ids: Set<string>): vo
       if (item.kind === 'color') continue
       if (typeof item.mediaId !== 'string' || !ids.has(item.mediaId)) throw new Error('프로젝트의 미디어 연결 정보가 잘못되었습니다.')
     }
+  }
+  for (const value of (p.mediaLibrary ?? []) as unknown[]) {
+    const asset = value as Record<string, unknown>
+    if (typeof asset.mediaId !== 'string' || !ids.has(asset.mediaId)) throw new Error('프로젝트의 미디어 보관함 연결 정보가 잘못되었습니다.')
   }
 }
 

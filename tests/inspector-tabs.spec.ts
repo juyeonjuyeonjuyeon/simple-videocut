@@ -21,7 +21,7 @@ test('inspector shows focused tabs for media and text selections', async ({ page
   await tabs.getByRole('tab', { name: '변형' }).click()
   await expect(page.getByText('가로 위치', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '자르기' })).toBeVisible()
-  await expect(page.getByRole('textbox', { name: '이름' })).toHaveCount(0)
+  await expect(page.locator('.inspector').getByRole('textbox', { name: '이름', exact: true })).toHaveCount(0)
 
   await page.getByRole('button', { name: '텍스트', exact: true }).click()
   await expect(tabs.getByRole('tab')).toHaveText(['내용', '스타일', '배치', '시간'])

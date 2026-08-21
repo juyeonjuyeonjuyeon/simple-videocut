@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Clip, Overlay, TextOverlay } from './types'
+import type { Clip, MediaAsset, Overlay, TextOverlay } from './types'
 import type { ProjectState } from './utils/project'
 import { useEditor } from './store'
 import { projectDuration } from './utils/time'
@@ -17,7 +17,7 @@ const clip = (repeat = 1): Clip => ({
 describe('timeline splitting', () => {
   beforeEach(() => {
     useEditor.setState({
-      clips: [clip(3)], overlays: [], audios: [], backgrounds: [], texts: [], markers: [], groups: [], selectedItems: [],
+      mediaLibrary: [], clips: [clip(3)], overlays: [], audios: [], backgrounds: [], texts: [], markers: [], groups: [], selectedItems: [],
       playhead: 2.5, selection: { type: 'clip', id: 'clip-1' },
       isPlaying: false,
     })
@@ -131,5 +131,24 @@ describe('timeline splitting', () => {
       { type: 'text', id: text.id },
       { type: 'overlay', id: overlay.id },
     ])
+  })
+
+  it('reuses one media-bin source on multiple tracks without deleting timeline instances', () => {
+    const file = new File(['image'], 'still.png', { type: 'image/png' })
+    const asset: MediaAsset = {
+      id: 'asset-1', kind: 'image', name: file.name, src: 'blob:still', file,
+      sourceSize: file.size, duration: 5, hasAudio: false,
+    }
+    useEditor.setState({ mediaLibrary: [asset], clips: [], overlays: [], visualOrder: [], selection: null })
+
+    useEditor.getState().addMediaAssetToTimeline(asset.id, 'main')
+    useEditor.getState().addMediaAssetToTimeline(asset.id, 'overlay')
+
+    expect(useEditor.getState().clips[0].assetId).toBe(asset.id)
+    expect(useEditor.getState().overlays[0].assetId).toBe(asset.id)
+    useEditor.getState().removeMediaAsset(asset.id)
+    expect(useEditor.getState().mediaLibrary).toHaveLength(0)
+    expect(useEditor.getState().clips).toHaveLength(1)
+    expect(useEditor.getState().overlays).toHaveLength(1)
   })
 })

@@ -19,6 +19,7 @@ const ACTIVE_PROJECT_KEY = 'simplecut-active-project-name'
 function snapshotProject() {
   const s = useEditor.getState()
   return {
+    mediaLibrary: s.mediaLibrary,
     clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
     markers: s.markers, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
     groups: s.groups,
@@ -27,6 +28,7 @@ function snapshotProject() {
 }
 
 export default function App() {
+  const mediaLibrary = useEditor((s) => s.mediaLibrary)
   const clips = useEditor((s) => s.clips)
   const overlays = useEditor((s) => s.overlays)
   const audios = useEditor((s) => s.audios)
@@ -35,6 +37,7 @@ export default function App() {
   const playhead = useEditor((s) => s.playhead)
   const isPlaying = useEditor((s) => s.isPlaying)
   const loop = useEditor((s) => s.loop)
+  const importMediaFiles = useEditor((s) => s.importMediaFiles)
   const addFiles = useEditor((s) => s.addFiles)
   const addOverlayFiles = useEditor((s) => s.addOverlayFiles)
   const addAudioFiles = useEditor((s) => s.addAudioFiles)
@@ -57,6 +60,7 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null)
   const overlayRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLInputElement>(null)
+  const libraryRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
   const [showExport, setShowExport] = useState(false)
   const [showProjectHome, setShowProjectHome] = useState(false)
@@ -100,7 +104,7 @@ export default function App() {
   }
   const appStyle = {
     ['--inspector-w' as string]: inspectorOpen ? `${inspectorW}px` : '0px',
-    ['--media-panel-w' as string]: mediaPanelOpen ? '260px' : '0px',
+    ['--media-panel-w' as string]: mediaPanelOpen ? '300px' : '0px',
     ...(timelineH != null ? { ['--tl-h' as string]: `${timelineH}px` } : {}),
   } as React.CSSProperties
 
@@ -155,13 +159,14 @@ export default function App() {
       const s = useEditor.getState()
       const strip = (arr: { file?: File; src?: string }[]) => arr.map(({ file: _f, src: _s, ...r }) => { void _f; void _s; return r })
       return JSON.stringify({
+        ml: strip(s.mediaLibrary),
         c: strip(s.clips), o: strip(s.overlays), a: strip(s.audios), b: strip(s.backgrounds),
         t: s.texts, m: s.markers, g: s.groups, vo: s.visualOrder, ar: s.aspectRatio, es: s.exportSettings,
       })
     }
     const saveNow = async () => {
       const s = useEditor.getState()
-      if (!(s.clips.length || s.overlays.length || s.audios.length || s.backgrounds.length || s.texts.length)) return
+      if (!(s.mediaLibrary.length || s.clips.length || s.overlays.length || s.audios.length || s.backgrounds.length || s.texts.length)) return
       const sig = signature()
       if (sig === lastSig.current) { dirty = false; return }
       if (inFlight) {
@@ -174,6 +179,7 @@ export default function App() {
       let succeeded = false
       try {
         await saveProject(AUTOSAVE_KEY, {
+          mediaLibrary: s.mediaLibrary,
           clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
           markers: s.markers,
           groups: s.groups,
@@ -248,7 +254,7 @@ export default function App() {
   const backgrounds = useEditor((s) => s.backgrounds)
   const total = projectDuration(clips, overlays, audios, texts, backgrounds)
   const hasClips = clips.length > 0
-  const hasContent = hasClips || overlays.length > 0 || audios.length > 0 || backgrounds.length > 0 || texts.length > 0
+  const hasContent = mediaLibrary.length > 0 || hasClips || overlays.length > 0 || audios.length > 0 || backgrounds.length > 0 || texts.length > 0
 
   const openProject = async (name: string) => {
     const project = await loadProject(name)
@@ -373,14 +379,14 @@ export default function App() {
           onChange={(e) => { if (e.target.files) addOverlayFiles(e.target.files); e.target.value = '' }} />
         <input ref={audioRef} type="file" accept={AUDIO_ACCEPT} multiple hidden
           onChange={(e) => { if (e.target.files) addAudioFiles(e.target.files); e.target.value = '' }} />
+        <input ref={libraryRef} type="file" accept={`video/*,image/*,${AUDIO_ACCEPT}`} multiple hidden
+          onChange={(e) => { if (e.target.files) void importMediaFiles(e.target.files); e.target.value = '' }} />
       </header>
 
       <main className={`stage${inspectorOpen ? '' : ' stage--inspector-hidden'}${mediaPanelOpen ? '' : ' stage--media-hidden'}`}>
         {mediaPanelOpen && <MediaPanel
           onClose={() => setMediaPanelOpen(false)}
-          onPickFiles={() => fileRef.current?.click()}
-          onPickOverlay={() => overlayRef.current?.click()}
-          onPickAudio={() => audioRef.current?.click()}
+          onImport={() => libraryRef.current?.click()}
         />}
         <section className="stage__preview">
           <Preview />

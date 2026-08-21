@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup, VisualLayerRef } from './types'
+import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup, VisualLayerRef, MediaAsset } from './types'
 import { NO_CROP, FONT_OPTIONS } from './types'
 import type { ProjectState } from './utils/project'
 import { assertMediaCapacity, probeVideo, probeImage, probeAudio, nextClipColor, isVideoFile, isImageFile, isAudioFile } from './utils/media'
@@ -18,6 +18,7 @@ const IMAGE_NOMINAL_MAX = 3600 // images can be stretched up to this length (s)
 const DEFAULT_IMAGE_DUR = 5
 
 interface EditorState {
+  mediaLibrary: MediaAsset[]
   clips: Clip[]
   overlays: Overlay[]
   audios: AudioClip[]
@@ -33,6 +34,12 @@ interface EditorState {
   isPlaying: boolean
   loop: boolean
   exportSettings: ExportSettings
+
+  // ---- reusable project media ----
+  importMediaFiles: (files: FileList | File[]) => Promise<void>
+  addMediaAssetToTimeline: (id: string, target?: 'auto' | 'main' | 'overlay') => void
+  renameMediaAsset: (id: string, name: string) => void
+  removeMediaAsset: (id: string) => void
 
   // ---- main track (video + image) ----
   addFiles: (files: FileList | File[]) => Promise<void>
@@ -100,8 +107,8 @@ interface EditorState {
   redo: () => void
 }
 
-type MediaState = Pick<EditorState, 'clips' | 'overlays' | 'audios' | 'backgrounds'>
-const mediaItems = (s: MediaState) => [...s.clips, ...s.overlays, ...s.audios, ...s.backgrounds]
+type MediaState = Pick<EditorState, 'mediaLibrary' | 'clips' | 'overlays' | 'audios' | 'backgrounds'>
+const mediaItems = (s: MediaState) => [...s.mediaLibrary, ...s.clips, ...s.overlays, ...s.audios, ...s.backgrounds]
 const existingMediaFiles = (s: MediaState) => {
   const seen = new Set<File | string>()
   return mediaItems(s).flatMap((item) => {
@@ -115,6 +122,25 @@ const existingMediaFiles = (s: MediaState) => {
 const allowMediaBatch = (files: File[], state: MediaState) => {
   try { assertMediaCapacity(files, existingMediaFiles(state)); return true }
   catch (error) { alert((error as Error).message); return false }
+}
+
+const sameSourceFile = (asset: MediaAsset, file: File) => asset.file === file || (
+  asset.name === file.name && asset.sourceSize === file.size && asset.file.lastModified === file.lastModified
+)
+
+const assetFromTimelineItem = (item: Clip | Overlay | AudioClip | Background): MediaAsset | null => {
+  if ('kind' in item && item.kind === 'color') return null
+  return {
+    id: item.assetId || uid(),
+    kind: 'kind' in item ? item.kind as 'video' | 'image' : 'audio',
+    name: item.name,
+    src: item.src,
+    file: item.file,
+    sourceSize: item.sourceSize,
+    nativeMediaId: item.nativeMediaId,
+    duration: 'kind' in item && item.kind === 'image' ? DEFAULT_IMAGE_DUR : item.duration,
+    hasAudio: 'hasAudio' in item ? item.hasAudio : true,
+  }
 }
 
 const clampTrim = (c: { trimStart: number; trimEnd: number; duration: number }) => {
@@ -153,6 +179,7 @@ const normalizeExactDuration = (
 const TRANSFORM_DEFAULTS = { rotate: 0 as const, flipH: false, flipV: false, crop: NO_CROP }
 
 export const useEditor = create<EditorState>((set, get) => ({
+  mediaLibrary: [],
   clips: [],
   overlays: [],
   audios: [],
@@ -172,6 +199,83 @@ export const useEditor = create<EditorState>((set, get) => ({
   canRedo: false,
   undo: () => undoEditor(),
   redo: () => redoEditor(),
+
+  // ---------- reusable project media ----------
+  importMediaFiles: async (files) => {
+    const list = Array.from(files).filter((file) => isVideoFile(file) || isImageFile(file) || isAudioFile(file))
+    const unique = list.filter((file, index) => !list.some((candidate, other) => other < index
+      && candidate.name === file.name && candidate.size === file.size && candidate.lastModified === file.lastModified))
+      .filter((file) => !get().mediaLibrary.some((asset) => sameSourceFile(asset, file)))
+    if (!unique.length || !allowMediaBatch(unique, get())) return
+    for (const file of unique) {
+      try {
+        const nativeMediaId = await registerNativeMedia(file)
+        let asset: MediaAsset
+        if (isImageFile(file)) {
+          const { src } = await probeImage(file)
+          asset = { id: uid(), kind: 'image', name: file.name, src, file, sourceSize: file.size, nativeMediaId, duration: DEFAULT_IMAGE_DUR, hasAudio: false }
+        } else if (isVideoFile(file)) {
+          const { duration, hasAudio, src } = await probeVideo(file)
+          asset = { id: uid(), kind: 'video', name: file.name, src, file, sourceSize: file.size, nativeMediaId, duration, hasAudio }
+        } else {
+          const { duration, src } = await probeAudio(file)
+          asset = { id: uid(), kind: 'audio', name: file.name, src, file, sourceSize: file.size, nativeMediaId, duration, hasAudio: true }
+        }
+        set((s) => s.mediaLibrary.some((existing) => sameSourceFile(existing, file))
+          ? s
+          : { mediaLibrary: [...s.mediaLibrary, asset] })
+      } catch (error) {
+        console.error(error)
+        alert((error as Error).message)
+      }
+    }
+  },
+
+  addMediaAssetToTimeline: (id, target = 'auto') => set((s) => {
+    const asset = s.mediaLibrary.find((candidate) => candidate.id === id)
+    if (!asset) return s
+    if (asset.kind === 'audio') {
+      const audio: AudioClip = {
+        id: uid(), assetId: asset.id, name: asset.name, src: asset.src, file: asset.file,
+        sourceSize: asset.sourceSize, nativeMediaId: asset.nativeMediaId,
+        duration: asset.duration, trimStart: 0, trimEnd: asset.duration,
+        volume: 1, muted: false, color: nextClipColor(), start: s.playhead, repeat: 1, fadeIn: 0, fadeOut: 0,
+      }
+      return { audios: [...s.audios, audio], selection: { type: 'audio', id: audio.id } }
+    }
+    if (target === 'overlay') {
+      const overlay: Overlay = {
+        id: uid(), assetId: asset.id, kind: asset.kind, name: asset.name, src: asset.src, file: asset.file,
+        sourceSize: asset.sourceSize, nativeMediaId: asset.nativeMediaId,
+        duration: asset.kind === 'image' ? IMAGE_NOMINAL_MAX : asset.duration,
+        trimStart: 0, trimEnd: asset.kind === 'image' ? DEFAULT_IMAGE_DUR : asset.duration,
+        hasAudio: asset.hasAudio, color: nextClipColor(), start: s.playhead,
+        x: 0.5, y: 0.5, scale: 0.4, scaleY: undefined, aspectLocked: true, angle: 0,
+        speed: 1, volume: 1, muted: false, ...TRANSFORM_DEFAULTS, repeat: 1,
+        opacity: 1, locked: false, hidden: false, fadeIn: 0, fadeOut: 0, positionKeyframes: [],
+      }
+      return {
+        overlays: [...s.overlays, overlay],
+        visualOrder: [...normalizeVisualOrder(s.overlays, s.texts, s.visualOrder), { type: 'overlay', id: overlay.id }],
+        selection: { type: 'overlay', id: overlay.id },
+      }
+    }
+    const clip: Clip = {
+      id: uid(), assetId: asset.id, kind: asset.kind, name: asset.name, src: asset.src, file: asset.file,
+      sourceSize: asset.sourceSize, nativeMediaId: asset.nativeMediaId,
+      duration: asset.kind === 'image' ? IMAGE_NOMINAL_MAX : asset.duration,
+      trimStart: 0, trimEnd: asset.kind === 'image' ? DEFAULT_IMAGE_DUR : asset.duration,
+      speed: 1, volume: 1, muted: false, hasAudio: asset.hasAudio, color: nextClipColor(),
+      ...TRANSFORM_DEFAULTS, repeat: 1, fadeIn: 0, fadeOut: 0,
+    }
+    return { clips: [...s.clips, clip], selection: { type: 'clip', id: clip.id } }
+  }),
+
+  renameMediaAsset: (id, name) => set((s) => ({
+    mediaLibrary: s.mediaLibrary.map((asset) => asset.id === id ? { ...asset, name: name.trim() || asset.name } : asset),
+  })),
+
+  removeMediaAsset: (id) => set((s) => ({ mediaLibrary: s.mediaLibrary.filter((asset) => asset.id !== id) })),
 
   // ---------- main track ----------
   addFiles: async (files) => {
@@ -199,7 +303,12 @@ export const useEditor = create<EditorState>((set, get) => ({
             ...TRANSFORM_DEFAULTS, repeat: 1, fadeIn: 0, fadeOut: 0,
           }
         }
+        const knownAsset = get().mediaLibrary.find((asset) => sameSourceFile(asset, file))
+        const asset = knownAsset || assetFromTimelineItem(clip)!
+        if (knownAsset && clip.src !== knownAsset.src) URL.revokeObjectURL(clip.src)
+        clip = { ...clip, assetId: asset.id, src: asset.src, file: asset.file, sourceSize: asset.sourceSize, nativeMediaId: asset.nativeMediaId }
         set((s) => ({
+          mediaLibrary: s.mediaLibrary.some((item) => item.id === asset.id) ? s.mediaLibrary : [...s.mediaLibrary, asset],
           clips: [...s.clips, clip],
           selection: s.selection ?? { type: 'clip', id: clip.id },
         }))
@@ -449,7 +558,12 @@ export const useEditor = create<EditorState>((set, get) => ({
           const { duration, hasAudio, src } = await probeVideo(file)
           ov = { ...base, kind: 'video', src, duration, trimStart: 0, trimEnd: duration, hasAudio }
         }
+        const knownAsset = get().mediaLibrary.find((asset) => sameSourceFile(asset, file))
+        const asset = knownAsset || assetFromTimelineItem(ov)!
+        if (knownAsset && ov.src !== knownAsset.src) URL.revokeObjectURL(ov.src)
+        ov = { ...ov, assetId: asset.id, src: asset.src, file: asset.file, sourceSize: asset.sourceSize, nativeMediaId: asset.nativeMediaId }
         set((s) => ({
+          mediaLibrary: s.mediaLibrary.some((item) => item.id === asset.id) ? s.mediaLibrary : [...s.mediaLibrary, asset],
           overlays: [...s.overlays, ov],
           visualOrder: [...normalizeVisualOrder(s.overlays, s.texts, s.visualOrder), { type: 'overlay', id: ov.id }],
           selection: { type: 'overlay', id: ov.id },
@@ -540,7 +654,14 @@ export const useEditor = create<EditorState>((set, get) => ({
           volume: 1, muted: false, color: nextClipColor(), start: get().playhead, repeat: 1,
           fadeIn: 0, fadeOut: 0,
         }
-        set((s) => ({ audios: [...s.audios, a], selection: { type: 'audio', id: a.id } }))
+        const knownAsset = get().mediaLibrary.find((asset) => sameSourceFile(asset, file))
+        const asset = knownAsset || assetFromTimelineItem(a)!
+        if (knownAsset && a.src !== knownAsset.src) URL.revokeObjectURL(a.src)
+        const audio = { ...a, assetId: asset.id, src: asset.src, file: asset.file, sourceSize: asset.sourceSize, nativeMediaId: asset.nativeMediaId }
+        set((s) => ({
+          mediaLibrary: s.mediaLibrary.some((item) => item.id === asset.id) ? s.mediaLibrary : [...s.mediaLibrary, asset],
+          audios: [...s.audios, audio], selection: { type: 'audio', id: audio.id },
+        }))
       } catch (e) {
         console.error(e)
         alert((e as Error).message)
@@ -822,15 +943,16 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   replaceProject: (p) => replaceEditorProject(p),
   resetProject: () => replaceEditorProject({
-    clips: [], overlays: [], audios: [], backgrounds: [], texts: [], markers: [], groups: [], visualOrder: [],
+    mediaLibrary: [], clips: [], overlays: [], audios: [], backgrounds: [], texts: [], markers: [], groups: [], visualOrder: [],
     aspectRatio: '16:9', exportSettings: { height: 720, format: 'mp4', filename: 'simplecut' },
   }),
 }))
 
 type EditorSnapshot = Pick<EditorState,
-  'clips' | 'overlays' | 'audios' | 'texts' | 'backgrounds' | 'markers' | 'groups' | 'visualOrder' | 'aspectRatio' | 'exportSettings'>
+  'mediaLibrary' | 'clips' | 'overlays' | 'audios' | 'texts' | 'backgrounds' | 'markers' | 'groups' | 'visualOrder' | 'aspectRatio' | 'exportSettings'>
 
 const takeSnapshot = (s: EditorState): EditorSnapshot => ({
+  mediaLibrary: s.mediaLibrary,
   clips: s.clips, overlays: s.overlays, audios: s.audios, texts: s.texts,
   backgrounds: s.backgrounds, markers: s.markers, groups: s.groups, visualOrder: s.visualOrder, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
 })
@@ -842,6 +964,7 @@ let lastHistoryKey = ''
 let lastHistoryAt = 0
 
 const historyKey = (a: EditorState, b: EditorState) => {
+  if (a.mediaLibrary !== b.mediaLibrary) return 'mediaLibrary'
   if (a.clips !== b.clips) return 'clips'
   if (a.overlays !== b.overlays) return 'overlays'
   if (a.audios !== b.audios) return 'audios'
@@ -866,6 +989,21 @@ const releaseSnapshotMedia = (candidate: EditorSnapshot) => {
 
 function replaceEditorProject(p: ProjectState) {
   const discarded = [takeSnapshot(useEditor.getState()), ...past, ...future]
+  const mediaLibrary: MediaAsset[] = []
+  const addAsset = (asset: MediaAsset | null) => {
+    if (!asset) return
+    const duplicate = mediaLibrary.some((candidate) => candidate.id === asset.id
+      || (!!candidate.nativeMediaId && candidate.nativeMediaId === asset.nativeMediaId)
+      || sameSourceFile(candidate, asset.file))
+    if (!duplicate) mediaLibrary.push(asset)
+  }
+  for (const asset of p.mediaLibrary ?? []) addAsset(asset)
+  if (p.mediaLibrary === undefined) {
+    for (const item of [...p.clips, ...p.overlays, ...p.audios, ...p.backgrounds]) addAsset(assetFromTimelineItem(item))
+  }
+  const linkedAssetId = (item: Clip | Overlay | AudioClip | Background) => item.assetId && mediaLibrary.some((asset) => asset.id === item.assetId)
+    ? item.assetId
+    : mediaLibrary.find((asset) => (!!item.nativeMediaId && asset.nativeMediaId === item.nativeMediaId) || sameSourceFile(asset, item.file))?.id
   past.length = 0
   future = []
   lastHistoryKey = ''
@@ -873,14 +1011,15 @@ function replaceEditorProject(p: ProjectState) {
   applyingHistory = true
   useEditor.setState({
     // Backfill fields added in newer versions so older saves stay valid.
+    mediaLibrary,
     overlays: p.overlays.map((o) => ({
-      ...o, angle: o.angle ?? 0, opacity: o.opacity ?? 1,
+      ...o, assetId: linkedAssetId(o), angle: o.angle ?? 0, opacity: o.opacity ?? 1,
       locked: o.locked ?? false, hidden: o.hidden ?? false,
       fadeIn: o.fadeIn ?? 0, fadeOut: o.fadeOut ?? 0, positionKeyframes: o.positionKeyframes ?? [],
     })),
-    audios: p.audios.map((a) => ({ ...a, fadeIn: a.fadeIn ?? 0, fadeOut: a.fadeOut ?? 0 })),
+    audios: p.audios.map((a) => ({ ...a, assetId: linkedAssetId(a), fadeIn: a.fadeIn ?? 0, fadeOut: a.fadeOut ?? 0 })),
     backgrounds: p.backgrounds.map((b) => ({
-      ...b, opacity: b.opacity ?? 1, locked: b.locked ?? false, hidden: b.hidden ?? false,
+      ...b, assetId: linkedAssetId(b), opacity: b.opacity ?? 1, locked: b.locked ?? false, hidden: b.hidden ?? false,
       fadeIn: b.fadeIn ?? 0, fadeOut: b.fadeOut ?? 0,
     })),
     texts: p.texts.map((t) => ({
@@ -888,7 +1027,7 @@ function replaceEditorProject(p: ProjectState) {
       locked: t.locked ?? false, hidden: t.hidden ?? false,
       fadeIn: t.fadeIn ?? 0, fadeOut: t.fadeOut ?? 0, positionKeyframes: t.positionKeyframes ?? [],
     })),
-    clips: p.clips.map((c) => ({ ...c, fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 })),
+    clips: p.clips.map((c) => ({ ...c, assetId: linkedAssetId(c), fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 })),
     markers: p.markers ?? [],
     groups: p.groups ?? [],
     visualOrder: normalizeVisualOrder(p.overlays, p.texts, p.visualOrder),
