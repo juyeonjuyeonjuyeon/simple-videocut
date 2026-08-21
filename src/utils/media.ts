@@ -26,11 +26,13 @@ export function assertMediaCapacity(incoming: FileSize[], existing: FileSize[]):
 }
 
 // Mobile file pickers may omit File.type, especially for Voice Memos.
-export const isVideoFile = (file: File) => file.type.startsWith('video/') || (!file.type && VIDEO_EXTENSIONS.has(extension(file)))
-export const isImageFile = (file: File) => file.type.startsWith('image/') || (!file.type && IMAGE_EXTENSIONS.has(extension(file)))
+export const isVideoFile = (file: File) => file.type.startsWith('video/') || VIDEO_EXTENSIONS.has(extension(file))
+export const isImageFile = (file: File) => file.type.startsWith('image/') || IMAGE_EXTENSIONS.has(extension(file))
 export const isAudioFile = (file: File) => file.type.startsWith('audio/') || AUDIO_EXTENSIONS.has(extension(file))
 
 export const AUDIO_ACCEPT = 'audio/*,.m4a,.aac,.caf,.wav,.mp3,.aif,.aiff,.flac,.ogg,.oga,.opus'
+export const VISUAL_ACCEPT = 'video/*,image/*,.mp4,.mov,.m4v,.webm,.ogv,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.avif'
+export const MEDIA_ACCEPT = `${VISUAL_ACCEPT},${AUDIO_ACCEPT}`
 
 /** Probe a video File for its duration and whether it carries an audio track. */
 export function probeVideo(file: File): Promise<{ duration: number; hasAudio: boolean; src: string }> {

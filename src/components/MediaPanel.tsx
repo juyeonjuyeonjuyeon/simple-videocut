@@ -139,7 +139,7 @@ export default function MediaPanel({ onClose, onImport }: Props) {
               </article>
             )
           })}
-          {!visibleAssets.length && <div className="media-panel__empty">{query || filter !== 'all' ? '조건에 맞는 파일이 없습니다.' : <>가져온 미디어가 없습니다.<br />위 버튼으로 영상·사진·음성을 보관하세요.</>}</div>}
+          {!visibleAssets.length && <div className="media-panel__empty">{query || filter !== 'all' ? '조건에 맞는 파일이 없습니다.' : <>가져온 미디어가 없습니다.<br />위 버튼을 누르거나 앱 화면에 파일을 끌어 놓으세요.</>}</div>}
         </div>
       ) : (
         <div className={`media-panel__list media-panel__list--${view}`}>

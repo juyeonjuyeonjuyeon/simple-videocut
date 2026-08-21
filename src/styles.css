@@ -907,6 +907,7 @@ button, input, textarea { font-family: inherit; }
   background: var(--bg-1);
   box-shadow: 0 10px 30px var(--popover-shadow);
 }
+.dropzone__inner > .ui-icon { width: 34px; height: 34px; margin: 0 auto; color: var(--accent); }
 .dropzone__inner span { font-size: 44px; display: block; }
 .dropzone__inner p { margin: 12px 0 4px; font-size: 18px; font-weight: 700; }
 .dropzone__inner small { color: var(--text-dim); }

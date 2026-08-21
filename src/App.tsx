@@ -9,7 +9,8 @@ import ProjectHome from './components/ProjectHome'
 import { projectDuration, formatTime, formatTimeFine } from './utils/time'
 import { saveProject, loadProject, listProjects, deleteProject, autosaveMeta, AUTOSAVE_KEY } from './utils/project'
 import type { ProjectMeta } from './utils/project'
-import { AUDIO_ACCEPT, isAudioFile, isImageFile, isVideoFile } from './utils/media'
+import { AUDIO_ACCEPT, MEDIA_ACCEPT, VISUAL_ACCEPT, isAudioFile, isImageFile, isVideoFile } from './utils/media'
+import { filesFromDrop, hasFilePayload } from './utils/drop'
 import Icon from './components/Icon'
 import { startPointerDrag } from './utils/pointer'
 import MediaPanel from './components/MediaPanel'
@@ -79,6 +80,7 @@ export default function App() {
   })
   const [activeProjectName, setActiveProjectNameState] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [dropImporting, setDropImporting] = useState(false)
   const [restorable, setRestorable] = useState<ProjectMeta | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [manualSaveStatus, setManualSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -355,14 +357,16 @@ export default function App() {
   })
 
   // ---- drag & drop files anywhere onto the app ----
-  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes('Files')
+  const hasFiles = (e: React.DragEvent) => hasFilePayload(e.dataTransfer)
   const onDragEnter = (e: React.DragEvent) => {
     if (!hasFiles(e)) return
     dragDepth.current++
     setDragging(true)
   }
   const onDragOver = (e: React.DragEvent) => {
-    if (hasFiles(e)) e.preventDefault()
+    if (!hasFiles(e)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
   }
   const onDragLeave = (e: React.DragEvent) => {
     if (!hasFiles(e)) return
@@ -375,12 +379,27 @@ export default function App() {
     if (main.length) await addFiles(main)
     if (audio.length) await addAudioFiles(audio)
   }
-  const onDrop = (e: React.DragEvent) => {
+  const onDrop = async (e: React.DragEvent) => {
     if (!hasFiles(e)) return
     e.preventDefault()
     dragDepth.current = 0
     setDragging(false)
-    void addCategorizedFiles(Array.from(e.dataTransfer.files))
+    setDropImporting(true)
+    try {
+      const files = await filesFromDrop(e.dataTransfer)
+      if (!files.length) {
+        alert('파일을 읽지 못했습니다. 사진이나 녹음을 파일 앱에 저장한 뒤 다시 끌어 놓아 주세요.')
+        return
+      }
+      const supported = files.filter((file) => isVideoFile(file) || isImageFile(file) || isAudioFile(file))
+      const unsupported = files.filter((file) => !supported.includes(file))
+      if (supported.length) await addCategorizedFiles(supported)
+      if (unsupported.length) {
+        alert(`지원하지 않는 파일 ${unsupported.length}개는 추가하지 않았습니다:\n${unsupported.map((file) => file.name).join('\n')}`)
+      }
+    } finally {
+      setDropImporting(false)
+    }
   }
 
   return (
@@ -404,13 +423,13 @@ export default function App() {
             내보내기
           </button>
         </div>
-        <input ref={fileRef} type="file" accept={`video/*,image/*,${AUDIO_ACCEPT}`} multiple hidden
+        <input ref={fileRef} type="file" accept={MEDIA_ACCEPT} multiple hidden
           onChange={(e) => { if (e.target.files) void addCategorizedFiles(Array.from(e.target.files)); e.target.value = '' }} />
-        <input ref={overlayRef} type="file" accept="video/*,image/*" multiple hidden
+        <input ref={overlayRef} type="file" accept={VISUAL_ACCEPT} multiple hidden
           onChange={(e) => { if (e.target.files) addOverlayFiles(e.target.files); e.target.value = '' }} />
         <input ref={audioRef} type="file" accept={AUDIO_ACCEPT} multiple hidden
           onChange={(e) => { if (e.target.files) addAudioFiles(e.target.files); e.target.value = '' }} />
-        <input ref={libraryRef} type="file" accept={`video/*,image/*,${AUDIO_ACCEPT}`} multiple hidden
+        <input ref={libraryRef} type="file" accept={MEDIA_ACCEPT} multiple hidden
           onChange={(e) => { if (e.target.files) void importMediaFiles(e.target.files); e.target.value = '' }} />
       </header>
 
@@ -494,12 +513,12 @@ export default function App() {
         </div>
       )}
 
-      {dragging && (
-        <div className="dropzone">
+      {(dragging || dropImporting) && (
+        <div className="dropzone" role="status" aria-live="polite">
           <div className="dropzone__inner">
             <Icon name="download" />
-            <p>파일을 놓아 추가</p>
-            <small>동영상·사진은 메인 트랙, 음악은 오디오 트랙으로 추가됩니다</small>
+            <p>{dropImporting ? '파일을 가져오는 중…' : '사진·영상·음성을 놓으세요'}</p>
+            <small>{dropImporting ? '파일을 안전하게 읽고 있습니다' : '사진 앱·음성 메모·파일 앱·Finder에서 바로 추가할 수 있습니다'}</small>
           </div>
         </div>
       )}
