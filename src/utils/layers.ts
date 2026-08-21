@@ -5,6 +5,7 @@ export const PREVIEW_Z = {
   main: 1_000,
   overlay: 2_000,
   text: 3_000,
+  caption: 3_500,
   editor: 4_000,
 } as const
 

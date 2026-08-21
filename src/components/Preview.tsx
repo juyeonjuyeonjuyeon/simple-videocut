@@ -22,6 +22,7 @@ import { resolveShapeStyle, shapePathData } from '../utils/shape'
 import { useLanguage } from '../i18n'
 import { resolveMainPlacement } from '../utils/main-placement'
 import BackgroundRemovedImage from './BackgroundRemovedImage'
+import { captionStyleForCue } from '../utils/captions'
 
 const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
 const DRIFT = 0.35 // seconds before we hard-seek a media element back in sync
@@ -125,6 +126,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
   const overlays = useEditor((s) => s.overlays)
   const audios = useEditor((s) => s.audios)
   const texts = useEditor((s) => s.texts)
+  const captionTracks = useEditor((s) => s.captionTracks)
   const backgrounds = useEditor((s) => s.backgrounds)
   const storedVisualOrder = useEditor((s) => s.visualOrder)
   const storedSelection = useEditor((s) => s.selection)
@@ -779,6 +781,9 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
   }
 
   const visibleTexts = texts.filter((t) => !t.hidden && playhead >= t.start && playhead <= t.end)
+  const visibleCaptions = captionTracks.flatMap((track) => track.hidden ? [] : track.cues
+    .filter((cue) => playhead >= cue.start && playhead <= cue.end)
+    .map((cue) => ({ track, cue, style: captionStyleForCue(track, cue) })))
   const hasContent = clips.length > 0 || overlays.length > 0 || audios.length > 0 || backgrounds.length > 0
 
   return (
@@ -988,6 +993,40 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
             </div>
           )
         })}
+
+        {visibleCaptions.map(({ track, cue, style }, index) => {
+          const fontPx = style.size * box.h
+          const selected = selection?.type === 'caption' && selection.id === cue.id
+          return (
+            <div key={`${track.id}:${cue.id}`} className={`preview__caption preview__caption--${style.align}${selected ? ' preview__caption--selected' : ''}`}
+              style={{
+                left: `${style.x * 100}%`,
+                top: `${style.y * 100}%`,
+                width: `${style.maxWidth * 100}%`,
+                fontFamily: style.font,
+                fontSize: `${fontPx}px`,
+                lineHeight: style.lineHeight,
+                color: hexToRgba(style.color, style.colorAlpha),
+                textAlign: style.align,
+                transform: 'translate(-50%, -50%)',
+                zIndex: PREVIEW_Z.caption + index,
+              }}
+              onPointerDown={(event) => { event.stopPropagation(); if (!presentation) select({ type: 'caption', id: cue.id }) }}>
+              <span style={{
+                background: style.box ? hexToRgba(style.boxColor, style.boxAlpha) : 'transparent',
+                padding: style.box ? `${style.boxPadding}em ${style.boxPadding * 1.7}em` : 0,
+                borderRadius: style.box ? `${style.boxRadius}em` : 0,
+                WebkitTextStrokeWidth: style.strokeWidth > 0 ? `${style.strokeWidth * fontPx}px` : undefined,
+                WebkitTextStrokeColor: style.strokeWidth > 0 ? style.strokeColor : undefined,
+                paintOrder: 'stroke fill',
+                textShadow: style.shadow ? `0 ${style.shadowDist * fontPx}px ${style.shadowBlur * fontPx}px ${style.shadowColor}` : 'none',
+                WebkitLineClamp: style.lineLimit,
+              }}>{cue.text}</span>
+            </div>
+          )
+        })}
+
+        {selection?.type === 'caption' && <div className="preview__caption-safe-area" aria-hidden="true" />}
 
         {guides.x != null && <div className="preview-guide preview-guide--x" style={{ left: `${guides.x * 100}%` }} />}
         {guides.y != null && <div className="preview-guide preview-guide--y" style={{ top: `${guides.y * 100}%` }} />}

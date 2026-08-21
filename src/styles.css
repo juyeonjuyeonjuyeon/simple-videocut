@@ -493,6 +493,35 @@ button, input, textarea { font-family: inherit; }
 }
 .preview__text--selected { outline: 2px dashed var(--accent); outline-offset: 3px; }
 .preview__resize--text { right: -9px; bottom: -9px; }
+.preview__caption {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: auto;
+  user-select: none;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.preview__caption > span {
+  display: -webkit-box;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.preview__caption--left > span { margin-left: 0; margin-right: auto; }
+.preview__caption--right > span { margin-left: auto; margin-right: 0; }
+.preview__caption--selected { outline: 2px dashed var(--accent); outline-offset: 4px; }
+.preview__caption-safe-area {
+  position: absolute;
+  inset: 5%;
+  z-index: 3997;
+  border: 1px dashed rgba(255, 255, 255, .5);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .4);
+  pointer-events: none;
+}
 
 /* ---------- Final / platform preview ---------- */
 .showcase-preview {

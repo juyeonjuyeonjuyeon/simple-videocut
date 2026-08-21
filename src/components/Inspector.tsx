@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useEditor } from '../store'
-import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop, PositionKeyframe, KeyframeEasing, OverlayBorderStyle, OverlayMaskShape, CaptionCue, CaptionTrack } from '../types'
+import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop, PositionKeyframe, KeyframeEasing, OverlayBorderStyle, OverlayMaskShape, CaptionCue, CaptionTrack, CaptionStyle } from '../types'
 import { NO_CROP } from '../types'
 import { formatTime, formatClock, parseClock, clipTimelineDuration, overlayLength, audioLength, totalDuration, exactDurationPatch } from '../utils/time'
 import { rotateBy } from '../utils/transform'
@@ -13,6 +13,7 @@ import { resolveShapeStyle, SHAPE_OPTIONS, SHAPE_STYLE_DEFAULTS } from '../utils
 import ShapeIcon from './ShapeIcon'
 import { translate, useLanguage } from '../i18n'
 import { DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-removal'
+import { CAPTION_STYLE_DEFAULTS } from '../utils/captions'
 
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
@@ -762,6 +763,7 @@ function CaptionInspector({ track, cue, tab }: { track: CaptionTrack; cue: Capti
   const removeCue = useEditor((s) => s.removeCaptionCue)
   const setPlayhead = useEditor((s) => s.setPlayhead)
   const setCue = (patch: Partial<Omit<CaptionCue, 'id'>>) => updateCue(track.id, cue.id, patch)
+  const setStyle = (patch: Partial<CaptionStyle>) => updateTrack(track.id, { style: patch })
 
   return (
     <div className="inspector__body">
@@ -799,6 +801,53 @@ function CaptionInspector({ track, cue, tab }: { track: CaptionTrack; cue: Capti
             <button className="btn btn--sm" onClick={() => setPlayhead(cue.start)}>{translate('시작 위치로 이동', 'Go to caption start')}</button>
           </div>
         </InspectorBlock>
+      </>}
+      {tab === 'style' && <>
+        <div className="inspector__hint">{translate('이 설정은 같은 트랙의 모든 자막에 적용됩니다.', 'These settings apply to every caption on this track.')}</div>
+        <InspectorBlock title={translate('글꼴과 정렬', 'Font and alignment')}>
+          <div className="inspector__group">
+            <FontPicker value={track.style.font} onChange={(font) => setStyle({ font })} />
+            <Range label={translate('글자 크기', 'Text size')} value={Math.round(track.style.size * 1000)} min={20} max={160} step={1} onChange={(size) => setStyle({ size: size / 1000 })} />
+            <div className="chips">{(['left', 'center', 'right'] as const).map((align) => (
+              <button key={align} className={`chip chip--icon${track.style.align === align ? ' chip--on' : ''}`}
+                aria-label={{ left: translate('왼쪽 정렬', 'Align left'), center: translate('가운데 정렬', 'Align center'), right: translate('오른쪽 정렬', 'Align right') }[align]}
+                onClick={() => setStyle({ align })}><AlignIcon a={align} /></button>
+            ))}</div>
+            <Range label={translate('줄 간격', 'Line spacing')} value={Number(track.style.lineHeight.toFixed(2))} min={0.8} max={2} step={0.05} onChange={(lineHeight) => setStyle({ lineHeight })} />
+            <label className="style-select"><span>{translate('최대 줄 수', 'Maximum lines')}</span><select value={track.style.lineLimit} onChange={(event) => setStyle({ lineLimit: Number(event.target.value) as 1 | 2 | 3 })}><option value={1}>1</option><option value={2}>2</option><option value={3}>3</option></select></label>
+          </div>
+        </InspectorBlock>
+        <InspectorBlock title={translate('글자색과 외곽선', 'Text and outline')}>
+          <div className="inspector__group">
+            <ColorControl label={translate('글자색', 'Text color')} value={track.style.color} onChange={(color) => setStyle({ color })} />
+            <Range label={translate('글자 불투명도', 'Text opacity')} value={Math.round(track.style.colorAlpha * 100)} min={0} max={100} step={1} unit="%" onChange={(value) => setStyle({ colorAlpha: value / 100 })} />
+            <Range label={translate('외곽선 두께', 'Outline width')} value={Math.round(track.style.strokeWidth * 100)} min={0} max={30} step={1} unit="%" onChange={(value) => setStyle({ strokeWidth: value / 100 })} />
+            {track.style.strokeWidth > 0 && <ColorControl label={translate('외곽선 색상', 'Outline color')} value={track.style.strokeColor} onChange={(strokeColor) => setStyle({ strokeColor })} />}
+          </div>
+        </InspectorBlock>
+        <InspectorBlock title={translate('배경과 그림자', 'Background and shadow')}>
+          <div className="inspector__group">
+            <label className="switch"><input type="checkbox" checked={track.style.box} onChange={(event) => setStyle({ box: event.target.checked })} /><span>{translate('배경 박스 사용', 'Use background box')}</span></label>
+            {track.style.box && <>
+              <ColorControl label={translate('배경색', 'Background color')} value={track.style.boxColor} onChange={(boxColor) => setStyle({ boxColor })} />
+              <Range label={translate('배경 불투명도', 'Background opacity')} value={Math.round(track.style.boxAlpha * 100)} min={0} max={100} step={1} unit="%" onChange={(value) => setStyle({ boxAlpha: value / 100 })} />
+              <Range label={translate('배경 여백', 'Background padding')} value={Math.round(track.style.boxPadding * 100)} min={0} max={150} step={1} unit="%" onChange={(value) => setStyle({ boxPadding: value / 100 })} />
+              <Range label={translate('모서리', 'Corner radius')} value={Math.round(track.style.boxRadius * 100)} min={0} max={150} step={1} unit="%" onChange={(value) => setStyle({ boxRadius: value / 100 })} />
+            </>}
+            <label className="switch"><input type="checkbox" checked={track.style.shadow} onChange={(event) => setStyle({ shadow: event.target.checked })} /><span>{translate('그림자 사용', 'Use shadow')}</span></label>
+            {track.style.shadow && <><ColorControl label={translate('그림자 색상', 'Shadow color')} value={track.style.shadowColor} onChange={(shadowColor) => setStyle({ shadowColor })} /><Range label={translate('그림자 흐림', 'Shadow blur')} value={Math.round(track.style.shadowBlur * 100)} min={0} max={100} step={1} unit="%" onChange={(value) => setStyle({ shadowBlur: value / 100 })} /><Range label={translate('그림자 거리', 'Shadow distance')} value={Math.round(track.style.shadowDist * 100)} min={0} max={100} step={1} unit="%" onChange={(value) => setStyle({ shadowDist: value / 100 })} /></>}
+          </div>
+        </InspectorBlock>
+        <InspectorBlock title={translate('화면 배치와 안전 영역', 'Placement and safe area')}>
+          <div className="inspector__group">
+            <div className="chips"><button className={`chip${Math.abs(track.style.y - 0.14) < 0.01 ? ' chip--on' : ''}`} onClick={() => setStyle({ x: 0.5, y: 0.14 })}>{translate('위', 'Top')}</button><button className={`chip${Math.abs(track.style.y - 0.5) < 0.01 ? ' chip--on' : ''}`} onClick={() => setStyle({ x: 0.5, y: 0.5 })}>{translate('가운데', 'Middle')}</button><button className={`chip${Math.abs(track.style.y - 0.86) < 0.01 ? ' chip--on' : ''}`} onClick={() => setStyle({ x: 0.5, y: 0.86 })}>{translate('아래', 'Bottom')}</button></div>
+            <Range label={translate('가로 위치', 'Horizontal position')} value={Math.round(track.style.x * 100)} min={5} max={95} step={1} unit="%" onChange={(value) => setStyle({ x: value / 100 })} />
+            <Range label={translate('세로 위치', 'Vertical position')} value={Math.round(track.style.y * 100)} min={5} max={95} step={1} unit="%" onChange={(value) => setStyle({ y: value / 100 })} />
+            <Range label={translate('최대 너비', 'Maximum width')} value={Math.round(track.style.maxWidth * 100)} min={20} max={94} step={1} unit="%" onChange={(value) => setStyle({ maxWidth: value / 100 })} />
+            <div className="inspector__hint">{translate('자막을 선택하면 미리보기에 5% 안전 영역이 표시됩니다. 기본 아래 위치는 그 안에 맞춰져 있습니다.', 'Selecting a caption shows a 5% safe area in the preview. The default bottom position stays inside it.')}</div>
+          </div>
+        </InspectorBlock>
+        <button className="btn" onClick={() => updateTrack(track.id, { style: { ...CAPTION_STYLE_DEFAULTS } })}>{translate('자막 스타일 초기화', 'Reset caption style')}</button>
       </>}
     </div>
   )
@@ -868,7 +917,7 @@ export default function Inspector({ onOpenCrop }: { onOpenCrop: () => void }) {
   const activeSelectionGroup = groups.find((group) => selectedItems.length > 1 && selectedItems.every((item) =>
     group.members.some((member) => member.type === item.type && member.id === item.id)))
   const inspectorTabs: InspectorTabOption[] = useMemo(() => selCaption
-    ? [{ id: 'basic', label: t('자막', 'Caption') }, { id: 'time', label: t('시간', 'Timing') }]
+    ? [{ id: 'basic', label: t('자막', 'Caption') }, { id: 'style', label: t('스타일', 'Style') }, { id: 'time', label: t('시간', 'Timing') }]
     : selText
       ? [{ id: 'basic', label: t('내용', 'Content') }, { id: 'style', label: t('스타일', 'Style') }, { id: 'transform', label: t('배치', 'Layout') }, { id: 'time', label: t('시간', 'Timing') }]
     : selAudio
