@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CaptionTrack } from '../types'
-import { CAPTION_STYLE_DEFAULTS, captionStyleForCue, normalizeCaptionTrack, resolveCaptionStyle } from './captions'
+import { CAPTION_STYLE_DEFAULTS, captionStyleForCue, normalizeCaptionTrack, resolveCaptionStyle, wrapCaptionLines } from './captions'
 
 describe('dedicated caption model', () => {
   it('normalizes unsafe style values without changing the shared defaults', () => {
@@ -26,5 +26,12 @@ describe('dedicated caption model', () => {
     expect(normalized.cues[1].style).toEqual({ color: '#ff0000' })
     expect(captionStyleForCue(normalized, normalized.cues[1]).color).toBe('#ff0000')
     expect(captionStyleForCue(normalized, normalized.cues[0]).color).toBe('#ffffff')
+  })
+
+  it('wraps Korean and English text within a fixed line limit', () => {
+    const measure = (text: string) => Array.from(text).length
+    expect(wrapCaptionLines('짧은 자막 문장입니다', 6, 2, measure)).toEqual(['짧은 자막', '문장입니다'])
+    expect(wrapCaptionLines('one two three four', 7, 2, measure)).toEqual(['one two', 'three…'])
+    expect(wrapCaptionLines('ABCDEFGHIJ', 4, 2, measure)).toEqual(['ABCD', 'EFG…'])
   })
 })

@@ -43,6 +43,19 @@ test('exported MP4 keeps the same overlay order as the preview', async ({ page }
     const upperZ = Number.parseInt(await page.locator('[data-layer-name="upper-blue.png"]').evaluate((element) => getComputedStyle(element).zIndex), 10)
     expect(lowerZ).toBeLessThan(upperZ)
 
+    // A vivid caption background makes its preview/export z-plane and timing
+    // verifiable at one stable pixel without relying on OCR.
+    await page.getByRole('button', { name: '자막', exact: true }).click()
+    await page.getByRole('button', { name: '자막 트랙 만들기' }).click()
+    await page.getByRole('button', { name: '현재 위치에 자막', exact: true }).click()
+    await page.getByRole('textbox', { name: '1번 자막' }).fill(' ')
+    await page.locator('.caption-dialog__panel').getByRole('button', { name: '닫기' }).click()
+    await page.locator('.timeline__lane--caption .tlclip').click()
+    await page.getByRole('tab', { name: '스타일', exact: true }).click()
+    await page.getByLabel('배경색').fill('#00ff00')
+    await page.locator('.ctl').filter({ hasText: '배경 불투명도' }).locator('input[type=range]').fill('100')
+    await page.locator('.ctl').filter({ hasText: '배경 여백' }).locator('input[type=range]').fill('150')
+
     await page.getByRole('button', { name: '내보내기', exact: true }).click()
     await page.getByRole('button', { name: '480p', exact: true }).click()
     await page.getByRole('button', { name: '내보내기 시작' }).click()
@@ -67,13 +80,16 @@ test('exported MP4 keeps the same overlay order as the preview', async ({ page }
       const context = canvas.getContext('2d')!
       context.drawImage(video, 0, 0)
       const sample = (x: number, y: number) => [...context.getImageData(Math.floor(canvas.width * x), Math.floor(canvas.height * y), 1, 1).data]
-      return { center: sample(0.5, 0.5), maskedCorner: sample(0.34, 0.34) }
+      return { center: sample(0.5, 0.5), maskedCorner: sample(0.34, 0.34), captionCenter: sample(0.5, 0.86) }
     })
 
     expect(pixels.center[2]).toBeGreaterThan(180)
     expect(pixels.center[2]).toBeGreaterThan(pixels.center[0] + 100)
     expect(pixels.maskedCorner[0]).toBeGreaterThan(180)
     expect(pixels.maskedCorner[0]).toBeGreaterThan(pixels.maskedCorner[2] + 100)
+    expect(pixels.captionCenter[1], `caption pixel: ${JSON.stringify(pixels.captionCenter)}`).toBeGreaterThan(100)
+    expect(pixels.captionCenter[1]).toBeGreaterThan(pixels.captionCenter[0] + 80)
+    expect(pixels.captionCenter[1]).toBeGreaterThan(pixels.captionCenter[2] + 80)
   } finally {
     rmSync(temp, { recursive: true, force: true })
   }

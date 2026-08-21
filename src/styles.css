@@ -498,11 +498,13 @@ button, input, textarea { font-family: inherit; }
   box-sizing: border-box;
   pointer-events: auto;
   user-select: none;
+  font-weight: 700;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 .preview__caption > span {
   display: -webkit-box;
+  box-sizing: border-box;
   width: fit-content;
   max-width: 100%;
   margin-inline: auto;

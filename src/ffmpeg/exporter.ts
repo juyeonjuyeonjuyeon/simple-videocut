@@ -1,6 +1,6 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
-import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, Crop, Rotation, VisualLayerRef } from '../types'
+import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, Crop, Rotation, VisualLayerRef, CaptionCue, CaptionTrack } from '../types'
 import { aspectToWH, projectDuration, overlayLength, audioLength, clipTimelineDuration, clipBaseLength, repeatCountFor } from '../utils/time'
 import { hexToRgba } from '../utils/color'
 import { hasNativeFFmpeg, NativeFFmpeg } from './native'
@@ -10,6 +10,7 @@ import { overlayOutputSize, renderOverlayEffectAssets } from '../utils/overlay-s
 import { renderShapePng } from '../utils/shape'
 import { resolveMainPlacement } from '../utils/main-placement'
 import { cachedBackgroundRemovedImage, DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-removal'
+import { captionStyleForCue, wrapCaptionLines } from '../utils/captions'
 
 // Keep the encoding engine on the same origin. Exports must not depend on a
 // third-party CDN being reachable after the editor itself has loaded.
@@ -262,9 +263,68 @@ async function renderTextPng(t: TextOverlay, W: number, H: number): Promise<Uint
   return new Uint8Array(await blob.arrayBuffer())
 }
 
+/** Render a caption cue using the same sizing, wrapping, alignment and decoration as the preview. */
+async function renderCaptionPng(track: CaptionTrack, cue: CaptionCue, W: number, H: number): Promise<Uint8Array> {
+  const style = captionStyleForCue(track, cue)
+  const canvas = document.createElement('canvas')
+  canvas.width = W
+  canvas.height = H
+  const ctx = canvas.getContext('2d')!
+  const fontPx = Math.max(8, Math.round(style.size * H))
+  await document.fonts.load(`700 ${fontPx}px ${style.font}`, cue.text || '가').catch(() => {})
+  ctx.font = `700 ${fontPx}px ${style.font}`
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+
+  const outerWidth = style.maxWidth * W
+  const padX = style.box ? style.boxPadding * 1.7 * fontPx : 0
+  const padY = style.box ? style.boxPadding * fontPx : 0
+  const textLimit = Math.max(fontPx, outerWidth - padX * 2)
+  const lines = wrapCaptionLines(cue.text, textLimit, style.lineLimit, (line) => ctx.measureText(line).width)
+  const lineHeight = style.lineHeight * fontPx
+  const textWidth = Math.max(1, ...lines.map((line) => ctx.measureText(line).width))
+  const blockWidth = Math.min(outerWidth, textWidth + padX * 2)
+  const blockHeight = lineHeight * lines.length + padY * 2
+  const cx = style.x * W
+  const cy = style.y * H
+  const parentLeft = cx - outerWidth / 2
+  const blockLeft = style.align === 'left' ? parentLeft : style.align === 'right' ? parentLeft + outerWidth - blockWidth : cx - blockWidth / 2
+  const blockTop = cy - blockHeight / 2
+
+  if (style.box) {
+    ctx.fillStyle = hexToRgba(style.boxColor, style.boxAlpha)
+    roundRect(ctx, blockLeft, blockTop, blockWidth, blockHeight, Math.min(blockHeight / 2, style.boxRadius * fontPx))
+    ctx.fill()
+  }
+
+  ctx.textAlign = style.align
+  const lineX = style.align === 'left' ? blockLeft + padX : style.align === 'right' ? blockLeft + blockWidth - padX : blockLeft + blockWidth / 2
+  const strokePx = style.strokeWidth * fontPx
+  lines.forEach((line, index) => {
+    const y = blockTop + padY + lineHeight * (index + 0.5)
+    if (style.shadow) {
+      ctx.shadowColor = style.shadowColor
+      ctx.shadowBlur = style.shadowBlur * fontPx
+      ctx.shadowOffsetY = style.shadowDist * fontPx
+    } else ctx.shadowColor = 'transparent'
+    if (strokePx > 0) {
+      ctx.lineWidth = strokePx * 2
+      ctx.strokeStyle = style.strokeColor
+      ctx.strokeText(line, lineX, y)
+    }
+    ctx.fillStyle = hexToRgba(style.color, style.colorAlpha)
+    ctx.fillText(line, lineX, y)
+    ctx.shadowColor = 'transparent'
+  })
+
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('자막 이미지를 만들 수 없습니다.')), 'image/png'))
+  return new Uint8Array(await blob.arrayBuffer())
+}
+
 export interface ExportOptions {
   clips: Clip[]
   texts: TextOverlay[]
+  captionTracks?: CaptionTrack[]
   overlays?: Overlay[]
   audios?: AudioClip[]
   backgrounds?: Background[]
@@ -314,6 +374,7 @@ const audioLoopCount = (item: AudioClip) => repeatCountFor(item.trimEnd - item.t
 export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
   const { clips, aspect, height, onProgress, onLog } = opts
   const texts = opts.texts.filter((text) => !text.hidden)
+  const captions = (opts.captionTracks ?? []).flatMap((track) => track.hidden ? [] : track.cues.map((cue) => ({ track, cue })))
   const overlays = (opts.overlays ?? []).filter((o) => !o.hidden && (o.kind === 'video' || o.kind === 'image'))
   const audios = opts.audios ?? []
   const backgrounds = (opts.backgrounds ?? []).filter((background) => !background.hidden)
@@ -462,6 +523,9 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       const renderText = text.positionKeyframes?.length ? { ...text, x: 0.5, y: 0.5 } : text
       await fp.writeFile(`text${k}.png`, await renderTextPng(renderText, W, H))
     }
+    for (let k = 0; k < captions.length; k++) {
+      await fp.writeFile(`caption${k}.png`, await renderCaptionPng(captions[k].track, captions[k].cue, W, H))
+    }
 
     // 2b. Write free-track media once and remember which video layers carry audio.
     const overlayAudioFlags: boolean[] = []
@@ -562,7 +626,10 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     texts.forEach((_, k) => {
       args.push('-loop', '1', '-i', `text${k}.png`)
     })
-    const ovBase = inputCount + texts.length
+    captions.forEach((_, k) => {
+      args.push('-loop', '1', '-i', `caption${k}.png`)
+    })
+    const ovBase = inputCount + texts.length + captions.length
     overlays.forEach((o, k) => {
       if (o.kind === 'image') args.push('-loop', '1', '-t', String(ovLen(o)), '-i', overlayFiles[k])
       else {
@@ -765,6 +832,20 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       lastV = out
     })
 
+    // Captions are semantic presentation text and always sit above the free
+    // visual-layer stack, matching the preview's dedicated caption z-plane.
+    captions.forEach(({ cue }, k) => {
+      const inputIdx = inputCount + texts.length + k
+      const label = `[captionv${k}]`
+      const out = `[captionlayer${k}]`
+      filters.push(`[${inputIdx}:v]format=rgba,setpts=PTS+${cue.start.toFixed(3)}/TB${label}`)
+      filters.push(
+        `${lastV}${label}overlay=x=0:y=0:eof_action=pass:` +
+        `enable='between(t,${cue.start.toFixed(3)},${cue.end.toFixed(3)})'${out}`,
+      )
+      lastV = out
+    })
+
     // Mix the main-track audio with timed overlay, background and music tracks.
     const mixInputs: string[] = []
     filters.push(`[ca]apad=whole_dur=${duration.toFixed(3)},atrim=0:${duration.toFixed(3)}[amain]`)
@@ -847,7 +928,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         const detail = logBuffer.slice(-8).join('\n')
         throw new Error(`완성된 영상의 재생 검증에 실패했습니다.${detail ? `\n${detail}` : ''}`)
       }
-      await cleanup(fp, outName, clips.length, texts.length, overlays.length, backgrounds.length, audios.length, true)
+      await cleanup(fp, outName, clips.length, texts.length, captions.length, overlays.length, backgrounds.length, audios.length, true)
       return { kind: 'native-file', name: outName, size, format }
     }
 
@@ -859,11 +940,11 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     }
 
     // 5. Clean up the virtual filesystem for the next run.
-    await cleanup(fp, outName, clips.length, texts.length, overlays.length, backgrounds.length, audios.length)
+    await cleanup(fp, outName, clips.length, texts.length, captions.length, overlays.length, backgrounds.length, audios.length)
 
     return new Blob([bytes], { type: format === 'webm' ? 'video/webm' : 'video/mp4' })
   } catch (error) {
-    await cleanup(fp, outName, clips.length, texts.length, overlays.length, backgrounds.length, audios.length)
+    await cleanup(fp, outName, clips.length, texts.length, captions.length, overlays.length, backgrounds.length, audios.length)
     if (resetEngine) {
       fp.terminate()
       ffmpeg = null
@@ -874,11 +955,12 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
   }
 }
 
-async function cleanup(fp: FFmpegEngine, outName: string, nClips: number, nTexts: number, nOv: number, nBg: number, nAudio: number, keepOutput = false) {
+async function cleanup(fp: FFmpegEngine, outName: string, nClips: number, nTexts: number, nCaptions: number, nOv: number, nBg: number, nAudio: number, keepOutput = false) {
   const names = keepOutput ? [] : [outName]
   for (let i = 0; i < nClips; i++) names.push(`in${i}`, `norm${i}.mp4`)
   for (let i = 0; i < nClips; i++) names.push(`norm${i}.png`)
   for (let k = 0; k < nTexts; k++) names.push(`text${k}.png`)
+  for (let k = 0; k < nCaptions; k++) names.push(`caption${k}.png`)
   for (let k = 0; k < nOv; k++) names.push(`ov${k}`, `normov${k}.mp4`, `normov${k}.png`)
   for (let k = 0; k < nOv; k++) names.push(`ovmask${k}.png`, `ovdecor${k}.png`)
   for (let k = 0; k < nBg; k++) names.push(`bg${k}`, `normbg${k}.mp4`, `normbg${k}.png`)

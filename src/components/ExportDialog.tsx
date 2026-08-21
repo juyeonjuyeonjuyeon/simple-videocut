@@ -61,6 +61,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
   const desktop = Boolean(window.simplecutDesktop)
   const clips = useEditor((s) => s.clips)
   const texts = useEditor((s) => s.texts)
+  const captionTracks = useEditor((s) => s.captionTracks)
   const overlays = useEditor((s) => s.overlays)
   const audios = useEditor((s) => s.audios)
   const backgrounds = useEditor((s) => s.backgrounds)
@@ -100,6 +101,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
       const out = await exportVideo({
         clips,
         texts,
+        captionTracks,
         overlays,
         audios,
         backgrounds,
@@ -205,7 +207,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        <div className="modal__note">{t('메인 트랙과 자막, 오버레이, 배경, 음악이 모두 결과물에 합성됩니다.', 'The main track, text, overlays, backgrounds, and music will all be composited into the result.')}</div>
+        <div className="modal__note">{t('메인 트랙과 텍스트, 자막, 오버레이, 배경, 음악이 모두 결과물에 합성됩니다.', 'The main track, text, captions, overlays, backgrounds, and music will all be composited into the result.')}</div>
 
         {phase === 'running' && (
           <div className="progress">

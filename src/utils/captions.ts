@@ -100,3 +100,56 @@ export function normalizeCaptionTrack(track: CaptionTrack): CaptionTrack {
 export function captionStyleForCue(track: CaptionTrack, cue: CaptionCue): CaptionStyle {
   return resolveCaptionStyle({ ...track.style, ...(cue.style ?? {}) })
 }
+
+/** Wrap text the same way the preview intends to: prefer words, then break a long word by grapheme. */
+export function wrapCaptionLines(
+  value: string,
+  maxWidth: number,
+  lineLimit: number,
+  measure: (text: string) => number,
+): string[] {
+  const safeWidth = Math.max(1, maxWidth)
+  const safeLimit = Math.max(1, Math.floor(lineLimit))
+  const lines: string[] = []
+  let clipped = false
+  const push = (line: string) => {
+    if (lines.length < safeLimit) lines.push(line.trimEnd())
+    else clipped = true
+  }
+  // Korean syllables, Latin text, and supplementary Unicode code points are
+  // kept intact without requiring Intl.Segmenter on older Safari builds.
+  const graphemes = (text: string) => Array.from(text)
+
+  for (const paragraph of String(value ?? '').split('\n')) {
+    if (lines.length >= safeLimit) { clipped = true; break }
+    if (!paragraph) { push(''); continue }
+    const tokens = paragraph.match(/\S+\s*|\s+/g) ?? [paragraph]
+    let line = ''
+    for (const token of tokens) {
+      if (measure((line + token).trimEnd()) <= safeWidth) { line += token; continue }
+      if (line.trim()) { push(line); line = ''; if (lines.length >= safeLimit) { clipped = true; break } }
+      let chunk = ''
+      for (const grapheme of graphemes(token.trimStart())) {
+        if (chunk && measure(chunk + grapheme) > safeWidth) {
+          push(chunk)
+          chunk = ''
+          if (lines.length >= safeLimit) { clipped = true; break }
+        }
+        chunk += grapheme
+      }
+      if (lines.length >= safeLimit) break
+      line = chunk
+    }
+    if (lines.length >= safeLimit) { if (line.trim() || tokens.length) clipped = true; break }
+    if (line || !lines.length) push(line)
+  }
+
+  if (!lines.length) lines.push('')
+  if (clipped) {
+    const ellipsis = '…'
+    let last = lines[lines.length - 1].trimEnd()
+    while (last && measure(last + ellipsis) > safeWidth) last = graphemes(last).slice(0, -1).join('')
+    lines[lines.length - 1] = last + ellipsis
+  }
+  return lines.slice(0, safeLimit)
+}
