@@ -163,4 +163,27 @@ describe('timeline splitting', () => {
     expect(useEditor.getState().clips).toHaveLength(1)
     expect(useEditor.getState().overlays).toHaveLength(1)
   })
+
+  it('adds an editable shape at the playhead without polluting the media bin', () => {
+    useEditor.setState({
+      mediaLibrary: [], clips: [clip(1)], overlays: [], visualOrder: [],
+      playhead: 1.25, selection: null, selectedItems: [],
+    })
+
+    useEditor.getState().addShape('star')
+
+    const state = useEditor.getState()
+    expect(state.overlays).toHaveLength(1)
+    expect(state.overlays[0]).toMatchObject({
+      kind: 'image', start: 1.25, trimStart: 0, trimEnd: 5,
+      shape: { kind: 'star', fillColor: '#e27f92', fillOpacity: 1 },
+    })
+    expect(state.mediaLibrary).toHaveLength(0)
+    expect(state.selection).toEqual({ type: 'overlay', id: state.overlays[0].id })
+    expect(state.visualOrder).toContainEqual({ type: 'overlay', id: state.overlays[0].id })
+
+    useEditor.getState().moveOverlayToMain(state.overlays[0].id)
+    expect(useEditor.getState().overlays).toHaveLength(1)
+    expect(useEditor.getState().clips).toHaveLength(1)
+  })
 })

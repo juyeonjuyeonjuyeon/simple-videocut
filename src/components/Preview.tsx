@@ -18,6 +18,7 @@ import { startPointerDrag } from '../utils/pointer'
 import { positionAt } from '../utils/motion'
 import Icon from './Icon'
 import { maskClipPath, maskPathData, resolveOverlayStyle } from '../utils/overlay-style'
+import { resolveShapeStyle, shapePathData } from '../utils/shape'
 
 const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
 const DRIFT = 0.35 // seconds before we hard-seek a media element back in sync
@@ -73,6 +74,41 @@ function OverlayDecoration({ overlay, frameHeight }: { overlay: Overlay; frameHe
         <path {...common} d={path(borderWidth * 5 / 6)} strokeWidth={Math.max(1, borderWidth / 3)} />
       </> : (
         <path {...common} d={path(borderWidth / 2)} strokeWidth={borderWidth}
+          strokeDasharray={style.borderStyle === 'dashed' ? `${borderWidth * 3} ${borderWidth * 2}` : style.borderStyle === 'dotted' ? `0.1 ${borderWidth * 1.9}` : undefined}
+          strokeLinecap={style.borderStyle === 'dotted' ? 'round' : 'butt'} />
+      )}
+    </svg>
+  )
+}
+
+function ShapeOverlayGraphic({ overlay, frameHeight }: { overlay: Overlay; frameHeight: number }) {
+  const ref = useRef<SVGSVGElement>(null)
+  const [size, setSize] = useState({ width: 100, height: 100 })
+  const shape = resolveShapeStyle(overlay.shape)
+  const style = resolveOverlayStyle(overlay)
+  const borderWidth = style.borderWidth * frameHeight
+  const path = shapePathData(shape.kind, size.width, size.height, borderWidth / 2 + 1, shape.cornerRadius)
+  const common = { fill: hexToRgba(shape.fillColor, shape.fillOpacity), stroke: style.borderColor, strokeLinejoin: 'round' as const }
+
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const measure = () => setSize({ width: Math.max(1, element.clientWidth), height: Math.max(1, element.clientHeight) })
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    measure()
+    return () => observer.disconnect()
+  }, [])
+
+  return (
+    <svg ref={ref} className={`preview__shape${overlay.scaleY != null && !(overlay.aspectLocked ?? true) ? ' preview__shape--free' : ''}`}
+      viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" aria-hidden="true"
+      style={{ transform: cssTransform(overlay.rotate, overlay.flipH, overlay.flipV) }}>
+      {style.borderStyle === 'double' && borderWidth >= .5 ? <>
+        <path {...common} d={path} strokeWidth={Math.max(1, borderWidth / 3)} />
+        <path {...common} fill="none" d={shapePathData(shape.kind, size.width, size.height, borderWidth * .85 + 1, shape.cornerRadius)} strokeWidth={Math.max(1, borderWidth / 3)} />
+      </> : (
+        <path {...common} d={path} strokeWidth={borderWidth}
           strokeDasharray={style.borderStyle === 'dashed' ? `${borderWidth * 3} ${borderWidth * 2}` : style.borderStyle === 'dotted' ? `0.1 ${borderWidth * 1.9}` : undefined}
           strokeLinecap={style.borderStyle === 'dotted' ? 'round' : 'butt'} />
       )}
@@ -293,7 +329,7 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
       }
       const media = overlayEls.current.get(o.id)
       const clip = wrap?.querySelector<HTMLElement>('.preview__overlay-clip')
-      if (clip && wrap) clip.style.clipPath = maskClipPath(resolveOverlayStyle(o).maskShape, wrap.offsetWidth, wrap.offsetHeight)
+      if (clip && wrap) clip.style.clipPath = o.shape ? 'none' : maskClipPath(resolveOverlayStyle(o).maskShape, wrap.offsetWidth, wrap.offsetHeight)
       if (media) {
         media.style.transform = `${cssCropFill(o.crop)} ${cssTransform(o.rotate, o.flipH, o.flipV)}`.trim()
         media.style.clipPath = 'none'
@@ -671,10 +707,12 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
                 zIndex: visualPreviewZ(visualOrder, { type: 'overlay', id: o.id }),
               }}
               onPointerDown={(e) => onOverlayDown(e, o.id)}
-              onDoubleClick={(e) => { e.stopPropagation(); if (sel) onOpenCrop() }}
+              onDoubleClick={(e) => { e.stopPropagation(); if (sel && !o.shape) onOpenCrop() }}
             >
-              <div className="preview__overlay-clip" style={{ clipPath: maskClipPath(visualStyle.maskShape), filter: shadow }}>
-                {o.kind === 'video' ? (
+              <div className="preview__overlay-clip" style={{ clipPath: o.shape ? 'none' : maskClipPath(visualStyle.maskShape), filter: shadow }}>
+                {o.shape ? (
+                  <ShapeOverlayGraphic overlay={o} frameHeight={box.h} />
+                ) : o.kind === 'video' ? (
                   <video
                     ref={(el) => { if (el) overlayEls.current.set(o.id, el); else overlayEls.current.delete(o.id) }}
                     className={`preview__overlay-media${o.scaleY != null && !(o.aspectLocked ?? true) ? ' preview__overlay-media--free' : ''}`}
@@ -690,7 +728,7 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
                   />
                 )}
               </div>
-              <OverlayDecoration overlay={o} frameHeight={box.h} />
+              {!o.shape && <OverlayDecoration overlay={o} frameHeight={box.h} />}
             </div>
           )
         })}
@@ -707,7 +745,7 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
               zIndex: PREVIEW_Z.editor,
             }}
             onPointerDown={(event) => onOverlayDown(event, selOverlay.id)}
-            onDoubleClick={(event) => { event.stopPropagation(); onOpenCrop() }}
+            onDoubleClick={(event) => { event.stopPropagation(); if (!selOverlay.shape) onOpenCrop() }}
           >
             {!selOverlay.locked && (['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'] as const).map((handle) => (
               <span key={handle} className={`preview__resize preview__resize--${handle}`} onPointerDown={(event) => onResizeDown(event, selOverlay.id, handle)} />
@@ -763,7 +801,7 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
         {guides.y != null && <div className="preview-guide preview-guide--y" style={{ top: `${guides.y * 100}%` }} />}
         {rotationReadout && <div className="preview__rotation-readout">{rotationReadout.angle}°</div>}
 
-        {((selClip && selClip.kind !== 'color') || selOverlay) && !(selOverlay?.locked) && (
+        {((selClip && selClip.kind !== 'color') || (selOverlay && !selOverlay.shape)) && !(selOverlay?.locked) && (
           <div className="preview__selection-tools" onPointerDown={(event) => event.stopPropagation()}>
             <button type="button" onClick={onOpenCrop}><Icon name="crop" />자르기</button>
           </div>

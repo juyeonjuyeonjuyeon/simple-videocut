@@ -9,6 +9,8 @@ import { keyframeAt, positionAt } from '../utils/motion'
 import { normalizeVisualOrder } from '../utils/layers'
 import FontPicker from './FontPicker'
 import { maskPathData, OVERLAY_STYLE_DEFAULTS, resolveOverlayStyle } from '../utils/overlay-style'
+import { resolveShapeStyle, SHAPE_OPTIONS, SHAPE_STYLE_DEFAULTS } from '../utils/shape'
+import ShapeIcon from './ShapeIcon'
 
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
@@ -435,14 +437,15 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
   const localTime = Math.max(0, Math.min(playhead - ov.start, overlayLength(ov)))
   const position = positionAt(ov, localTime)
   const visualStyle = resolveOverlayStyle(ov)
+  const shapeStyle = ov.shape ? resolveShapeStyle(ov.shape) : null
 
   return (
     <div className="inspector__body">
       {tab === 'basic' && <>
         <InspectorBlock title="기본 정보">
           <div className="inspector__group">
-            <NameField icon={<Icon name={ov.kind === 'image' ? 'image' : 'layers'} />} name={ov.name} onChange={(v) => update(ov.id, { name: v })} />
-            <div className="inspector__hint">레이어 · 길이 {formatTime(overlayLength(ov))}</div>
+            <NameField icon={<Icon name={ov.shape ? 'shape' : ov.kind === 'image' ? 'image' : 'layers'} />} name={ov.name} onChange={(v) => update(ov.id, { name: v })} />
+            <div className="inspector__hint">{ov.shape ? '도형' : '레이어'} · 길이 {formatTime(overlayLength(ov))}</div>
           </div>
         </InspectorBlock>
         <InspectorBlock title="레이어 상태">
@@ -454,7 +457,7 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
             <button className="btn" disabled={idx <= 0} onClick={() => raise(ov.id, -1)}>▼ 아래로</button>
             <button className="btn" disabled={idx >= visualOrder.length - 1} onClick={() => raise(ov.id, 1)}>위로 ▲</button>
           </div>
-          <button className="btn" onClick={() => toMain(ov.id)}><Icon name="video" />메인 트랙으로 이동</button>
+          {!ov.shape && <button className="btn" onClick={() => toMain(ov.id)}><Icon name="video" />메인 트랙으로 이동</button>}
         </InspectorBlock>
         <button className="btn btn--danger" onClick={() => remove(ov.id)}>레이어 삭제</button>
       </>}
@@ -476,7 +479,7 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
           <TransformRow rotate={ov.rotate} flipH={ov.flipH} flipV={ov.flipV} onPatch={patch} />
           <div className="inspector__group"><Range label="자유 회전" value={ov.angle || 0} min={-180} max={180} step={1} unit="°" onChange={(v) => update(ov.id, { angle: v })} /></div>
         </InspectorBlock>
-        <InspectorBlock title="자르기"><CropRow crop={ov.crop} onPatch={patch} onOpen={onOpenCrop} /></InspectorBlock>
+        {!ov.shape && <InspectorBlock title="자르기"><CropRow crop={ov.crop} onPatch={patch} onOpen={onOpenCrop} /></InspectorBlock>}
         <InspectorBlock title="움직임">
           <PositionKeyframeRow frames={ov.positionKeyframes} localTime={localTime}
             onToggle={() => togglePositionKeyframe('overlay', ov.id)}
@@ -486,7 +489,25 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
         </InspectorBlock>
       </>}
       {tab === 'style' && <>
-        <InspectorBlock title="마스크 모양">
+        {shapeStyle ? <InspectorBlock title="도형">
+          <div className="shape-style-picker" role="radiogroup" aria-label="도형 종류">
+            {SHAPE_OPTIONS.map((option) => (
+              <button type="button" role="radio" aria-checked={shapeStyle.kind === option.value} key={option.value}
+                className={shapeStyle.kind === option.value ? 'is-active' : ''}
+                onClick={() => update(ov.id, { shape: { ...shapeStyle, kind: option.value }, name: `${option.label} 도형` })}>
+                <ShapeIcon kind={option.value} />
+                <span>{option.label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="inspector__group">
+            <ColorControl label="채우기 색상" value={shapeStyle.fillColor} onChange={(fillColor) => update(ov.id, { shape: { ...shapeStyle, fillColor } })} />
+            <Range label="채우기 불투명도" value={Math.round(shapeStyle.fillOpacity * 100)} min={0} max={100} step={1} unit="%"
+              onChange={(fillOpacity) => update(ov.id, { shape: { ...shapeStyle, fillOpacity: fillOpacity / 100 } })} />
+            {shapeStyle.kind === 'rectangle' && <Range label="모서리 둥글기" value={Math.round(shapeStyle.cornerRadius * 200)} min={0} max={100} step={1} unit="%"
+              onChange={(cornerRadius) => update(ov.id, { shape: { ...shapeStyle, cornerRadius: cornerRadius / 200 } })} />}
+          </div>
+        </InspectorBlock> : <InspectorBlock title="마스크 모양">
           <div className="mask-picker" role="radiogroup" aria-label="오버레이 마스크 모양">
             {MASK_OPTIONS.map((option) => (
               <button type="button" role="radio" aria-checked={visualStyle.maskShape === option.value} key={option.value}
@@ -498,7 +519,7 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
             ))}
           </div>
           <div className="inspector__hint">마스크는 원본을 지우지 않고 보이는 모양만 바꿉니다.</div>
-        </InspectorBlock>
+        </InspectorBlock>}
         <InspectorBlock title="테두리">
           <div className="inspector__group">
             <Range label="굵기" value={Math.round(visualStyle.borderWidth * 720)} min={0} max={40} step={1} unit="px"
@@ -534,21 +555,23 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
             </>}
           </div>
         </InspectorBlock>
-        <button className="btn" onClick={() => update(ov.id, { ...OVERLAY_STYLE_DEFAULTS })}>스타일 초기화</button>
+        <button className="btn" onClick={() => update(ov.id, shapeStyle
+          ? { ...OVERLAY_STYLE_DEFAULTS, shape: { ...SHAPE_STYLE_DEFAULTS, kind: shapeStyle.kind } }
+          : { ...OVERLAY_STYLE_DEFAULTS })}>스타일 초기화</button>
       </>}
       {tab === 'time' && <>
-        <InspectorBlock title="트림">
+        {!ov.shape && <InspectorBlock title="트림">
           <div className="inspector__group">
             <Range label="시작 트림" badge={formatTime(ov.trimStart)} value={ov.trimStart} min={0} max={ov.duration} step={0.1} unit="초"
               onChange={(v) => update(ov.id, { trimStart: Math.min(v, ov.trimEnd - 0.1) })} />
             <Range label="끝 트림" badge={formatTime(ov.trimEnd)} value={ov.trimEnd} min={0} max={ov.duration} step={0.1} unit="초"
               onChange={(v) => update(ov.id, { trimEnd: Math.max(v, ov.trimStart + 0.1) })} />
           </div>
-        </InspectorBlock>
-        {ov.kind === 'video' && <InspectorBlock title="속도"><SpeedRow speed={ov.speed} onPatch={patch} /></InspectorBlock>}
+        </InspectorBlock>}
+        {!ov.shape && ov.kind === 'video' && <InspectorBlock title="속도"><SpeedRow speed={ov.speed} onPatch={patch} /></InspectorBlock>}
         <InspectorBlock title="페이드"><FadeRow length={overlayLength(ov)} fadeIn={ov.fadeIn} fadeOut={ov.fadeOut} onPatch={patch} label="화면·소리 페이드" /></InspectorBlock>
-        <InspectorBlock title="길이와 반복">
-          <RepeatRow repeat={ov.repeat} onPatch={patch} />
+        <InspectorBlock title={ov.shape ? '길이' : '길이와 반복'}>
+          {!ov.shape && <RepeatRow repeat={ov.repeat} onPatch={patch} />}
           <DurationRow seconds={overlayLength(ov)} onSet={(t) => update(ov.id, exactDurationPatch((ov.trimEnd - ov.trimStart) / ov.speed, t))} />
         </InspectorBlock>
       </>}

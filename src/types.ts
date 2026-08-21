@@ -11,6 +11,16 @@ export type OverlayBorderStyle = 'solid' | 'dashed' | 'dotted' | 'double'
 
 export type OverlayMaskShape = 'none' | 'rounded' | 'circle' | 'ellipse' | 'heart' | 'star' | 'hexagon'
 
+export type ShapeKind = 'rectangle' | 'circle' | 'triangle' | 'diamond' | 'star' | 'heart' | 'hexagon' | 'arrow' | 'line'
+
+export interface ShapeStyle {
+  kind: ShapeKind
+  fillColor: string
+  fillOpacity: number
+  /** Corner radius as a fraction of the shorter side; only used by rectangles. */
+  cornerRadius: number
+}
+
 /** Crop insets as a fraction (0..0.45) of each side. */
 export interface Crop {
   top: number
@@ -159,6 +169,8 @@ export interface Overlay {
   shadowX?: number
   shadowY?: number
   maskShape?: OverlayMaskShape
+  /** Built-in vector shape. Its placeholder File only keeps project media validation portable. */
+  shape?: ShapeStyle
   fadeIn?: number
   fadeOut?: number
   positionKeyframes?: PositionKeyframe[]

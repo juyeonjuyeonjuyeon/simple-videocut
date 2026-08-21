@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup, VisualLayerRef, MediaAsset } from './types'
+import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup, VisualLayerRef, MediaAsset, ShapeKind } from './types'
 import { NO_CROP, FONT_OPTIONS } from './types'
 import type { ProjectState } from './utils/project'
 import { assertMediaCapacity, probeVideo, probeImage, probeAudio, nextClipColor, isVideoFile, isImageFile, isAudioFile } from './utils/media'
@@ -7,6 +7,7 @@ import { clipTimelineDuration, clipStartOffsets, projectDuration, overlayLength,
 import { keyframeAt, positionAt } from './utils/motion'
 import { normalizeVisualOrder } from './utils/layers'
 import { OVERLAY_STYLE_DEFAULTS } from './utils/overlay-style'
+import { createShapePlaceholderFile, resolveShapeStyle, shapeLabel, SHAPE_STYLE_DEFAULTS } from './utils/shape'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
 const registerNativeMedia = async (file: File) => {
@@ -60,6 +61,7 @@ interface EditorState {
   moveBackgroundToMain: (id: string) => void
 
   // ---- overlay (PiP) layers ----
+  addShape: (kind: ShapeKind) => void
   addOverlayFiles: (files: FileList | File[]) => Promise<void>
   updateOverlay: (id: string, patch: Partial<Overlay>) => void
   removeOverlay: (id: string) => void
@@ -542,6 +544,26 @@ export const useEditor = create<EditorState>((set, get) => ({
     }),
 
   // ---------- overlays ----------
+  addShape: (kind) => {
+    const file = createShapePlaceholderFile(kind)
+    const id = uid()
+    const overlay: Overlay = {
+      id, kind: 'image', name: `${shapeLabel(kind)} 도형`, src: URL.createObjectURL(file), file,
+      sourceSize: file.size, duration: IMAGE_NOMINAL_MAX, trimStart: 0, trimEnd: DEFAULT_IMAGE_DUR,
+      hasAudio: false, color: nextClipColor(), start: get().playhead,
+      x: .5, y: .5, scale: .28, scaleY: undefined, aspectLocked: true, angle: 0,
+      speed: 1, volume: 1, muted: true, ...TRANSFORM_DEFAULTS, repeat: 1,
+      opacity: 1, locked: false, hidden: false, fadeIn: 0, fadeOut: 0, positionKeyframes: [],
+      ...OVERLAY_STYLE_DEFAULTS,
+      shape: { ...SHAPE_STYLE_DEFAULTS, kind },
+    }
+    set((state) => ({
+      overlays: [...state.overlays, overlay],
+      visualOrder: [...normalizeVisualOrder(state.overlays, state.texts, state.visualOrder), { type: 'overlay', id }],
+      selection: { type: 'overlay', id }, selectedItems: [{ type: 'overlay', id }],
+    }))
+  },
+
   addOverlayFiles: async (files) => {
     const list = Array.from(files).filter((f) => isVideoFile(f) || isImageFile(f))
     if (!list.length || !allowMediaBatch(list, get())) return
@@ -604,6 +626,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.shadowBlur = Math.max(0, Math.min(next.shadowBlur ?? OVERLAY_STYLE_DEFAULTS.shadowBlur, 40 / 720))
         next.shadowX = Math.max(-40 / 720, Math.min(next.shadowX ?? OVERLAY_STYLE_DEFAULTS.shadowX, 40 / 720))
         next.shadowY = Math.max(-40 / 720, Math.min(next.shadowY ?? OVERLAY_STYLE_DEFAULTS.shadowY, 40 / 720))
+        if (next.shape) next.shape = resolveShapeStyle(next.shape)
         clampFades(next, overlayLength(next))
         next.positionKeyframes = (next.positionKeyframes ?? [])
           .map((frame) => ({ ...frame, time: Math.max(0, Math.min(frame.time, overlayLength(next))) }))
@@ -633,7 +656,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   moveOverlayToMain: (id) =>
     set((s) => {
       const o = s.overlays.find((x) => x.id === id)
-      if (!o) return s
+      if (!o || o.shape) return s
       // Drop the overlay-only fields; the rest is a Clip.
       const {
         start: _s, x: _x, y: _y, scale: _sc, scaleY: _sy, aspectLocked: _al, angle: _a,
@@ -1055,6 +1078,7 @@ function replaceEditorProject(p: ProjectState) {
       shadowX: o.shadowX ?? OVERLAY_STYLE_DEFAULTS.shadowX,
       shadowY: o.shadowY ?? OVERLAY_STYLE_DEFAULTS.shadowY,
       maskShape: o.maskShape ?? OVERLAY_STYLE_DEFAULTS.maskShape,
+      shape: o.shape ? resolveShapeStyle(o.shape) : undefined,
       fadeIn: o.fadeIn ?? 0, fadeOut: o.fadeOut ?? 0, positionKeyframes: o.positionKeyframes ?? [],
     })),
     audios: p.audios.map((a) => ({ ...a, assetId: linkedAssetId(a), fadeIn: a.fadeIn ?? 0, fadeOut: a.fadeOut ?? 0 })),

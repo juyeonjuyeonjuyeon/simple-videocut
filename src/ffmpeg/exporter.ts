@@ -7,6 +7,7 @@ import { hasNativeFFmpeg, NativeFFmpeg } from './native'
 import { positionExpression } from '../utils/motion'
 import { normalizeVisualOrder } from '../utils/layers'
 import { overlayOutputSize, renderOverlayEffectAssets } from '../utils/overlay-style'
+import { renderShapePng } from '../utils/shape'
 
 // Keep the encoding engine on the same origin. Exports must not depend on a
 // third-party CDN being reachable after the editor itself has loaded.
@@ -448,14 +449,28 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     const overlayTrimStarts: number[] = []
     const overlayEffects: Array<{ width: number; height: number; padding: number; maskName: string | null; decorationName: string | null }> = []
     for (let k = 0; k < overlays.length; k++) {
-      if (!overlays[k].sourceSize) throw new Error(`원본 오버레이 파일이 비어 있습니다: ${overlays[k].name}`)
-      await stageMedia(`ov${k}`, overlays[k])
-      const prepared = await prepareVisual(`ov${k}`, `normov${k}`, overlays[k], false)
+      const overlay = overlays[k]
+      if (overlay.shape) {
+        const body = overlayOutputSize(overlay, 1, 1, W, H)
+        const rendered = await renderShapePng(overlay, body.width, body.height, H)
+        const fileName = `shape${k}.png`
+        await fp.writeFile(fileName, rendered.data)
+        overlayFiles.push(fileName)
+        overlayTrimStarts.push(0)
+        overlayAudioFlags.push(false)
+        overlayEffects.push({ width: rendered.width, height: rendered.height, padding: 0, maskName: null, decorationName: null })
+        visualIndex++
+        progressReporter.report(0.05 + (0.2 * visualIndex) / Math.max(1, visualCount))
+        continue
+      }
+      if (!overlay.sourceSize) throw new Error(`원본 오버레이 파일이 비어 있습니다: ${overlay.name}`)
+      await stageMedia(`ov${k}`, overlay)
+      const prepared = await prepareVisual(`ov${k}`, `normov${k}`, overlay, false)
       overlayFiles.push(prepared.fileName)
       overlayTrimStarts.push(prepared.trimStart)
       overlayAudioFlags.push(prepared.hasAudio)
-      const size = overlayOutputSize(overlays[k], prepared.width || W, prepared.height || H, W, H)
-      const assets = await renderOverlayEffectAssets(overlays[k], size.width, size.height, H)
+      const size = overlayOutputSize(overlay, prepared.width || W, prepared.height || H, W, H)
+      const assets = await renderOverlayEffectAssets(overlay, size.width, size.height, H)
       const maskName = assets.mask ? `ovmask${k}.png` : null
       const decorationName = assets.decoration ? `ovdecor${k}.png` : null
       if (assets.mask && maskName) await fp.writeFile(maskName, assets.mask)

@@ -3,7 +3,7 @@ import type { ReactNode, SVGProps } from 'react'
 export type IconName = 'brand' | 'plus' | 'folder' | 'play' | 'pause' | 'repeat' | 'split' | 'layers' |
   'music' | 'palette' | 'text' | 'undo' | 'redo' | 'copy' | 'trash' | 'download' | 'upload' | 'share' | 'close' |
   'warning' | 'screen' | 'video' | 'image' | 'mute' | 'rotate' | 'flipH' | 'flipV' | 'save' | 'panel' | 'crop' | 'lock' | 'unlock' | 'library' | 'search' |
-  'eye' | 'eyeOff' | 'zoomIn' | 'zoomOut' | 'fit' | 'marker' | 'grid' | 'list' | 'project' | 'help'
+  'eye' | 'eyeOff' | 'zoomIn' | 'zoomOut' | 'fit' | 'marker' | 'grid' | 'list' | 'project' | 'help' | 'shape'
 
 // Every icon uses the same 24px grid, optical centre, round joins and stroke
 // weight. Filled shapes are reserved for primary actions such as play.
@@ -52,6 +52,7 @@ const paths: Record<IconName, ReactNode> = {
   list: <><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1" fill="currentColor" stroke="none"/></>,
   project: <><path d="M5 3.5h10l4 4v13H5z"/><path d="M15 3.5v4h4M8.5 12h7M8.5 16h5"/></>,
   help: <><circle cx="12" cy="12" r="9"/><path d="M9.3 9a2.8 2.8 0 0 1 5.4 1.1c0 2.1-2.7 2.4-2.7 4.6M12 18h.01"/></>,
+  shape: <><rect x="3.5" y="8" width="9.5" height="9.5" rx="2"/><circle cx="16.5" cy="8" r="4"/></>,
 }
 
 export default function Icon({ name, className = '', ...props }: { name: IconName } & SVGProps<SVGSVGElement>) {

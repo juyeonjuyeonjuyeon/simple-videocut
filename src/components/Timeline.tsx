@@ -799,8 +799,8 @@ export default function Timeline() {
                 <div key={`visual:${ref.type}:${ref.id}`} className="timeline__lane timeline__lane--visual timeline__lane--overlay" style={{ height: OV_LANE_H }}
                   onPointerDown={onTimelineBackgroundDown}>
                   {trackHeader(o.name, ref, { hidden: o.hidden, locked: o.locked })}
-                  {freeChip('overlay', o.id, o.start, overlayLength(o), 0, OV_LANE_H, o.color,
-                    `${o.kind === 'image' ? '이미지' : '영상'} · ${o.name}${o.repeat > 1 ? ` · 반복 ${o.repeat}회` : ''}${o.kind === 'video' && o.muted ? ' · 음소거' : ''}`,
+                  {freeChip('overlay', o.id, o.start, overlayLength(o), 0, OV_LANE_H, o.shape?.fillColor ?? o.color,
+                    `${o.shape ? '도형' : o.kind === 'image' ? '이미지' : '영상'} · ${o.name}${!o.shape && o.repeat > 1 ? ` · 반복 ${o.repeat}회` : ''}${o.kind === 'video' && o.muted ? ' · 음소거' : ''}`,
                     isSelected(ref),
                     <>{fadeVisual(o.fadeIn, o.fadeOut, overlayLength(o))}{keyframeVisual(o.positionKeyframes, overlayLength(o))}</>,
                     { hidden: o.hidden, locked: o.locked })}
@@ -952,6 +952,7 @@ export default function Timeline() {
         const canMute = target.type === 'audio'
           || (target.type === 'overlay' && st.overlays.find((x) => x.id === target.id)?.kind === 'video')
           || (target.type === 'background' && st.backgrounds.find((x) => x.id === target.id)?.kind === 'video')
+        const targetIsShape = target.type === 'overlay' && Boolean(st.overlays.find((x) => x.id === target.id)?.shape)
         const menuVisualOrder = normalizeVisualOrder(st.overlays, st.texts, st.visualOrder)
         const sharedVisualLayer = target.type === 'overlay' || target.type === 'text'
         const layerIndex = sharedVisualLayer
@@ -1077,12 +1078,12 @@ export default function Timeline() {
               <button role="menuitem" disabled={layerIndex <= 0} onClick={() => withTarget(target, () => moveLayerToEdge(-1))}>맨 아래로 내리기</button>
             </>}
 
-            {(target.type === 'clip' || target.type === 'overlay' || target.type === 'background') && <div className="timeline-menu__label">트랙 이동</div>}
+            {(target.type === 'clip' || (target.type === 'overlay' && !targetIsShape) || target.type === 'background') && <div className="timeline-menu__label">트랙 이동</div>}
             {target.type === 'clip' && <>
               <button role="menuitem" onClick={() => withTarget(target, () => moveClipToOverlay(target.id))}>오버레이 레이어로 이동</button>
               <button role="menuitem" onClick={() => withTarget(target, () => moveClipToBackground(target.id))}>배경 레이어로 이동</button>
             </>}
-            {target.type === 'overlay' && <button role="menuitem" onClick={() => withTarget(target, () => moveOverlayToMain(target.id))}>메인 트랙으로 이동</button>}
+            {target.type === 'overlay' && !targetIsShape && <button role="menuitem" onClick={() => withTarget(target, () => moveOverlayToMain(target.id))}>메인 트랙으로 이동</button>}
             {target.type === 'background' && <button role="menuitem" onClick={() => withTarget(target, () => moveBackgroundToMain(target.id))}>메인 트랙으로 이동</button>}
 
             <div className="timeline-menu__label">편집</div>

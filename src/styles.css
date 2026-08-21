@@ -361,6 +361,8 @@ button, input, textarea { font-family: inherit; }
   transform-origin: center;
 }
 .preview__overlay-media--free { width: 100%; height: 100%; object-fit: fill; }
+.preview__shape { display: block; width: 100%; height: auto; aspect-ratio: 1; overflow: visible; transform-origin: center; }
+.preview__shape--free { height: 100%; aspect-ratio: auto; }
 .preview__resize {
   position: absolute;
   width: 18px;
@@ -725,6 +727,26 @@ button, input, textarea { font-family: inherit; }
 .mask-picker button.is-active { color: #fff; border-color: var(--accent); background: var(--accent); }
 .mask-picker svg { width: 36px; height: 28px; overflow: visible; }
 .mask-picker path { fill: currentColor; stroke: none; }
+.shape-style-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-bottom: 12px; }
+.shape-style-picker button {
+  min-width: 0;
+  min-height: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text-dim);
+  background: var(--bg-2);
+  font-size: 10px;
+  cursor: pointer;
+}
+.shape-style-picker button:hover { color: var(--text); border-color: var(--line-strong); }
+.shape-style-picker button.is-active { color: #fff; border-color: var(--accent); background: var(--accent); }
+.shape-style-picker .shape-icon { width: 32px; height: 28px; fill: currentColor; }
 .style-color { min-height: 36px; display: grid; grid-template-columns: minmax(0, 1fr) 42px 68px; align-items: center; gap: 8px; color: var(--text-dim); font-size: 13px; }
 .style-color input[type='color'] { width: 42px; height: 32px; }
 .style-color code { color: var(--text); font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; }
@@ -2036,7 +2058,7 @@ input[type='range']:disabled { opacity: 0.4; }
   display: grid;
   place-items: center;
   padding: 16px;
-  z-index: 100;
+  z-index: 2000;
 }
 .modal__panel {
   position: relative;
@@ -2099,6 +2121,29 @@ input[type='range']:disabled { opacity: 0.4; }
 .help-shortcuts__row { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; border-top: 1px solid var(--line); color: var(--text-dim); font-size: 12px; }
 .help-shortcuts__row:nth-child(-n + 2) { border-top: 0; }
 .help-shortcuts__row kbd { flex: 0 0 auto; padding: 3px 7px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; color: var(--text); background: var(--bg-1); font-family: inherit; font-size: 11px; font-weight: 600; line-height: 1.3; white-space: nowrap; }
+.shape-dialog__panel { width: min(520px, calc(100vw - 24px)); }
+.shape-dialog__panel .modal__head p { margin: 4px 0 0; color: var(--text-dim); font-size: 12px; }
+.shape-picker { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding: 16px; }
+.shape-picker > button {
+  min-width: 0;
+  min-height: 92px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 10px 6px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  color: var(--text);
+  background: var(--bg-2);
+  cursor: pointer;
+}
+.shape-picker > button:hover,
+.shape-picker > button:focus-visible { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg-1)); outline: none; }
+.shape-picker > button span { font-size: 11px; font-weight: 700; }
+.shape-icon { width: 42px; height: 42px; overflow: visible; fill: var(--accent); stroke: none; }
+.shape-dialog__hint { margin: 0 16px 16px; color: var(--text-dim); font-size: 11px; line-height: 1.55; }
 .timeline__multi-select--on { color: var(--accent-strong); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--bg-1)); }
 
 .progress { display: flex; flex-direction: column; gap: 8px; }
@@ -2195,6 +2240,10 @@ input[type='range']:disabled { opacity: 0.4; }
   .preview__resize--r { right: -9px; }
   .preview__rotate { width: 28px; height: 28px; margin-left: -14px; bottom: -44px; }
   .crophandle { min-width: 26px; min-height: 26px; }
+}
+
+@media (max-width: 520px) {
+  .shape-picker { grid-template-columns: repeat(3, minmax(0, 1fr)); max-height: min(58vh, 440px); overflow-y: auto; }
 }
 
 @media (max-width: 520px) {

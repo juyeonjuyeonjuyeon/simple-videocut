@@ -17,6 +17,7 @@ import MediaPanel from './components/MediaPanel'
 import HelpDialog from './components/HelpDialog'
 import CropDialog from './components/CropDialog'
 import ThemePicker from './components/ThemePicker'
+import ShapePicker from './components/ShapePicker'
 
 const ACTIVE_PROJECT_KEY = 'simplecut-active-project-name'
 
@@ -45,6 +46,7 @@ export default function App() {
   const importMediaFiles = useEditor((s) => s.importMediaFiles)
   const addFiles = useEditor((s) => s.addFiles)
   const addOverlayFiles = useEditor((s) => s.addOverlayFiles)
+  const addShape = useEditor((s) => s.addShape)
   const addAudioFiles = useEditor((s) => s.addAudioFiles)
   const addBackground = useEditor((s) => s.addBackground)
   const splitAtPlayhead = useEditor((s) => s.splitAtPlayhead)
@@ -72,6 +74,7 @@ export default function App() {
   const [showExport, setShowExport] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const [showCropEditor, setShowCropEditor] = useState(false)
+  const [showShapes, setShowShapes] = useState(false)
   const [showProjectHome, setShowProjectHome] = useState(false)
   const [projectDialogMode, setProjectDialogMode] = useState<'manage' | 'saveAs' | null>(null)
   const [lastProjectName, setLastProjectName] = useState<string | null>(() => {
@@ -294,10 +297,11 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable
-      const modalOpen = showExport || showHelp || showCropEditor || showProjectHome || projectDialogMode !== null
+      const modalOpen = showExport || showHelp || showCropEditor || showShapes || showProjectHome || projectDialogMode !== null
       if (e.key === 'Escape' && modalOpen) {
         e.preventDefault()
         if (showCropEditor) setShowCropEditor(false)
+        else if (showShapes) setShowShapes(false)
         else if (showHelp) setShowHelp(false)
         else if (showExport) setShowExport(false)
         else if (projectDialogMode) setProjectDialogMode(null)
@@ -464,6 +468,7 @@ export default function App() {
             <button className="btn btn--sm" onClick={splitAtPlayhead} disabled={!hasClips} title="단축키: S"><Icon name="split" />분할</button>
             <button className="btn btn--sm" onClick={addBackground}><Icon name="palette" />배경</button>
             <button className="btn btn--sm" onClick={addText}><Icon name="text" />텍스트</button>
+            <button className="btn btn--sm" onClick={() => setShowShapes(true)}><Icon name="shape" />도형</button>
             <button className="iconbtn" onClick={undo} disabled={!canUndo} title="실행 취소" aria-label="실행 취소"><Icon name="undo" /></button>
             <button className="iconbtn" onClick={redo} disabled={!canRedo} title="다시 실행" aria-label="다시 실행"><Icon name="redo" /></button>
             <button className="btn btn--sm" onClick={duplicateSelected} disabled={!selection} title="단축키: ⌘D"><Icon name="copy" />복제</button>
@@ -479,6 +484,12 @@ export default function App() {
 
       {showExport && <ExportDialog onClose={() => setShowExport(false)} />}
       {showCropEditor && <CropDialog onClose={() => setShowCropEditor(false)} />}
+      {showShapes && <ShapePicker onClose={() => setShowShapes(false)} onSelect={(kind) => {
+        addShape(kind)
+        setShowShapes(false)
+        setInspectorOpen(true)
+        if (window.innerWidth <= 860) setMediaPanelOpen(false)
+      }} />}
       {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
       {showProjectHome && <ProjectHome
         activeName={activeProjectName}

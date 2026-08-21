@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import { useEditor } from '../store'
-import type { MediaAsset } from '../types'
+import type { MediaAsset, ShapeKind } from '../types'
 import { audioLength, clipStartOffsets, clipTimelineDuration, formatTime, overlayLength } from '../utils/time'
 import Icon from './Icon'
+import ShapeIcon from './ShapeIcon'
 
 interface Props {
   onClose: () => void
@@ -37,7 +38,7 @@ export default function MediaPanel({ onClose, onImport }: Props) {
 
   const usageRows = useMemo(() => [
     ...clips.map((item, index) => ({ type: 'clip' as const, id: item.id, assetId: item.assetId, name: item.name, kind: item.kind, label: '메인', start: offsets[index], length: clipTimelineDuration(item), src: item.src, color: item.bgColor })),
-    ...overlays.map((item) => ({ type: 'overlay' as const, id: item.id, assetId: item.assetId, name: item.name, kind: item.kind, label: '레이어', start: item.start, length: overlayLength(item), src: item.src, color: undefined })),
+    ...overlays.map((item) => ({ type: 'overlay' as const, id: item.id, assetId: item.assetId, name: item.name, kind: item.kind, shapeKind: item.shape?.kind, label: item.shape ? '도형' : '레이어', start: item.start, length: overlayLength(item), src: item.src, color: item.shape?.fillColor })),
     ...audios.map((item) => ({ type: 'audio' as const, id: item.id, assetId: item.assetId, name: item.name, kind: 'audio' as const, label: '오디오', start: item.start, length: audioLength(item), src: item.src, color: undefined })),
     ...backgrounds.map((item) => ({ type: 'background' as const, id: item.id, assetId: item.assetId, name: item.name, kind: item.kind, label: '배경', start: item.start, length: clipTimelineDuration(item), src: item.src, color: item.bgColor })),
   ], [audios, backgrounds, clips, offsets, overlays])
@@ -65,10 +66,10 @@ export default function MediaPanel({ onClose, onImport }: Props) {
     if (focusedAsset === asset.id) setFocusedAsset(null)
   }
 
-  const mediaThumb = (item: { kind: string; src: string; color?: string }) => (
+  const mediaThumb = (item: { kind: string; src: string; color?: string; shapeKind?: ShapeKind }) => (
     <span className="media-row__thumb" style={item.kind === 'color' ? { background: item.color || '#000' } : undefined}>
-      {item.kind === 'image' && <img src={item.src} alt="" />}
-      {item.kind !== 'image' && item.kind !== 'color' && <Icon name={item.kind === 'audio' ? 'music' : 'video'} />}
+      {item.shapeKind ? <ShapeIcon kind={item.shapeKind} /> : item.kind === 'image' ? <img src={item.src} alt="" /> : null}
+      {!item.shapeKind && item.kind !== 'image' && item.kind !== 'color' && <Icon name={item.kind === 'audio' ? 'music' : 'video'} />}
     </span>
   )
 
