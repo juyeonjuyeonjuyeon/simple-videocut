@@ -145,6 +145,29 @@ describe('timeline splitting', () => {
     ])
   })
 
+  it('preserves a styled text layer when a saved project is restored', () => {
+    const text: TextOverlay = {
+      id: 'text-restored', text: '기존 일반 텍스트', start: 0.25, end: 1.75,
+      x: 0.35, y: 0.72, size: 0.09, color: '#fefefe', colorAlpha: 0.85,
+      box: true, boxColor: '#123456', boxAlpha: 0.4, font: 'sans-serif',
+      strokeWidth: 0.08, strokeColor: '#010101', shadow: true,
+      shadowColor: '#222222', shadowBlur: 0.15, shadowDist: 0.05,
+      align: 'right', angle: 12, opacity: 0.9, locked: true, hidden: false,
+      fadeIn: 0.2, fadeOut: 0.3, positionKeyframes: [],
+    }
+    const project: ProjectState = {
+      clips: [clip(1)], overlays: [], audios: [], backgrounds: [], texts: [text],
+      visualOrder: [{ type: 'text', id: text.id }],
+      aspectRatio: '16:9', exportSettings: { height: 720, format: 'mp4', filename: 'text-restore' },
+    }
+
+    useEditor.getState().replaceProject(project)
+
+    expect(useEditor.getState().texts).toEqual([text])
+    expect(useEditor.getState().visualOrder).toEqual([{ type: 'text', id: text.id }])
+    expect(useEditor.getState().selection).toBeNull()
+  })
+
   it('reuses one media-bin source on multiple tracks without deleting timeline instances', () => {
     const file = new File(['image'], 'still.png', { type: 'image/png' })
     const asset: MediaAsset = {
