@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useEditor } from '../store'
-import type { AspectRatio } from '../types'
+import type { AspectRatio, Overlay } from '../types'
 import {
   resolveTimelineTime,
   totalDuration,
@@ -17,6 +17,7 @@ import { normalizeVisualOrder, PREVIEW_Z, visualPreviewZ } from '../utils/layers
 import { startPointerDrag } from '../utils/pointer'
 import { positionAt } from '../utils/motion'
 import Icon from './Icon'
+import { maskClipPath, maskPathData, resolveOverlayStyle } from '../utils/overlay-style'
 
 const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
 const DRIFT = 0.35 // seconds before we hard-seek a media element back in sync
@@ -43,6 +44,40 @@ function fitBox(cw: number, ch: number, r: number): { w: number; h: number } {
     w = h * r
   }
   return { w: Math.floor(w), h: Math.floor(h) }
+}
+
+function OverlayDecoration({ overlay, frameHeight }: { overlay: Overlay; frameHeight: number }) {
+  const ref = useRef<SVGSVGElement>(null)
+  const [size, setSize] = useState({ width: 100, height: 100 })
+  const style = resolveOverlayStyle(overlay)
+  const borderWidth = style.borderWidth * frameHeight
+  const enabled = borderWidth >= 0.5
+
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const measure = () => setSize({ width: Math.max(1, element.clientWidth), height: Math.max(1, element.clientHeight) })
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    measure()
+    return () => observer.disconnect()
+  }, [enabled])
+
+  if (!enabled) return null
+  const path = (inset: number) => maskPathData(style.maskShape, size.width, size.height, inset)
+  const common = { fill: 'none', stroke: style.borderColor, strokeLinejoin: 'round' as const }
+  return (
+    <svg ref={ref} className="preview__overlay-decoration" viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" aria-hidden="true">
+      {style.borderStyle === 'double' ? <>
+        <path {...common} d={path(borderWidth / 6)} strokeWidth={Math.max(1, borderWidth / 3)} />
+        <path {...common} d={path(borderWidth * 5 / 6)} strokeWidth={Math.max(1, borderWidth / 3)} />
+      </> : (
+        <path {...common} d={path(borderWidth / 2)} strokeWidth={borderWidth}
+          strokeDasharray={style.borderStyle === 'dashed' ? `${borderWidth * 3} ${borderWidth * 2}` : style.borderStyle === 'dotted' ? `0.1 ${borderWidth * 1.9}` : undefined}
+          strokeLinecap={style.borderStyle === 'dotted' ? 'round' : 'butt'} />
+      )}
+    </svg>
+  )
 }
 
 export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
@@ -257,6 +292,8 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
         wrap.style.top = `${position.y * 100}%`
       }
       const media = overlayEls.current.get(o.id)
+      const clip = wrap?.querySelector<HTMLElement>('.preview__overlay-clip')
+      if (clip && wrap) clip.style.clipPath = maskClipPath(resolveOverlayStyle(o).maskShape, wrap.offsetWidth, wrap.offsetHeight)
       if (media) {
         media.style.transform = `${cssCropFill(o.crop)} ${cssTransform(o.rotate, o.flipH, o.flipV)}`.trim()
         media.style.clipPath = 'none'
@@ -614,6 +651,10 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
         {overlays.map((o) => {
           const sel = selection?.type === 'overlay' && selection.id === o.id
           const position = positionAt(o, playhead - o.start)
+          const visualStyle = resolveOverlayStyle(o)
+          const shadow = visualStyle.shadowEnabled
+            ? `drop-shadow(${visualStyle.shadowX * box.h}px ${visualStyle.shadowY * box.h}px ${visualStyle.shadowBlur * box.h}px ${hexToRgba(visualStyle.shadowColor, visualStyle.shadowOpacity)})`
+            : 'none'
           return (
             <div
               key={o.id}
@@ -632,7 +673,7 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
               onPointerDown={(e) => onOverlayDown(e, o.id)}
               onDoubleClick={(e) => { e.stopPropagation(); if (sel) onOpenCrop() }}
             >
-              <div className="preview__overlay-clip">
+              <div className="preview__overlay-clip" style={{ clipPath: maskClipPath(visualStyle.maskShape), filter: shadow }}>
                 {o.kind === 'video' ? (
                   <video
                     ref={(el) => { if (el) overlayEls.current.set(o.id, el); else overlayEls.current.delete(o.id) }}
@@ -649,6 +690,7 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
                   />
                 )}
               </div>
+              <OverlayDecoration overlay={o} frameHeight={box.h} />
             </div>
           )
         })}

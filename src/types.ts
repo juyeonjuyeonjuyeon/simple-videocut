@@ -7,6 +7,10 @@ export type VisualKind = 'video' | 'image' | 'color'
 
 export type Rotation = 0 | 90 | 180 | 270
 
+export type OverlayBorderStyle = 'solid' | 'dashed' | 'dotted' | 'double'
+
+export type OverlayMaskShape = 'none' | 'rounded' | 'circle' | 'ellipse' | 'heart' | 'star' | 'hexagon'
+
 /** Crop insets as a fraction (0..0.45) of each side. */
 export interface Crop {
   top: number
@@ -143,6 +147,18 @@ export interface Overlay {
   locked?: boolean
   /** Hidden layers stay in the project/timeline but are skipped in preview/export. */
   hidden?: boolean
+  /** Border width as a fraction of the output frame height. */
+  borderWidth?: number
+  borderColor?: string
+  borderStyle?: OverlayBorderStyle
+  shadowEnabled?: boolean
+  shadowColor?: string
+  shadowOpacity?: number
+  /** Shadow blur and offsets as fractions of the output frame height. */
+  shadowBlur?: number
+  shadowX?: number
+  shadowY?: number
+  maskShape?: OverlayMaskShape
   fadeIn?: number
   fadeOut?: number
   positionKeyframes?: PositionKeyframe[]

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useEditor } from '../store'
-import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop, PositionKeyframe, KeyframeEasing } from '../types'
+import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop, PositionKeyframe, KeyframeEasing, OverlayBorderStyle, OverlayMaskShape } from '../types'
 import { NO_CROP } from '../types'
 import { formatTime, formatClock, parseClock, clipTimelineDuration, overlayLength, audioLength, totalDuration, exactDurationPatch } from '../utils/time'
 import { rotateBy } from '../utils/transform'
@@ -8,10 +8,13 @@ import Icon from './Icon'
 import { keyframeAt, positionAt } from '../utils/motion'
 import { normalizeVisualOrder } from '../utils/layers'
 import FontPicker from './FontPicker'
+import { maskPathData, OVERLAY_STYLE_DEFAULTS, resolveOverlayStyle } from '../utils/overlay-style'
 
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
-  'timelineDuration' | 'fadeIn' | 'fadeOut' | 'opacity' | 'locked' | 'hidden' | 'scaleY' | 'aspectLocked'>>
+  'timelineDuration' | 'fadeIn' | 'fadeOut' | 'opacity' | 'locked' | 'hidden' | 'scaleY' | 'aspectLocked' |
+  'borderWidth' | 'borderColor' | 'borderStyle' | 'shadowEnabled' | 'shadowColor' | 'shadowOpacity' |
+  'shadowBlur' | 'shadowX' | 'shadowY' | 'maskShape'>>
 
 type InspectorTab = 'basic' | 'transform' | 'style' | 'time' | 'audio'
 interface InspectorTabOption { id: InspectorTab; label: string }
@@ -147,6 +150,34 @@ function AlignIcon({ a }: { a: TextOverlay['align'] }) {
         return <rect key={i} x={x} y={y} width={lw} height={1.7} rx={0.85} fill="currentColor" />
       })}
     </svg>
+  )
+}
+
+const MASK_OPTIONS: Array<{ value: OverlayMaskShape; label: string }> = [
+  { value: 'none', label: '사각형' },
+  { value: 'rounded', label: '둥근 사각형' },
+  { value: 'circle', label: '원' },
+  { value: 'ellipse', label: '타원' },
+  { value: 'heart', label: '하트' },
+  { value: 'star', label: '별' },
+  { value: 'hexagon', label: '육각형' },
+]
+
+function MaskIcon({ shape }: { shape: OverlayMaskShape }) {
+  return (
+    <svg viewBox="0 0 36 28" aria-hidden="true" focusable="false">
+      <path d={maskPathData(shape, 34, 26, 1)} />
+    </svg>
+  )
+}
+
+function ColorControl({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="style-color">
+      <span>{label}</span>
+      <input type="color" value={value} onChange={(event) => onChange(event.target.value)} />
+      <code>{value.toUpperCase()}</code>
+    </label>
   )
 }
 
@@ -403,6 +434,7 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
   const patch = (p: Patch) => update(ov.id, p)
   const localTime = Math.max(0, Math.min(playhead - ov.start, overlayLength(ov)))
   const position = positionAt(ov, localTime)
+  const visualStyle = resolveOverlayStyle(ov)
 
   return (
     <div className="inspector__body">
@@ -452,6 +484,57 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
             onSeek={(frame) => setPlayhead(ov.start + frame.time)}
             onEasing={(keyframeId, easing) => setPositionKeyframeEasing('overlay', ov.id, keyframeId, easing)} />
         </InspectorBlock>
+      </>}
+      {tab === 'style' && <>
+        <InspectorBlock title="마스크 모양">
+          <div className="mask-picker" role="radiogroup" aria-label="오버레이 마스크 모양">
+            {MASK_OPTIONS.map((option) => (
+              <button type="button" role="radio" aria-checked={visualStyle.maskShape === option.value} key={option.value}
+                className={visualStyle.maskShape === option.value ? 'is-active' : ''}
+                onClick={() => update(ov.id, { maskShape: option.value })}>
+                <MaskIcon shape={option.value} />
+                <span>{option.label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="inspector__hint">마스크는 원본을 지우지 않고 보이는 모양만 바꿉니다.</div>
+        </InspectorBlock>
+        <InspectorBlock title="테두리">
+          <div className="inspector__group">
+            <Range label="굵기" value={Math.round(visualStyle.borderWidth * 720)} min={0} max={40} step={1} unit="px"
+              onChange={(value) => update(ov.id, { borderWidth: value / 720 })} />
+            <ColorControl label="색상" value={visualStyle.borderColor} onChange={(borderColor) => update(ov.id, { borderColor })} />
+            <label className="style-select">
+              <span>선 스타일</span>
+              <select value={visualStyle.borderStyle} onChange={(event) => update(ov.id, { borderStyle: event.target.value as OverlayBorderStyle })}>
+                <option value="solid">실선</option>
+                <option value="dashed">긴 점선</option>
+                <option value="dotted">둥근 점선</option>
+                <option value="double">이중선</option>
+              </select>
+            </label>
+          </div>
+        </InspectorBlock>
+        <InspectorBlock title="그림자">
+          <div className="inspector__group">
+            <label className="switch">
+              <input type="checkbox" checked={visualStyle.shadowEnabled} onChange={(event) => update(ov.id, { shadowEnabled: event.target.checked })} />
+              <span>그림자 사용</span>
+            </label>
+            {visualStyle.shadowEnabled && <>
+              <ColorControl label="색상" value={visualStyle.shadowColor} onChange={(shadowColor) => update(ov.id, { shadowColor })} />
+              <Range label="불투명도" value={Math.round(visualStyle.shadowOpacity * 100)} min={0} max={100} step={1} unit="%"
+                onChange={(value) => update(ov.id, { shadowOpacity: value / 100 })} />
+              <Range label="흐림" value={Math.round(visualStyle.shadowBlur * 720)} min={0} max={40} step={1} unit="px"
+                onChange={(value) => update(ov.id, { shadowBlur: value / 720 })} />
+              <Range label="가로 위치" value={Math.round(visualStyle.shadowX * 720)} min={-40} max={40} step={1} unit="px"
+                onChange={(value) => update(ov.id, { shadowX: value / 720 })} />
+              <Range label="세로 위치" value={Math.round(visualStyle.shadowY * 720)} min={-40} max={40} step={1} unit="px"
+                onChange={(value) => update(ov.id, { shadowY: value / 720 })} />
+            </>}
+          </div>
+        </InspectorBlock>
+        <button className="btn" onClick={() => update(ov.id, { ...OVERLAY_STYLE_DEFAULTS })}>스타일 초기화</button>
       </>}
       {tab === 'time' && <>
         <InspectorBlock title="트림">
@@ -655,7 +738,7 @@ export default function Inspector({ onOpenCrop }: { onOpenCrop: () => void }) {
     : selAudio
       ? [{ id: 'basic', label: '오디오' }, { id: 'time', label: '시간' }]
       : selOverlay
-        ? [{ id: 'basic', label: '기본' }, { id: 'transform', label: '변형' }, { id: 'time', label: '시간' }, ...(selOverlay.kind === 'video' ? [{ id: 'audio' as const, label: '오디오' }] : [])]
+        ? [{ id: 'basic', label: '기본' }, { id: 'transform', label: '변형' }, { id: 'style', label: '스타일' }, { id: 'time', label: '시간' }, ...(selOverlay.kind === 'video' ? [{ id: 'audio' as const, label: '오디오' }] : [])]
         : selClip
           ? [{ id: 'basic', label: '기본' }, ...(selClip.kind === 'color' ? [] : [{ id: 'transform' as const, label: '변형' }]), { id: 'time', label: '시간' }, ...(selClip.kind === 'video' ? [{ id: 'audio' as const, label: '오디오' }] : [])]
           : selBg

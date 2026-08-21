@@ -31,6 +31,12 @@ test('exported MP4 keeps the same overlay order as the preview', async ({ page }
     await page.locator('header input[type=file]').nth(1).setInputFiles([lower, upper])
     await expect(page.locator('.preview__overlay')).toHaveCount(2)
 
+    await page.locator('.tlclip', { hasText: 'upper-blue.png' }).click()
+    await page.getByRole('tab', { name: '스타일', exact: true }).click()
+    await page.getByRole('radio', { name: '별', exact: true }).click()
+    await page.locator('.ctl').filter({ hasText: '굵기' }).locator('input[type=range]').fill('8')
+    await page.getByRole('checkbox', { name: '그림자 사용', exact: true }).check()
+
     // Selecting the lower layer used to pull it above the real front layer only in the preview.
     await page.locator('.tlclip', { hasText: 'lower-red.png' }).click()
     const lowerZ = Number.parseInt(await page.locator('[data-layer-name="lower-red.png"]').evaluate((element) => getComputedStyle(element).zIndex), 10)
@@ -49,7 +55,7 @@ test('exported MP4 keeps the same overlay order as the preview', async ({ page }
 
     const preview = page.locator('video.modal__preview')
     await preview.waitFor({ state: 'visible' })
-    const center = await preview.evaluate(async (video: HTMLVideoElement) => {
+    const pixels = await preview.evaluate(async (video: HTMLVideoElement) => {
       if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
         await new Promise<void>((resolve) => video.addEventListener('loadeddata', () => resolve(), { once: true }))
       }
@@ -60,11 +66,14 @@ test('exported MP4 keeps the same overlay order as the preview', async ({ page }
       canvas.height = video.videoHeight
       const context = canvas.getContext('2d')!
       context.drawImage(video, 0, 0)
-      return [...context.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data]
+      const sample = (x: number, y: number) => [...context.getImageData(Math.floor(canvas.width * x), Math.floor(canvas.height * y), 1, 1).data]
+      return { center: sample(0.5, 0.5), maskedCorner: sample(0.34, 0.34) }
     })
 
-    expect(center[2]).toBeGreaterThan(180)
-    expect(center[2]).toBeGreaterThan(center[0] + 100)
+    expect(pixels.center[2]).toBeGreaterThan(180)
+    expect(pixels.center[2]).toBeGreaterThan(pixels.center[0] + 100)
+    expect(pixels.maskedCorner[0]).toBeGreaterThan(180)
+    expect(pixels.maskedCorner[0]).toBeGreaterThan(pixels.maskedCorner[2] + 100)
   } finally {
     rmSync(temp, { recursive: true, force: true })
   }

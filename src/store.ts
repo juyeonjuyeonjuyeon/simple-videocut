@@ -6,6 +6,7 @@ import { assertMediaCapacity, probeVideo, probeImage, probeAudio, nextClipColor,
 import { clipTimelineDuration, clipStartOffsets, projectDuration, overlayLength, audioLength, exactDurationPatch } from './utils/time'
 import { keyframeAt, positionAt } from './utils/motion'
 import { normalizeVisualOrder } from './utils/layers'
+import { OVERLAY_STYLE_DEFAULTS } from './utils/overlay-style'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
 const registerNativeMedia = async (file: File) => {
@@ -255,6 +256,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         x: 0.5, y: 0.5, scale: 0.4, scaleY: undefined, aspectLocked: true, angle: 0,
         speed: 1, volume: 1, muted: false, ...TRANSFORM_DEFAULTS, repeat: 1,
         opacity: 1, locked: false, hidden: false, fadeIn: 0, fadeOut: 0, positionKeyframes: [],
+        ...OVERLAY_STYLE_DEFAULTS,
       }
       return {
         overlays: [...s.overlays, overlay],
@@ -452,6 +454,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const ov: Overlay = {
       ...c, start, x: 0.5, y: 0.5, scale: 0.5, scaleY: undefined, aspectLocked: true, angle: 0,
       opacity: 1, locked: false, hidden: false, positionKeyframes: [],
+      ...OVERLAY_STYLE_DEFAULTS,
     }
     set({
       clips: s.clips.filter((x) => x.id !== id),
@@ -552,6 +555,7 @@ export const useEditor = create<EditorState>((set, get) => ({
           start, x: 0.5, y: 0.5, scale: 0.4, scaleY: undefined, aspectLocked: true, angle: 0, speed: 1, volume: 1, muted: false,
           ...TRANSFORM_DEFAULTS, repeat: 1, opacity: 1, locked: false, hidden: false,
           fadeIn: 0, fadeOut: 0, positionKeyframes: [],
+          ...OVERLAY_STYLE_DEFAULTS,
         }
         if (isImageFile(file)) {
           const { src } = await probeImage(file)
@@ -595,6 +599,11 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.repeat = Math.max(1, Math.min(Math.round(next.repeat), 99))
         normalizeExactDuration(next, patch, (next.trimEnd - next.trimStart) / next.speed)
         next.opacity = Math.max(0, Math.min(next.opacity ?? 1, 1))
+        next.borderWidth = Math.max(0, Math.min(next.borderWidth ?? OVERLAY_STYLE_DEFAULTS.borderWidth, 40 / 720))
+        next.shadowOpacity = Math.max(0, Math.min(next.shadowOpacity ?? OVERLAY_STYLE_DEFAULTS.shadowOpacity, 1))
+        next.shadowBlur = Math.max(0, Math.min(next.shadowBlur ?? OVERLAY_STYLE_DEFAULTS.shadowBlur, 40 / 720))
+        next.shadowX = Math.max(-40 / 720, Math.min(next.shadowX ?? OVERLAY_STYLE_DEFAULTS.shadowX, 40 / 720))
+        next.shadowY = Math.max(-40 / 720, Math.min(next.shadowY ?? OVERLAY_STYLE_DEFAULTS.shadowY, 40 / 720))
         clampFades(next, overlayLength(next))
         next.positionKeyframes = (next.positionKeyframes ?? [])
           .map((frame) => ({ ...frame, time: Math.max(0, Math.min(frame.time, overlayLength(next))) }))
@@ -628,9 +637,13 @@ export const useEditor = create<EditorState>((set, get) => ({
       // Drop the overlay-only fields; the rest is a Clip.
       const {
         start: _s, x: _x, y: _y, scale: _sc, scaleY: _sy, aspectLocked: _al, angle: _a,
-        opacity: _o, locked: _l, hidden: _h, positionKeyframes: _pk, ...clip
+        opacity: _o, locked: _l, hidden: _h, positionKeyframes: _pk,
+        borderWidth: _bw, borderColor: _bc, borderStyle: _bs,
+        shadowEnabled: _se, shadowColor: _sc2, shadowOpacity: _so, shadowBlur: _sb, shadowX: _sx, shadowY: _sy2,
+        maskShape: _ms, ...clip
       } = o
       void _s; void _x; void _y; void _sc; void _sy; void _al; void _a; void _o; void _l; void _h; void _pk
+      void _bw; void _bc; void _bs; void _se; void _sc2; void _so; void _sb; void _sx; void _sy2; void _ms
       const offsets = clipStartOffsets(s.clips)
       const insertAt = offsets.findIndex((offset) => offset >= o.start - 1e-6)
       const index = insertAt < 0 ? s.clips.length : insertAt
@@ -1032,6 +1045,16 @@ function replaceEditorProject(p: ProjectState) {
     overlays: p.overlays.map((o) => ({
       ...o, assetId: linkedAssetId(o), angle: o.angle ?? 0, opacity: o.opacity ?? 1,
       locked: o.locked ?? false, hidden: o.hidden ?? false,
+      borderWidth: o.borderWidth ?? OVERLAY_STYLE_DEFAULTS.borderWidth,
+      borderColor: o.borderColor ?? OVERLAY_STYLE_DEFAULTS.borderColor,
+      borderStyle: o.borderStyle ?? OVERLAY_STYLE_DEFAULTS.borderStyle,
+      shadowEnabled: o.shadowEnabled ?? OVERLAY_STYLE_DEFAULTS.shadowEnabled,
+      shadowColor: o.shadowColor ?? OVERLAY_STYLE_DEFAULTS.shadowColor,
+      shadowOpacity: o.shadowOpacity ?? OVERLAY_STYLE_DEFAULTS.shadowOpacity,
+      shadowBlur: o.shadowBlur ?? OVERLAY_STYLE_DEFAULTS.shadowBlur,
+      shadowX: o.shadowX ?? OVERLAY_STYLE_DEFAULTS.shadowX,
+      shadowY: o.shadowY ?? OVERLAY_STYLE_DEFAULTS.shadowY,
+      maskShape: o.maskShape ?? OVERLAY_STYLE_DEFAULTS.maskShape,
       fadeIn: o.fadeIn ?? 0, fadeOut: o.fadeOut ?? 0, positionKeyframes: o.positionKeyframes ?? [],
     })),
     audios: p.audios.map((a) => ({ ...a, assetId: linkedAssetId(a), fadeIn: a.fadeIn ?? 0, fadeOut: a.fadeOut ?? 0 })),

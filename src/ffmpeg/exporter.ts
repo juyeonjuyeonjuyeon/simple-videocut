@@ -6,6 +6,7 @@ import { hexToRgba } from '../utils/color'
 import { hasNativeFFmpeg, NativeFFmpeg } from './native'
 import { positionExpression } from '../utils/motion'
 import { normalizeVisualOrder } from '../utils/layers'
+import { overlayOutputSize, renderOverlayEffectAssets } from '../utils/overlay-style'
 
 // Keep the encoding engine on the same origin. Exports must not depend on a
 // third-party CDN being reachable after the editor itself has loaded.
@@ -350,7 +351,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       normalizedBase: string,
       item: Clip | Overlay | Background,
       cover: boolean,
-    ): Promise<{ fileName: string; trimStart: number; hasAudio: boolean }> => {
+    ): Promise<{ fileName: string; trimStart: number; hasAudio: boolean; width: number; height: number }> => {
       progressReporter.setStage(0, 0)
       const info = await probeInput(fp, sourceName)
       const oversizedImage = item.kind === 'image' && (info.width > W || info.height > H)
@@ -366,7 +367,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       if (!needsNormalization) {
         progressReporter.setStage(0.05 + (0.2 * visualIndex) / Math.max(1, visualCount), 0)
         progressReporter.report(0)
-        return { fileName: sourceName, trimStart: item.trimStart, hasAudio: item.kind === 'video' && info.hasAudio }
+        return { fileName: sourceName, trimStart: item.trimStart, hasAudio: item.kind === 'video' && info.hasAudio, width: info.width, height: info.height }
       }
 
       const normalizedName = `${normalizedBase}.${item.kind === 'image' ? 'png' : 'mp4'}`
@@ -407,7 +408,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       await fp.deleteFile(sourceName).catch(() => {})
       progressReporter.setStage(0.05 + (0.2 * visualIndex) / Math.max(1, visualCount), 0)
       progressReporter.report(0)
-      return { fileName: normalizedName, trimStart: 0, hasAudio: item.kind === 'video' && info.hasAudio }
+      return { fileName: normalizedName, trimStart: 0, hasAudio: item.kind === 'video' && info.hasAudio, width: info.width, height: info.height }
     }
 
     // 1. Stage each clip without copying it through renderer memory, then
@@ -445,6 +446,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     const overlayAudioFlags: boolean[] = []
     const overlayFiles: string[] = []
     const overlayTrimStarts: number[] = []
+    const overlayEffects: Array<{ width: number; height: number; padding: number; maskName: string | null; decorationName: string | null }> = []
     for (let k = 0; k < overlays.length; k++) {
       if (!overlays[k].sourceSize) throw new Error(`원본 오버레이 파일이 비어 있습니다: ${overlays[k].name}`)
       await stageMedia(`ov${k}`, overlays[k])
@@ -452,6 +454,13 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       overlayFiles.push(prepared.fileName)
       overlayTrimStarts.push(prepared.trimStart)
       overlayAudioFlags.push(prepared.hasAudio)
+      const size = overlayOutputSize(overlays[k], prepared.width || W, prepared.height || H, W, H)
+      const assets = await renderOverlayEffectAssets(overlays[k], size.width, size.height, H)
+      const maskName = assets.mask ? `ovmask${k}.png` : null
+      const decorationName = assets.decoration ? `ovdecor${k}.png` : null
+      if (assets.mask && maskName) await fp.writeFile(maskName, assets.mask)
+      if (assets.decoration && decorationName) await fp.writeFile(decorationName, assets.decoration)
+      overlayEffects.push({ ...size, padding: assets.padding, maskName, decorationName })
     }
     const backgroundAudioFlags: boolean[] = []
     const backgroundFiles: string[] = []
@@ -527,9 +536,19 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         args.push('-ss', String(overlayTrimStarts[k]), '-t', String((o.trimEnd - o.trimStart) * repeat), '-i', overlayFiles[k])
       }
     })
-    const bgBase = ovBase + overlays.length
+    const overlayEffectIndexes = overlayEffects.map(() => ({ mask: -1, decoration: -1 }))
+    let freeInputCount = ovBase + overlays.length
+    overlayEffects.forEach((effect, k) => {
+      if (effect.maskName) {
+        overlayEffectIndexes[k].mask = freeInputCount++
+        args.push('-loop', '1', '-i', effect.maskName)
+      }
+      if (effect.decorationName) {
+        overlayEffectIndexes[k].decoration = freeInputCount++
+        args.push('-loop', '1', '-i', effect.decorationName)
+      }
+    })
     const bgInputIdx: number[] = []
-    let freeInputCount = bgBase
     backgrounds.forEach((b, k) => {
       if (b.kind === 'color') { bgInputIdx.push(-1); return }
       const repeat = repeatCountFor(clipBaseLength(b), clipTimelineDuration(b))
@@ -621,10 +640,9 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       const ovIdx = ovBase + k
       const len = ovLen(o)
       const shift = o.start
-      const ovW = Math.max(2, Math.round((o.scale * W) / 2) * 2)
-      const ovH = o.scaleY != null && !(o.aspectLocked ?? true)
-        ? Math.max(2, Math.round((o.scaleY * H) / 2) * 2)
-        : null
+      const effect = overlayEffects[k]
+      const ovW = effect.width
+      const ovH = effect.height
       // Pad the overlay's START with `shift` seconds (instead of shifting PTS) so
       // its timestamps begin at 0 like the base — avoids an overlay-sync deadlock.
       const speedF = o.kind === 'video' ? `setpts=PTS/${o.speed},` : ''
@@ -634,10 +652,29 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       const rotF = o.angle
         ? `rotate=a=${rad.toFixed(5)}:ow=rotw(${rad.toFixed(5)}):oh=roth(${rad.toFixed(5)}):c=0x00000000,`
         : ''
+      filters.push(`[${ovIdx}:v]${speedF}${spatialFilters(o)}scale=${ovW}:${ovH},format=rgba[ovbase${k}]`)
+      let styled = `[ovbase${k}]`
+      const indexes = overlayEffectIndexes[k]
+      if (indexes.mask >= 0) {
+        filters.push(`[${indexes.mask}:v]format=rgba,alphaextract[ovmask${k}]`)
+        filters.push(`${styled}[ovmask${k}]alphamerge[ovmasked${k}]`)
+        styled = `[ovmasked${k}]`
+      }
+      if (effect.padding > 0) {
+        const paddedW = ovW + effect.padding * 2
+        const paddedH = ovH + effect.padding * 2
+        filters.push(`${styled}pad=${paddedW}:${paddedH}:${effect.padding}:${effect.padding}:color=0x00000000[ovpad${k}]`)
+        styled = `[ovpad${k}]`
+      }
+      if (indexes.decoration >= 0) {
+        filters.push(`[${indexes.decoration}:v]format=rgba[ovdecor${k}]`)
+        filters.push(`${styled}[ovdecor${k}]overlay=0:0:eof_action=pass[ovstyled${k}]`)
+        styled = `[ovstyled${k}]`
+      }
       filters.push(
-        `[${ovIdx}:v]${speedF}${spatialFilters(o)}scale=${ovW}:${ovH ?? -2},format=rgba,${rotF}` +
-          `${videoEnvelope(len, o.fadeIn, o.fadeOut, o.opacity ?? 1)}` +
-          `tpad=start_duration=${shift.toFixed(3)}:start_mode=add:color=0x00000000[ovv${k}]`,
+        `${styled}${rotF}${videoEnvelope(len, o.fadeIn, o.fadeOut, o.opacity ?? 1)}` +
+        `trim=duration=${len.toFixed(3)},setpts=PTS-STARTPTS,` +
+        `tpad=start_duration=${shift.toFixed(3)}:start_mode=add:color=0x00000000[ovv${k}]`,
       )
     })
 
@@ -802,6 +839,7 @@ async function cleanup(fp: FFmpegEngine, outName: string, nClips: number, nTexts
   for (let i = 0; i < nClips; i++) names.push(`norm${i}.png`)
   for (let k = 0; k < nTexts; k++) names.push(`text${k}.png`)
   for (let k = 0; k < nOv; k++) names.push(`ov${k}`, `normov${k}.mp4`, `normov${k}.png`)
+  for (let k = 0; k < nOv; k++) names.push(`ovmask${k}.png`, `ovdecor${k}.png`)
   for (let k = 0; k < nBg; k++) names.push(`bg${k}`, `normbg${k}.mp4`, `normbg${k}.png`)
   for (let k = 0; k < nAudio; k++) names.push(`audio${k}`, `normaudio${k}.m4a`)
   for (const n of names) await fp.deleteFile(n).catch(() => {})
