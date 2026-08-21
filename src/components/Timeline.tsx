@@ -17,6 +17,7 @@ import {
 import { contrastText } from '../utils/color'
 import { normalizeVisualOrder, packVisualLanes } from '../utils/layers'
 import { startPointerDrag as startDrag } from '../utils/pointer'
+import { timelineWheelZoomFactor } from '../utils/timeline-zoom'
 import type { Clip, Selection, PositionKeyframe, TimelineItemRef } from '../types'
 import { AudioWaveform, ClipThumbnailStrip } from './TimelineMedia'
 import Icon from './Icon'
@@ -268,12 +269,13 @@ export default function Timeline() {
         return
       }
       e.preventDefault()
-      setFitMode(false)
       const rect = el.getBoundingClientRect()
       const cursorX = e.clientX - rect.left
-      const anchorTime = Math.max(0, (cursorX + el.scrollLeft - TRACK_HEADER_W) / pxPerSec)
-      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
+      if (e.deltaY === 0) return
+      setFitMode(false)
       setPxPerSec((p) => {
+        const anchorTime = Math.max(0, (cursorX + el.scrollLeft - TRACK_HEADER_W) / p)
+        const factor = timelineWheelZoomFactor(e.deltaY, e.deltaMode, el.clientHeight)
         const np = clampPps(p * factor)
         requestAnimationFrame(() => {
           const e2 = scrollRef.current
@@ -285,7 +287,7 @@ export default function Timeline() {
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [pxPerSec])
+  }, [])
 
   // ---- helpers ----
   const timeAt = (clientX: number) => {
