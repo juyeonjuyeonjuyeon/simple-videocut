@@ -346,6 +346,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.speed = Math.max(0.1, Math.min(next.speed, 4))
         next.volume = Math.max(0, Math.min(next.volume, 2))
         next.crop = clampCrop(next.crop)
+        if (next.backgroundRemovalSensitivity != null) next.backgroundRemovalSensitivity = Math.max(0, Math.min(next.backgroundRemovalSensitivity, 100))
         if (next.canvasX != null) next.canvasX = Math.max(0, Math.min(next.canvasX, 1))
         if (next.canvasY != null) next.canvasY = Math.max(0, Math.min(next.canvasY, 1))
         if (next.canvasScale != null) next.canvasScale = Math.max(0.05, Math.min(next.canvasScale, 3))
@@ -510,6 +511,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.repeat = Math.max(1, Math.min(Math.round(next.repeat), 99))
         next.start = Math.max(0, next.start)
         next.crop = clampCrop(next.crop)
+        if (next.backgroundRemovalSensitivity != null) next.backgroundRemovalSensitivity = Math.max(0, Math.min(next.backgroundRemovalSensitivity, 100))
         next.opacity = Math.max(0, Math.min(next.opacity ?? 1, 1))
         normalizeExactDuration(next, patch, (next.trimEnd - next.trimStart) / next.speed)
         clampFades(next, clipTimelineDuration(next))
@@ -625,6 +627,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.aspectLocked = next.aspectLocked ?? true
         next.start = Math.max(0, next.start)
         next.crop = clampCrop(next.crop)
+        if (next.backgroundRemovalSensitivity != null) next.backgroundRemovalSensitivity = Math.max(0, Math.min(next.backgroundRemovalSensitivity, 100))
         next.repeat = Math.max(1, Math.min(Math.round(next.repeat), 99))
         normalizeExactDuration(next, patch, (next.trimEnd - next.trimStart) / next.speed)
         next.opacity = Math.max(0, Math.min(next.opacity ?? 1, 1))

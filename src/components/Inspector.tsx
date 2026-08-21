@@ -12,11 +12,13 @@ import { maskPathData, OVERLAY_STYLE_DEFAULTS, resolveOverlayStyle } from '../ut
 import { resolveShapeStyle, SHAPE_OPTIONS, SHAPE_STYLE_DEFAULTS } from '../utils/shape'
 import ShapeIcon from './ShapeIcon'
 import { translate, useLanguage } from '../i18n'
+import { DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-removal'
 
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
   'timelineDuration' | 'fadeIn' | 'fadeOut' | 'opacity' | 'locked' | 'hidden' | 'scaleY' | 'aspectLocked' |
   'canvasX' | 'canvasY' | 'canvasScale' | 'canvasScaleY' | 'canvasAspectLocked' | 'canvasAngle' |
+  'backgroundRemovalEnabled' | 'backgroundRemovalSensitivity' |
   'borderWidth' | 'borderColor' | 'borderStyle' | 'shadowEnabled' | 'shadowColor' | 'shadowOpacity' |
   'shadowBlur' | 'shadowX' | 'shadowY' | 'maskShape'>>
 
@@ -74,6 +76,31 @@ function Range({ label, badge, value, min, max, step, unit = '', disabled, onCha
         </div>
         {unit && <span className="unit">{unit}</span>}
       </div>
+    </div>
+  )
+}
+
+function BackgroundRemovalRow({ enabled, sensitivity, onPatch }: {
+  enabled?: boolean
+  sensitivity?: number
+  onPatch: (patch: Patch) => void
+}) {
+  const value = sensitivity ?? DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY
+  return (
+    <div className="inspector__group background-removal-control">
+      <button type="button" className={`btn${enabled ? ' btn--on' : ' btn--primary'}`}
+        aria-pressed={Boolean(enabled)}
+        onClick={() => onPatch(enabled
+          ? { backgroundRemovalEnabled: false }
+          : { backgroundRemovalEnabled: true, backgroundRemovalSensitivity: value })}>
+        <Icon name="removeBackground" />
+        {enabled ? translate('배경 제거 해제', 'Restore background') : translate('배경 자동 제거', 'Remove background')}
+      </button>
+      {enabled && <Range label={translate('민감도', 'Sensitivity')} value={value} min={0} max={100} step={1} unit="%"
+        onChange={(backgroundRemovalSensitivity) => onPatch({ backgroundRemovalSensitivity })} />}
+      <div className="inspector__hint">{enabled
+        ? translate('민감도를 높이면 가장자리와 비슷한 색을 더 넓게 제거합니다. 원본 파일은 변경되지 않습니다.', 'Higher sensitivity removes a wider range of edge-like colours. The source file is unchanged.')
+        : translate('이미지 가장자리의 배경색을 자동 감지해 투명하게 만듭니다.', 'Automatically detects edge background colours and makes them transparent.')}</div>
     </div>
   )
 }
@@ -418,6 +445,9 @@ function ClipInspector({ clip, tab, onOpenCrop }: { clip: Clip; tab: InspectorTa
         <InspectorBlock title={translate('회전과 반전', 'Rotate and flip')}><TransformRow rotate={clip.rotate} flipH={clip.flipH} flipV={clip.flipV} onPatch={patch} /></InspectorBlock>
         <InspectorBlock title={translate('자르기', 'Crop')}><CropRow crop={clip.crop} onPatch={patch} onOpen={onOpenCrop} /></InspectorBlock>
       </>}
+      {tab === 'style' && clip.kind === 'image' && <InspectorBlock title={translate('배경 제거', 'Remove background')}>
+        <BackgroundRemovalRow enabled={clip.backgroundRemovalEnabled} sensitivity={clip.backgroundRemovalSensitivity} onPatch={patch} />
+      </InspectorBlock>}
       {tab === 'time' && <>
         <InspectorBlock title={translate('트림', 'Trim')}>
           <div className="inspector__group">
@@ -512,6 +542,9 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
         </InspectorBlock>
       </>}
       {tab === 'style' && <>
+        {!shapeStyle && ov.kind === 'image' && <InspectorBlock title={translate('배경 제거', 'Remove background')}>
+          <BackgroundRemovalRow enabled={ov.backgroundRemovalEnabled} sensitivity={ov.backgroundRemovalSensitivity} onPatch={patch} />
+        </InspectorBlock>}
         {shapeStyle ? <InspectorBlock title={translate('도형', 'Shape')}>
           <div className="shape-style-picker" role="radiogroup" aria-label={translate('도형 종류', 'Shape type')}>
             {SHAPE_OPTIONS.map((option) => (
@@ -739,6 +772,7 @@ function BackgroundInspector({ bg, tab }: { bg: Background; tab: InspectorTab })
           <div className="inspector__group"><NameField icon={<Icon name="palette" />} name={bg.name} onChange={(v) => update(bg.id, { name: v })} /><div className="inspector__hint">{translate('배경 레이어', 'Background layer')} · {translate('길이', 'Duration')} {formatTime(clipTimelineDuration(bg))}</div></div>
         </InspectorBlock>
         {bg.kind === 'color' && <InspectorBlock title={translate('색상', 'Color')}><div className="inspector__group inspector__row"><label className="field__label"><span>{translate('배경 색상', 'Background color')}</span></label><input type="color" value={bg.bgColor ?? '#000000'} onChange={(e) => update(bg.id, { bgColor: e.target.value })} /></div></InspectorBlock>}
+        {bg.kind === 'image' && <InspectorBlock title={translate('배경 제거', 'Remove background')}><BackgroundRemovalRow enabled={bg.backgroundRemovalEnabled} sensitivity={bg.backgroundRemovalSensitivity} onPatch={patch} /></InspectorBlock>}
         {bg.kind === 'video' && <InspectorBlock title={translate('오디오', 'Audio')}><VolumeRow volume={bg.volume} muted={bg.muted} onPatch={patch} /></InspectorBlock>}
         <InspectorBlock title={translate('레이어 상태', 'Layer state')}><LayerStateRow opacity={bg.opacity} locked={bg.locked} hidden={bg.hidden} onPatch={patch} /></InspectorBlock>
         <InspectorBlock title={translate('레이어 위치', 'Layer order')}><div className="inspector__group btnrow"><button className="btn" disabled={idx <= 0} onClick={() => raise(bg.id, -1)}>▼ {translate('아래로', 'Down')}</button><button className="btn" disabled={idx >= backgrounds.length - 1} onClick={() => raise(bg.id, 1)}>{translate('위로', 'Up')} ▲</button></div><button className="btn" onClick={() => toMain(bg.id)}><Icon name="video" />{translate('메인 트랙으로 이동', 'Move to main track')}</button></InspectorBlock>
@@ -787,7 +821,7 @@ export default function Inspector({ onOpenCrop }: { onOpenCrop: () => void }) {
       : selOverlay
         ? [{ id: 'basic', label: t('기본', 'Basic') }, { id: 'transform', label: t('변형', 'Transform') }, { id: 'style', label: t('스타일', 'Style') }, { id: 'time', label: t('시간', 'Timing') }, ...(selOverlay.kind === 'video' ? [{ id: 'audio' as const, label: t('오디오', 'Audio') }] : [])]
         : selClip
-          ? [{ id: 'basic', label: t('기본', 'Basic') }, ...(selClip.kind === 'color' ? [] : [{ id: 'transform' as const, label: t('변형', 'Transform') }]), { id: 'time', label: t('시간', 'Timing') }, ...(selClip.kind === 'video' ? [{ id: 'audio' as const, label: t('오디오', 'Audio') }] : [])]
+          ? [{ id: 'basic', label: t('기본', 'Basic') }, ...(selClip.kind === 'color' ? [] : [{ id: 'transform' as const, label: t('변형', 'Transform') }]), ...(selClip.kind === 'image' ? [{ id: 'style' as const, label: t('스타일', 'Style') }] : []), { id: 'time', label: t('시간', 'Timing') }, ...(selClip.kind === 'video' ? [{ id: 'audio' as const, label: t('오디오', 'Audio') }] : [])]
           : selBg
             ? [{ id: 'basic', label: t('기본', 'Basic') }, { id: 'time', label: t('시간', 'Timing') }]
             : [], [selAudio, selBg, selClip, selOverlay, selText, t])

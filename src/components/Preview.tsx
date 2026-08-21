@@ -21,6 +21,7 @@ import { maskClipPath, maskPathData, resolveOverlayStyle } from '../utils/overla
 import { resolveShapeStyle, shapePathData } from '../utils/shape'
 import { useLanguage } from '../i18n'
 import { resolveMainPlacement } from '../utils/main-placement'
+import BackgroundRemovedImage from './BackgroundRemovedImage'
 
 const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
 const DRIFT = 0.35 // seconds before we hard-seek a media element back in sync
@@ -297,7 +298,6 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
       wrap.style.opacity = String(clipOpacity)
     }
     if (clip.kind === 'image') {
-      if (img.getAttribute('src') !== clip.src) img.src = clip.src
       loadedMainId.current = clip.id
       img.style.display = ''
       img.style.opacity = '1'
@@ -800,8 +800,8 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
                 className="preview__bg-media" src={b.src} playsInline />
             )}
             {b.kind === 'image' && (
-              <img ref={(el) => { if (el) bgMediaEls.current.set(b.id, el); else bgMediaEls.current.delete(b.id) }}
-                className="preview__bg-media" src={b.src} alt="" />
+              <BackgroundRemovedImage source={b} ref={(el) => { if (el) bgMediaEls.current.set(b.id, el); else bgMediaEls.current.delete(b.id) }}
+                className="preview__bg-media" alt="" />
             )}
           </div>
         ))}
@@ -839,7 +839,7 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
                   if (activeMain?.kind === 'video') setMainNaturalSize({ id: activeMain.id, width: event.currentTarget.videoWidth, height: event.currentTarget.videoHeight })
                 }}
               />
-              <img ref={mainImgRef} className="preview__main-media" alt="" style={{
+              <BackgroundRemovedImage source={activeMain?.kind === 'image' ? activeMain : null} ref={mainImgRef} className="preview__main-media" alt="" style={{
                 display: 'none',
                 left: `${-((mainCrop?.left ?? 0) / mainKeptWidth) * 100}%`,
                 top: `${-((mainCrop?.top ?? 0) / mainKeptHeight) * 100}%`,
@@ -889,10 +889,10 @@ export default function Preview({ onOpenCrop }: { onOpenCrop: () => void }) {
                     playsInline
                   />
                 ) : (
-                  <img
+                  <BackgroundRemovedImage
+                    source={o}
                     ref={(el) => { if (el) overlayEls.current.set(o.id, el); else overlayEls.current.delete(o.id) }}
                     className={`preview__overlay-media${o.scaleY != null && !(o.aspectLocked ?? true) ? ' preview__overlay-media--free' : ''}`}
-                    src={o.src}
                     alt=""
                   />
                 )}

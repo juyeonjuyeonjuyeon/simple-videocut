@@ -4,15 +4,16 @@ import { saveProject } from './project'
 import type { Clip } from '../types'
 
 const makeProject = (): ProjectState => {
-  const file = new File(['desktop-media'], 'source.mp4', { type: 'video/mp4' })
+  const file = new File(['desktop-media'], 'source.png', { type: 'image/png' })
   const clip: Clip = {
-    id: 'clip-1', kind: 'video', name: file.name, src: 'blob:source', file,
+    id: 'clip-1', kind: 'image', name: file.name, src: 'blob:source', file,
     sourceSize: file.size,
     duration: 2, trimStart: 0, trimEnd: 2, speed: 1, volume: 1, muted: false,
-    hasAudio: true, color: '#123456', rotate: 0, flipH: false, flipV: false,
+    hasAudio: false, color: '#123456', rotate: 0, flipH: false, flipV: false,
     crop: { top: 0, right: 0, bottom: 0, left: 0 }, repeat: 1,
     canvasX: 0.35, canvasY: 0.6, canvasScale: 0.55, canvasScaleY: 0.8,
     canvasAspectLocked: false, canvasAngle: 12,
+    backgroundRemovalEnabled: true, backgroundRemovalSensitivity: 42,
   }
   return {
     clips: [clip], overlays: [], audios: [], backgrounds: [], texts: [],
@@ -48,6 +49,8 @@ describe('desktop project persistence', () => {
       canvasScaleY: 0.8,
       canvasAspectLocked: false,
       canvasAngle: 12,
+      backgroundRemovalEnabled: true,
+      backgroundRemovalSensitivity: 42,
     })
   })
 })

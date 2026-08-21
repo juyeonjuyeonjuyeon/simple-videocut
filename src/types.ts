@@ -57,6 +57,10 @@ export interface Transform {
   flipH: boolean
   flipV: boolean
   crop: Crop
+  /** Non-destructive automatic transparency for still images. */
+  backgroundRemovalEnabled?: boolean
+  /** Similar-colour range removed from edge-connected background pixels (0..100). */
+  backgroundRemovalSensitivity?: number
 }
 
 /** A reusable source kept in the project media bin independently of timeline usage. */
@@ -102,6 +106,8 @@ export interface Clip {
   flipH: boolean
   flipV: boolean
   crop: Crop
+  backgroundRemovalEnabled?: boolean
+  backgroundRemovalSensitivity?: number
   /** Canvas position; omitted values keep older projects centered and automatically contained. */
   canvasX?: number
   canvasY?: number
@@ -157,6 +163,8 @@ export interface Overlay {
   flipH: boolean
   flipV: boolean
   crop: Crop
+  backgroundRemovalEnabled?: boolean
+  backgroundRemovalSensitivity?: number
   repeat: number
   /** Exact occupied timeline length. When set, the final repeat is cut short. */
   timelineDuration?: number

@@ -724,6 +724,10 @@ button, input, textarea { font-family: inherit; }
 .inspector__row { flex-direction: row; align-items: center; gap: 10px; flex-wrap: wrap; }
 .inspector__title { font-weight: 700; font-size: 14px; word-break: break-all; }
 .inspector__hint, .inspector__empty { color: var(--text-dim); font-size: 13px; line-height: 1.6; }
+.background-removal-control > .btn { width: 100%; justify-content: center; }
+.background-removal-control > .btn.btn--on { color: var(--accent-strong); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--bg-2)); }
+img[data-background-removal='on'] { transition: opacity .14s ease; }
+img[data-background-removal='on'][aria-busy='true'] { opacity: .68; }
 .inspector__empty { text-align: center; padding: 30px 6px; }
 .inspector__sep { border: none; border-top: 1px solid var(--line); margin: 0; }
 

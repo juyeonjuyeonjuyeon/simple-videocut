@@ -9,6 +9,7 @@ import { normalizeVisualOrder } from '../utils/layers'
 import { overlayOutputSize, renderOverlayEffectAssets } from '../utils/overlay-style'
 import { renderShapePng } from '../utils/shape'
 import { resolveMainPlacement } from '../utils/main-placement'
+import { cachedBackgroundRemovedImage, DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-removal'
 
 // Keep the encoding engine on the same origin. Exports must not depend on a
 // third-party CDN being reachable after the editor itself has loaded.
@@ -348,6 +349,21 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       }
       await fp.writeFile(name, await fetchFile(item.file))
     }
+    const stageVisualMedia = async (name: string, item: Clip | Overlay | Background) => {
+      if (item.kind !== 'image' || !item.backgroundRemovalEnabled) {
+        await stageMedia(name, item)
+        return
+      }
+      externalLog?.(`이미지 배경을 제거하는 중입니다: ${item.name}`)
+      const scale = 'canvasScale' in item ? item.canvasScale ?? 1 : 1
+      const maxDimension = Math.min(4096, Math.round(Math.max(W, H) * Math.max(1, scale)))
+      const processed = await cachedBackgroundRemovedImage(
+        item,
+        item.backgroundRemovalSensitivity ?? DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY,
+        maxDimension,
+      )
+      await fp.writeFile(name, new Uint8Array(await processed.blob.arrayBuffer()))
+    }
     const prepareVisual = async (
       sourceName: string,
       normalizedBase: string,
@@ -431,7 +447,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       }
       if (!clip.sourceSize) throw new Error(`원본 영상 파일이 비어 있습니다: ${clip.name}`)
       const sourceName = `in${i}`
-      await stageMedia(sourceName, clip)
+      await stageVisualMedia(sourceName, clip)
       const cropped = Boolean(clip.crop.top || clip.crop.right || clip.crop.bottom || clip.crop.left)
       const prepared = await prepareVisual(sourceName, `norm${i}`, clip, cropped)
       audioFlags.push(prepared.hasAudio)
@@ -468,7 +484,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         continue
       }
       if (!overlay.sourceSize) throw new Error(`원본 오버레이 파일이 비어 있습니다: ${overlay.name}`)
-      await stageMedia(`ov${k}`, overlay)
+      await stageVisualMedia(`ov${k}`, overlay)
       const prepared = await prepareVisual(`ov${k}`, `normov${k}`, overlay, false)
       overlayFiles.push(prepared.fileName)
       overlayTrimStarts.push(prepared.trimStart)
@@ -493,7 +509,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         continue
       }
       if (!b.sourceSize) throw new Error(`원본 배경 파일이 비어 있습니다: ${b.name}`)
-      await stageMedia(`bg${k}`, b)
+      await stageVisualMedia(`bg${k}`, b)
       const prepared = await prepareVisual(`bg${k}`, `normbg${k}`, b, true)
       backgroundFiles.push(prepared.fileName)
       backgroundTrimStarts.push(prepared.trimStart)

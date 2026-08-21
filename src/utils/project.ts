@@ -541,6 +541,13 @@ const validateItem = (value: unknown, track: string) => {
     bool(item.flipV, `${track} 상하 반전`)
     const crop = record(item.crop, `${track} 크롭`)
     for (const side of ['top', 'right', 'bottom', 'left']) finite(crop[side], 0, 0.45, `${track} 크롭`)
+    const hasBackgroundRemoval = ('backgroundRemovalEnabled' in item && item.backgroundRemovalEnabled !== undefined)
+      || ('backgroundRemovalSensitivity' in item && item.backgroundRemovalSensitivity !== undefined)
+    if (hasBackgroundRemoval && item.kind !== 'image') throw new Error(`${track} 배경 제거는 이미지에만 사용할 수 있습니다.`)
+    if ('backgroundRemovalEnabled' in item && item.backgroundRemovalEnabled !== undefined) {
+      bool(item.backgroundRemovalEnabled, `${track} 배경 제거`)
+    }
+    if ('backgroundRemovalSensitivity' in item && item.backgroundRemovalSensitivity !== undefined) finite(item.backgroundRemovalSensitivity, 0, 100, `${track} 배경 제거 민감도`)
     if (item.kind === 'color') {
       if (item.mediaId !== null) throw new Error(`${track} 미디어 연결 값이 잘못되었습니다.`)
       text(item.bgColor, 64, `${track} 배경 색상`)
