@@ -38,7 +38,7 @@ export default function ProjectDialog({ onClose, activeName, initialMode = 'mana
   const refresh = () => listProjects().then(setProjects).catch(() => {})
   useEffect(() => { refresh() }, [])
 
-  const persist = async (projectName: string) => {
+  const persist = async (projectName: string, closeAfter = false) => {
     setBusy('저장 중…')
     try {
       await saveProject(projectName, snapshot())
@@ -46,19 +46,20 @@ export default function ProjectDialog({ onClose, activeName, initialMode = 'mana
       onSaved?.(projectName)
       await refresh()
       setSaveAs(false)
+      if (closeAfter) onClose()
     }
     catch (error) { alert('저장 실패: ' + (error as Error).message) }
     finally { setBusy('') }
   }
   const doSave = async () => {
     if (!activeName) { setSaveAs(true); return }
-    await persist(activeName)
+    await persist(activeName, true)
   }
   const doSaveAs = async () => {
     const projectName = name.trim() || '무제'
     const exists = projects.some((project) => project.name === projectName)
     if (exists && projectName !== activeName && !confirm(`'${projectName}' 프로젝트를 덮어쓸까요?`)) return
-    await persist(projectName)
+    await persist(projectName, true)
   }
   const doLoad = async (n: string) => {
     setBusy('불러오는 중…')

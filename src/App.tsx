@@ -5,8 +5,9 @@ import Timeline from './components/Timeline'
 import Inspector from './components/Inspector'
 import ExportDialog from './components/ExportDialog'
 import ProjectDialog from './components/ProjectDialog'
+import ProjectHome from './components/ProjectHome'
 import { projectDuration, formatTime } from './utils/time'
-import { saveProject, loadProject, autosaveMeta, AUTOSAVE_KEY } from './utils/project'
+import { saveProject, loadProject, listProjects, deleteProject, autosaveMeta, AUTOSAVE_KEY } from './utils/project'
 import type { ProjectMeta } from './utils/project'
 import { AUDIO_ACCEPT, isAudioFile, isImageFile, isVideoFile } from './utils/media'
 import Icon from './components/Icon'
@@ -52,16 +53,19 @@ export default function App() {
   const redo = useEditor((s) => s.redo)
 
   const replaceProject = useEditor((s) => s.replaceProject)
+  const resetProject = useEditor((s) => s.resetProject)
   const fileRef = useRef<HTMLInputElement>(null)
   const overlayRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
   const [showExport, setShowExport] = useState(false)
+  const [showProjectHome, setShowProjectHome] = useState(false)
   const [projectDialogMode, setProjectDialogMode] = useState<'manage' | 'saveAs' | null>(null)
-  const [activeProjectName, setActiveProjectNameState] = useState<string | null>(() => {
+  const [lastProjectName, setLastProjectName] = useState<string | null>(() => {
     try { return localStorage.getItem(ACTIVE_PROJECT_KEY) }
     catch { return null }
   })
+  const [activeProjectName, setActiveProjectNameState] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const [restorable, setRestorable] = useState<ProjectMeta | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -103,13 +107,16 @@ export default function App() {
   const setActiveProjectName = (name: string | null) => {
     setActiveProjectNameState(name)
     try {
-      if (name) localStorage.setItem(ACTIVE_PROJECT_KEY, name)
-      else localStorage.removeItem(ACTIVE_PROJECT_KEY)
+      if (name) {
+        setLastProjectName(name)
+        localStorage.setItem(ACTIVE_PROJECT_KEY, name)
+      }
     } catch { /* storage can be unavailable in private browsing */ }
   }
 
   const saveCurrentProject = async () => {
     if (!activeProjectName) {
+      setShowProjectHome(false)
       setProjectDialogMode('saveAs')
       return
     }
@@ -125,8 +132,16 @@ export default function App() {
     }
   }
 
-  // Offer to restore the last auto-saved session on startup.
-  useEffect(() => { autosaveMeta().then(setRestorable).catch(() => {}) }, [])
+  // Start on the project home only when there is something useful to resume.
+  // An empty first launch still opens straight into the editor.
+  useEffect(() => {
+    Promise.all([autosaveMeta(), listProjects()])
+      .then(([autosave, projects]) => {
+        setRestorable(autosave)
+        if (autosave || projects.length) setShowProjectHome(true)
+      })
+      .catch(() => {})
+  }, [])
 
   // Save shortly after each real edit. pagehide/visibilitychange are only a
   // final safety net because mobile browsers may freeze a page immediately.
@@ -220,7 +235,9 @@ export default function App() {
     try {
       const p = await loadProject(AUTOSAVE_KEY)
       if (p) replaceProject(p)
+      setActiveProjectName(null)
       setRestorable(null)
+      setShowProjectHome(false)
       setSaveStatus('saved')
     } catch (error) {
       setSaveStatus('error')
@@ -231,12 +248,41 @@ export default function App() {
   const backgrounds = useEditor((s) => s.backgrounds)
   const total = projectDuration(clips, overlays, audios, texts, backgrounds)
   const hasClips = clips.length > 0
-  const hasContent = hasClips || overlays.length > 0 || audios.length > 0 || backgrounds.length > 0
+  const hasContent = hasClips || overlays.length > 0 || audios.length > 0 || backgrounds.length > 0 || texts.length > 0
+
+  const openProject = async (name: string) => {
+    const project = await loadProject(name)
+    if (!project) throw new Error(`'${name}' 프로젝트를 찾을 수 없습니다.`)
+    replaceProject(project)
+    setActiveProjectName(name)
+    setRestorable(null)
+    setShowProjectHome(false)
+    setSaveStatus('saved')
+    setLastSavedAt(Date.now())
+  }
+
+  const startNewProject = () => {
+    if (hasContent && !confirm('새 프로젝트를 시작할까요? 현재 작업은 자동 저장 복구본으로 남아 있습니다.')) return
+    const discardRecovery = !hasContent && !!restorable
+    resetProject()
+    setActiveProjectName(null)
+    setRestorable(null)
+    setSaveStatus('idle')
+    setLastSavedAt(null)
+    setShowProjectHome(false)
+    if (discardRecovery) void deleteProject(AUTOSAVE_KEY).catch(() => {})
+  }
 
   // Keyboard shortcuts (ignored while typing in inputs).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
+      if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault()
+        if (e.shiftKey) setProjectDialogMode('saveAs')
+        else void saveCurrentProject()
+        return
+      }
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
       if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault()
@@ -244,10 +290,6 @@ export default function App() {
       } else if ((e.metaKey || e.ctrlKey) && (e.key === 'd' || e.key === 'D')) {
         e.preventDefault()
         duplicateSelected()
-      } else if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
-        e.preventDefault()
-        if (e.shiftKey) setProjectDialogMode('saveAs')
-        else void saveCurrentProject()
       } else if (e.code === 'Space') {
         e.preventDefault()
         if (hasContent) setPlaying(!isPlaying)
@@ -319,7 +361,7 @@ export default function App() {
             {manualSaveStatus === 'saving' ? '프로젝트 저장 중…' : manualSaveStatus === 'saved' ? '프로젝트 저장됨' : manualSaveStatus === 'error' ? '저장 실패' : saveStatus === 'saving' ? '자동 저장 중…' : saveStatus === 'saved' && lastSavedAt ? `자동 저장됨 · ${new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : saveStatus === 'error' ? '자동 저장 실패' : ''}
           </span>
           <button className={`iconbtn iconbtn--sm${mediaPanelOpen ? ' iconbtn--on' : ''}`} onClick={toggleMediaPanel} title="왼쪽 미디어 패널 열기·닫기" aria-label="왼쪽 미디어 패널 열기·닫기"><Icon name="library" /></button>
-          <button className="btn btn--sm topbar__project-menu" onClick={() => setProjectDialogMode('manage')} title="저장·다른 이름으로 저장·프로젝트 열기" aria-label="프로젝트 열기·관리"><Icon name="project" /><span>프로젝트</span></button>
+          <button className="btn btn--sm topbar__project-menu" onClick={() => setShowProjectHome(true)} title="프로젝트 홈·저장·열기" aria-label="프로젝트 홈 열기"><Icon name="project" /><span>프로젝트</span></button>
           <button className={`iconbtn iconbtn--sm${inspectorOpen ? ' iconbtn--on' : ''}`} onClick={toggleInspector} title="오른쪽 편집 패널 열기·닫기" aria-label="오른쪽 편집 패널 열기·닫기"><Icon name="panel" /></button>
           <button className="btn btn--primary" onClick={() => setShowExport(true)} disabled={!hasClips}>
             내보내기
@@ -380,6 +422,20 @@ export default function App() {
       <Timeline />
 
       {showExport && <ExportDialog onClose={() => setShowExport(false)} />}
+      {showProjectHome && <ProjectHome
+        activeName={activeProjectName}
+        lastProjectName={lastProjectName}
+        autosave={restorable}
+        hasContent={hasContent}
+        saveStatus={saveStatus}
+        onClose={() => setShowProjectHome(false)}
+        onNew={startNewProject}
+        onOpen={openProject}
+        onRestore={restore}
+        onSave={saveCurrentProject}
+        onSaveAs={() => { setShowProjectHome(false); setProjectDialogMode('saveAs') }}
+        onManageFiles={() => { setShowProjectHome(false); setProjectDialogMode('manage') }}
+      />}
       {projectDialogMode && <ProjectDialog
         onClose={() => setProjectDialogMode(null)}
         activeName={activeProjectName}
@@ -391,7 +447,7 @@ export default function App() {
         }}
       />}
 
-      {restorable && !hasContent && (
+      {restorable && !hasContent && !showProjectHome && (
         <div className="restore-banner">
           <span>이전에 작업하던 프로젝트가 있어요. 복원할까요?</span>
           <button className="btn btn--sm btn--primary" onClick={restore}>복원</button>

@@ -93,6 +93,7 @@ interface EditorState {
   deleteSelected: () => void
   duplicateSelected: () => void
   replaceProject: (p: ProjectState) => void
+  resetProject: () => void
   canUndo: boolean
   canRedo: boolean
   undo: () => void
@@ -820,6 +821,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   replaceProject: (p) => replaceEditorProject(p),
+  resetProject: () => replaceEditorProject({
+    clips: [], overlays: [], audios: [], backgrounds: [], texts: [], markers: [], groups: [], visualOrder: [],
+    aspectRatio: '16:9', exportSettings: { height: 720, format: 'mp4', filename: 'simplecut' },
+  }),
 }))
 
 type EditorSnapshot = Pick<EditorState,
