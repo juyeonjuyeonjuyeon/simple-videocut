@@ -751,7 +751,10 @@ export default function Timeline() {
         {activeGroup && <span className="timeline__group-summary" title={translate(`${activeGroup.members.length}개 항목이 연결되어 있습니다.`, `${activeGroup.members.length} items are linked.`)}>{activeGroup.name} · {translate(`${activeGroup.members.length}개`, `${activeGroup.members.length}`)}</span>}
         {activeGroup && selectedItems.length < activeGroup.members.length && <button className="btn btn--sm" onClick={() => selectGroup(activeGroup.id)}>{translate('그룹 전체 선택', 'Select full group')}</button>}
         {selectedItems.some((item) => Boolean(groupFor(item))) && <button className="btn btn--sm" onClick={ungroupSelected}>{translate('그룹 해제', 'Ungroup')}</button>}
-        <span className="timeline__hint">{translate('두 손가락=이동 · 핀치·⌘/Ctrl+스크롤=확대', 'Two fingers=scroll · Pinch/Cmd/Ctrl+scroll=zoom')}</span>
+        <span className="timeline__hint">
+          <span className="timeline__hint-long">{translate('두 손가락으로 이동 · 핀치 또는 ⌘/Ctrl+스크롤로 확대', 'Two-finger scroll to move · Pinch or Cmd/Ctrl+scroll to zoom')}</span>
+          <span className="timeline__hint-short">{translate('두 손가락 이동 · ⌘/Ctrl+스크롤 확대', 'Scroll to move · Cmd/Ctrl+scroll to zoom')}</span>
+        </span>
         <div className="timeline__bar-spacer" />
         <div className="timeline__seek-control" aria-label={translate('재생 헤드 위치', 'Playhead position')}>
           <button type="button" onClick={() => stepPlayhead(-1 / 30)} disabled={playhead <= 0} aria-label={translate('이전 프레임', 'Previous frame')} title={translate('이전 프레임', 'Previous frame')}>−1f</button>
