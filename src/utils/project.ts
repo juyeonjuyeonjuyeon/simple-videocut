@@ -1,6 +1,7 @@
 import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, ExportSettings, TimelineMarker, TimelineGroup, VisualLayerRef, MediaAsset } from '../types'
 import { isStickerKind } from './sticker'
 import { isBasicMotionPreset } from './basic-motion'
+import { isVisualFilterPreset } from './color-filter'
 
 const DB_NAME = 'simplecut-db'
 const STORE = 'projects'
@@ -551,6 +552,8 @@ const validateItem = (value: unknown, track: string) => {
       bool(item.backgroundRemovalEnabled, `${track} 배경 제거`)
     }
     if ('backgroundRemovalSensitivity' in item && item.backgroundRemovalSensitivity !== undefined) finite(item.backgroundRemovalSensitivity, 0, 100, `${track} 배경 제거 민감도`)
+    if ('filterPreset' in item && item.filterPreset !== undefined && !isVisualFilterPreset(item.filterPreset)) throw new Error(`${track} 색 필터 종류가 잘못되었습니다.`)
+    if ('filterAmount' in item && item.filterAmount !== undefined) finite(item.filterAmount, 0, 100, `${track} 색 필터 강도`)
     if (item.kind === 'color') {
       if (item.mediaId !== null) throw new Error(`${track} 미디어 연결 값이 잘못되었습니다.`)
       text(item.bgColor, 64, `${track} 배경 색상`)

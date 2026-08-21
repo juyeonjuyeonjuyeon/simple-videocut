@@ -38,6 +38,21 @@
 .motion-presets__sample--rise i { box-shadow: 0 7px 0 color-mix(in srgb, var(--blush) 25%, transparent); }
 .motion-presets__sample--slide-left i { box-shadow: -9px 0 0 color-mix(in srgb, var(--blush) 25%, transparent); }
 .motion-presets__sample--drift i { box-shadow: -8px 3px 0 color-mix(in srgb, var(--blush) 22%, transparent), 8px -3px 0 color-mix(in srgb, var(--blush) 45%, transparent); }
+.preview__filter-defs { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+.color-filter-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.color-filter-presets > button { min-width: 0; display: grid; gap: 5px; place-items: center; padding: 7px 4px; border: 1px solid var(--line); border-radius: 9px; color: var(--text); background: var(--bg-1); font-size: 10px; cursor: pointer; }
+.color-filter-presets > button:hover,
+.color-filter-presets > button:focus-visible { border-color: var(--accent); outline: none; }
+.color-filter-presets > button.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, var(--bg-1)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+.color-filter-presets__sample { width: 100%; height: 29px; display: flex; align-items: stretch; overflow: hidden; border-radius: 6px; background: #d9c7b8; }
+.color-filter-presets__sample i { flex: 1; background: #dc7d8f; }
+.color-filter-presets__sample i:nth-child(2) { background: #e6c360; }
+.color-filter-presets__sample i:nth-child(3) { background: #6fb8be; }
+.color-filter-presets__sample--mono { filter: grayscale(1); }
+.color-filter-presets__sample--warm { filter: sepia(.35) saturate(1.08); }
+.color-filter-presets__sample--cool { filter: hue-rotate(12deg) saturate(.92); }
+.color-filter-presets__sample--soft { filter: saturate(.76); }
+.color-filter-presets__sample--vivid { filter: saturate(1.28); }
 
 @media (max-width: 600px) {
   .sticker-picker { grid-template-columns: repeat(3, minmax(0, 1fr)); max-height: min(58vh, 440px); overflow-y: auto; }

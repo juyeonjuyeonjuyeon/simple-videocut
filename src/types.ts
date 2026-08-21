@@ -5,6 +5,14 @@ export type AspectRatio = '16:9' | '9:16' | '1:1'
 
 export type VisualKind = 'video' | 'image' | 'color'
 
+export type VisualFilterPreset = 'none' | 'mono' | 'warm' | 'cool' | 'soft' | 'vivid'
+
+export interface VisualFilterSettings {
+  filterPreset?: VisualFilterPreset
+  /** Blend from the original to the preset, 0..100. */
+  filterAmount?: number
+}
+
 export type Rotation = 0 | 90 | 180 | 270
 
 export type OverlayBorderStyle = 'solid' | 'dashed' | 'dotted' | 'double'
@@ -87,7 +95,7 @@ export interface MediaAsset {
 }
 
 /** A clip on the MAIN track: video or image, packed sequentially on the canvas. */
-export interface Clip {
+export interface Clip extends VisualFilterSettings {
   id: string
   /** Source in the project media bin, when available. */
   assetId?: string
@@ -139,7 +147,7 @@ export interface Clip {
 }
 
 /** A picture-in-picture overlay (video or image) floating over the main track. */
-export interface Overlay {
+export interface Overlay extends VisualFilterSettings {
   id: string
   assetId?: string
   kind: VisualKind

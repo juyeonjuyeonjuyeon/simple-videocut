@@ -74,6 +74,13 @@ describe('timeline splitting', () => {
     expect(useEditor.getState().markers[0]).toMatchObject({ time: 1.25, label: '중요 장면' })
   })
 
+  it('clamps non-destructive color filter settings', () => {
+    useEditor.getState().updateClip('clip-1', { filterPreset: 'warm', filterAmount: 180 })
+    expect(useEditor.getState().clips[0]).toMatchObject({ filterPreset: 'warm', filterAmount: 100 })
+    useEditor.getState().updateClip('clip-1', { filterAmount: -20 })
+    expect(useEditor.getState().clips[0].filterAmount).toBe(0)
+  })
+
   it('adds a new position keyframe when a keyed layer is moved at another time', () => {
     const overlay: Overlay = {
       ...clip(1), id: 'overlay-1', start: 0, x: 0.2, y: 0.3, scale: 0.5, angle: 0,

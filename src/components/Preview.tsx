@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useEditor } from '../store'
-import type { AspectRatio, Overlay } from '../types'
+import type { AspectRatio, Overlay, VisualFilterSettings } from '../types'
 import {
   resolveTimelineTime,
   totalDuration,
@@ -23,10 +23,30 @@ import StickerGraphic from './StickerGraphic'
 import { useLanguage } from '../i18n'
 import { resolveMainPlacement } from '../utils/main-placement'
 import BackgroundRemovedImage from './BackgroundRemovedImage'
+import { colorFilterCss, colorFilterDomId, resolveVisualFilter, svgColorMatrixValues } from '../utils/color-filter'
 
 const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
 const DRIFT = 0.35 // seconds before we hard-seek a media element back in sync
 const SNAP_PX = 8
+
+function ColorFilterDefs({ items }: { items: Array<{ id: string } & VisualFilterSettings> }) {
+  const filtered = items.filter((item) => {
+    const resolved = resolveVisualFilter(item)
+    return resolved.filterPreset !== 'none' && resolved.filterAmount > 0
+  })
+  if (!filtered.length) return null
+  return (
+    <svg className="preview__filter-defs" width="0" height="0" aria-hidden="true">
+      <defs>
+        {filtered.map((item) => (
+          <filter key={item.id} id={colorFilterDomId(item.id)} x="-50%" y="-50%" width="200%" height="200%" colorInterpolationFilters="sRGB">
+            <feColorMatrix type="matrix" values={svgColorMatrixValues(item)} />
+          </filter>
+        ))}
+      </defs>
+    </svg>
+  )
+}
 
 const snapLayerAxis = (center: number, size: number, axisPixels: number) => {
   const candidates = [
@@ -791,12 +811,13 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
         style={{ width: box.w, height: box.h }}
         onDoubleClick={() => { if (selClip && selClip.kind !== 'color') onOpenCrop() }}
       >
+        <ColorFilterDefs items={[...clips, ...backgrounds, ...overlays]} />
         {backgrounds.map((b) => (
           <div
             key={b.id}
             ref={(el) => { if (el) bgWrapEls.current.set(b.id, el); else bgWrapEls.current.delete(b.id) }}
             className="preview__bg"
-            style={{ visibility: 'hidden' }}
+            style={{ visibility: 'hidden', filter: colorFilterCss(b.id, b) }}
           >
             {b.kind === 'video' && (
               <video ref={(el) => { if (el) bgMediaEls.current.set(b.id, el); else bgMediaEls.current.delete(b.id) }}
@@ -836,6 +857,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
                   top: `${-((mainCrop?.top ?? 0) / mainKeptHeight) * 100}%`,
                   width: `${100 / mainKeptWidth}%`,
                   height: `${100 / mainKeptHeight}%`,
+                  filter: activeMain ? colorFilterCss(activeMain.id, activeMain) : 'none',
                 }}
                 playsInline
                 onLoadedMetadata={(event) => {
@@ -848,6 +870,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
                 top: `${-((mainCrop?.top ?? 0) / mainKeptHeight) * 100}%`,
                 width: `${100 / mainKeptWidth}%`,
                 height: `${100 / mainKeptHeight}%`,
+                filter: activeMain ? colorFilterCss(activeMain.id, activeMain) : 'none',
               }} onLoad={(event) => {
                 if (activeMain?.kind === 'image') setMainNaturalSize({ id: activeMain.id, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
               }} />
@@ -863,6 +886,8 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
           const shadow = visualStyle.shadowEnabled
             ? `drop-shadow(${visualStyle.shadowX * box.h}px ${visualStyle.shadowY * box.h}px ${visualStyle.shadowBlur * box.h}px ${hexToRgba(visualStyle.shadowColor, visualStyle.shadowOpacity)})`
             : 'none'
+          const colorFilter = colorFilterCss(o.id, o)
+          const combinedFilter = [colorFilter, shadow].filter((value) => value !== 'none').join(' ') || 'none'
           return (
             <div
               key={o.id}
@@ -881,7 +906,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
               onPointerDown={(e) => onOverlayDown(e, o.id)}
               onDoubleClick={(e) => { e.stopPropagation(); if (sel && !o.shape && !o.sticker) onOpenCrop() }}
             >
-              <div className="preview__overlay-clip" style={{ clipPath: o.shape || o.sticker ? 'none' : maskClipPath(visualStyle.maskShape), filter: shadow }}>
+              <div className="preview__overlay-clip" style={{ clipPath: o.shape || o.sticker ? 'none' : maskClipPath(visualStyle.maskShape), filter: combinedFilter }}>
                 {o.shape ? (
                   <ShapeOverlayGraphic overlay={o} frameHeight={box.h} />
                 ) : o.sticker ? (

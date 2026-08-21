@@ -11,6 +11,7 @@ import { renderShapePng } from '../utils/shape'
 import { renderStickerPng } from '../utils/sticker'
 import { resolveMainPlacement } from '../utils/main-placement'
 import { cachedBackgroundRemovedImage, DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-removal'
+import { ffmpegColorFilter } from '../utils/color-filter'
 
 // Keep the encoding engine on the same origin. Exports must not depend on a
 // third-party CDN being reachable after the editor itself has loaded.
@@ -633,7 +634,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
           : ''
         filters.push(
           `[${inputIdxOf[p]}:v]setpts=PTS/${sp},trim=duration=${segDur.toFixed(3)},setpts=PTS-STARTPTS,` +
-            `${spatialFilters(c)}scale=${targetWidth}:${targetHeight},setsar=1,fps=30,format=rgba,${freeRotation}` +
+            `${spatialFilters(c)}scale=${targetWidth}:${targetHeight},setsar=1,fps=30,format=rgba,${ffmpegColorFilter(c)}${freeRotation}` +
             `${videoEnvelope(segDur, c.fadeIn, c.fadeOut)}null[mainclip${p}]`,
         )
         filters.push(`color=c=0x00000000:s=${W}x${H}:r=30:d=${segDur.toFixed(3)},format=rgba[maincanvas${p}]`)
@@ -679,7 +680,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         const speedF = b.kind === 'video' ? `setpts=PTS/${b.speed},` : ''
         filters.push(
           `[${bgInputIdx[k]}:v]${speedF}${spatialFilters(b)}` +
-          `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},format=rgba,` +
+          `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},format=rgba,${ffmpegColorFilter(b)}` +
           `${videoEnvelope(len, b.fadeIn, b.fadeOut, b.opacity ?? 1)}` +
           `tpad=start_duration=${shift.toFixed(3)}:start_mode=add:color=0x00000000[bgv${k}]`,
         )
@@ -707,7 +708,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       const rotF = o.angle
         ? `rotate=a=${rad.toFixed(5)}:ow=rotw(${rad.toFixed(5)}):oh=roth(${rad.toFixed(5)}):c=0x00000000,`
         : ''
-      filters.push(`[${ovIdx}:v]${speedF}${spatialFilters(o)}scale=${ovW}:${ovH},format=rgba[ovbase${k}]`)
+      filters.push(`[${ovIdx}:v]${speedF}${spatialFilters(o)}scale=${ovW}:${ovH},format=rgba,${ffmpegColorFilter(o)}null[ovbase${k}]`)
       let styled = `[ovbase${k}]`
       const indexes = overlayEffectIndexes[k]
       if (indexes.mask >= 0) {
