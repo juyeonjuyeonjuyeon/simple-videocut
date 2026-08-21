@@ -6,7 +6,7 @@ import Inspector from './components/Inspector'
 import ExportDialog from './components/ExportDialog'
 import ProjectDialog from './components/ProjectDialog'
 import ProjectHome from './components/ProjectHome'
-import { projectDuration, formatTime } from './utils/time'
+import { projectDuration, formatTime, formatTimeFine } from './utils/time'
 import { saveProject, loadProject, listProjects, deleteProject, autosaveMeta, AUTOSAVE_KEY } from './utils/project'
 import type { ProjectMeta } from './utils/project'
 import { AUDIO_ACCEPT, isAudioFile, isImageFile, isVideoFile } from './utils/media'
@@ -408,7 +408,7 @@ export default function App() {
               <Icon name="repeat" />
             </button>
             <div className="transport__time">
-              {formatTime(playhead)} <span>/ {formatTime(total)}</span>
+              {formatTimeFine(playhead)} <span>/ {formatTime(total)}</span>
             </div>
             <div className="transport__spacer" />
             <button className="btn btn--sm" onClick={splitAtPlayhead} disabled={!hasClips} title="단축키: S"><Icon name="split" />분할</button>

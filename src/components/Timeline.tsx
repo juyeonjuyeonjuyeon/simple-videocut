@@ -9,6 +9,8 @@ import {
   packLanes,
   formatTime,
   formatTimeFine,
+  formatClock,
+  parseClock,
   totalDuration,
   exactDurationPatch,
 } from '../utils/time'
@@ -80,6 +82,8 @@ export default function Timeline() {
   const [trackW, setTrackW] = useState(0)
   const [pxPerSec, setPxPerSec] = useState(DEFAULT_PX_PER_SEC)
   const [fitMode, setFitMode] = useState(false)
+  const [scrubbing, setScrubbing] = useState(false)
+  const [timeDraft, setTimeDraft] = useState<string | null>(null)
   const fittedRef = useRef(false)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragLeft, setDragLeft] = useState(0)
@@ -331,9 +335,51 @@ export default function Timeline() {
   }
 
   const onRulerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return
+    e.preventDefault()
     setPlaying(false)
+    setScrubbing(true)
     scrub(e.clientX)
-    startDrag((ev) => scrub(ev.clientX))
+    startDrag((ev) => scrub(ev.clientX), () => setScrubbing(false))
+  }
+
+  const onPlayheadDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    setPlaying(false)
+    setScrubbing(true)
+    const startX = e.clientX
+    const startTime = useEditor.getState().playhead
+    document.body.style.cursor = 'ew-resize'
+    startDrag((event) => {
+      const next = startTime + (event.clientX - startX) / pxPerSec
+      setPlayhead(Math.max(0, Math.min(total, next)))
+    }, () => {
+      document.body.style.cursor = ''
+      setScrubbing(false)
+    })
+  }
+
+  const onTimelineBackgroundDown = (e: React.PointerEvent) => {
+    if (e.target !== e.currentTarget) return
+    select(null)
+    onRulerDown(e)
+  }
+
+  const stepPlayhead = (delta: number) => {
+    setPlaying(false)
+    setPlayhead(Math.max(0, Math.min(total, playhead + delta)))
+  }
+
+  const commitTimeDraft = () => {
+    if (timeDraft == null) return
+    const parsed = parseClock(timeDraft)
+    if (Number.isFinite(parsed)) {
+      setPlaying(false)
+      setPlayhead(Math.max(0, Math.min(total, parsed)))
+    }
+    setTimeDraft(null)
   }
 
   const onMarkerDown = (e: React.PointerEvent, id: string) => {
@@ -684,7 +730,17 @@ export default function Timeline() {
         {selectedItems.some((item) => Boolean(groupFor(item))) && <button className="btn btn--sm" onClick={ungroupSelected}>그룹 해제</button>}
         <span className="timeline__hint">스크롤=확대 · Shift+스크롤=이동</span>
         <div className="timeline__bar-spacer" />
-        <span className="timeline__total">{formatTime(playhead)} / {formatTime(total)}</span>
+        <div className="timeline__seek-control" aria-label="재생 헤드 위치">
+          <button type="button" onClick={() => stepPlayhead(-1 / 30)} disabled={playhead <= 0} aria-label="이전 프레임" title="이전 프레임">−1f</button>
+          <input value={timeDraft ?? formatClock(playhead)} aria-label="재생 헤드 시간" spellCheck={false}
+            onChange={(event) => setTimeDraft(event.target.value)} onFocus={(event) => event.currentTarget.select()}
+            onBlur={commitTimeDraft} onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur()
+              else if (event.key === 'Escape') setTimeDraft(null)
+            }} />
+          <span>/ {formatTime(total)}</span>
+          <button type="button" onClick={() => stepPlayhead(1 / 30)} disabled={playhead >= total} aria-label="다음 프레임" title="다음 프레임">+1f</button>
+        </div>
         <div className="timeline__zoom-control" aria-label="타임라인 확대 및 축소">
           <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1 / 1.35)} disabled={atMin} title="축소"><Icon name="zoomOut" /></button>
           <input type="range" min={0} max={1000} step={1} value={zoomValue} onChange={(event) => setZoomValue(Number(event.target.value))} aria-label="타임라인 확대 비율" />
@@ -727,7 +783,7 @@ export default function Timeline() {
               if (!o) return null
               return (
                 <div key={`visual:${ref.type}:${ref.id}`} className="timeline__lane timeline__lane--visual timeline__lane--overlay" style={{ height: OV_LANE_H }}
-                  onPointerDown={(event) => event.target === event.currentTarget && select(null)}>
+                  onPointerDown={onTimelineBackgroundDown}>
                   {trackHeader(o.name, ref, { hidden: o.hidden, locked: o.locked })}
                   {freeChip('overlay', o.id, o.start, overlayLength(o), 0, OV_LANE_H, o.color,
                     `${o.kind === 'image' ? '이미지' : '영상'} · ${o.name}${o.repeat > 1 ? ` · 반복 ${o.repeat}회` : ''}${o.kind === 'video' && o.muted ? ' · 음소거' : ''}`,
@@ -741,7 +797,7 @@ export default function Timeline() {
             if (!t) return null
             return (
               <div key={`visual:${ref.type}:${ref.id}`} className="timeline__lane timeline__lane--visual timeline__lane--text" style={{ height: OV_LANE_H }}
-                onPointerDown={(event) => event.target === event.currentTarget && select(null)}>
+                onPointerDown={onTimelineBackgroundDown}>
                 {trackHeader(t.text || '텍스트', ref, { hidden: t.hidden, locked: t.locked })}
                 {freeChip('text', t.id, t.start, t.end - t.start, 0, OV_LANE_H, '#3a4250',
                   `텍스트 · ${t.text}`,
@@ -755,7 +811,7 @@ export default function Timeline() {
           {/* Main video track */}
           <div
             className={`timeline__track${dragId ? ' timeline__track--reordering' : ''}`}
-            onPointerDown={(e) => e.target === e.currentTarget && select(null)}
+            onPointerDown={onTimelineBackgroundDown}
           >
             {trackHeader('메인 트랙')}
             {clips.length === 0 && <div className="timeline__placeholder">＋ 동영상·사진을 추가하세요</div>}
@@ -822,7 +878,7 @@ export default function Timeline() {
             <div
               className="timeline__lane timeline__lane--audio"
               style={{ height: nAudioLanes * AUD_LANE_H }}
-              onPointerDown={(e) => e.target === e.currentTarget && select(null)}
+              onPointerDown={onTimelineBackgroundDown}
             >
               {trackHeader('오디오')}
               {audios.map((a, i) =>
@@ -839,7 +895,7 @@ export default function Timeline() {
             <div
               className="timeline__lane timeline__lane--bg"
               style={{ height: nBgLanes * AUD_LANE_H }}
-              onPointerDown={(e) => e.target === e.currentTarget && select(null)}
+              onPointerDown={onTimelineBackgroundDown}
             >
               {trackHeader('배경')}
               {backgrounds.map((b, i) =>
@@ -852,7 +908,15 @@ export default function Timeline() {
             </div>
           )}
 
-          <div className="timeline__playhead" style={{ left: timelineX(playhead) }} onPointerDown={onRulerDown} title={`${formatTimeFine(playhead)} · 끌어서 이동`}>
+          <div className={`timeline__playhead${scrubbing ? ' timeline__playhead--dragging' : ''}`} style={{ left: timelineX(playhead) }}
+            onPointerDown={onPlayheadDown} onKeyDown={(event) => {
+              if (event.key === 'ArrowLeft') { event.preventDefault(); stepPlayhead(event.shiftKey ? -1 : -1 / 30) }
+              else if (event.key === 'ArrowRight') { event.preventDefault(); stepPlayhead(event.shiftKey ? 1 : 1 / 30) }
+              else if (event.key === 'Home') { event.preventDefault(); setPlayhead(0) }
+              else if (event.key === 'End') { event.preventDefault(); setPlayhead(total) }
+            }}
+            role="slider" tabIndex={0} aria-label="타임라인 재생 헤드" aria-valuemin={0} aria-valuemax={total} aria-valuenow={playhead} aria-valuetext={formatClock(playhead)}
+            title={`${formatTimeFine(playhead)} · 넓은 영역을 끌어서 이동`}>
             <span className="timeline__playhead-time">{formatTimeFine(playhead)}</span>
             <span className="timeline__playhead-grab" />
           </div>

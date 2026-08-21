@@ -1145,6 +1145,13 @@ input[type='range']:disabled { opacity: 0.4; }
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
+.timeline__seek-control { display: flex; align-items: center; gap: 3px; padding: 2px 3px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-2); }
+.timeline__seek-control button { min-width: 30px; min-height: 24px; padding: 2px 4px; color: var(--text-dim); border: 0; border-radius: 5px; background: transparent; font-size: 10px; font-weight: 700; cursor: pointer; }
+.timeline__seek-control button:hover:not(:disabled) { color: var(--text); background: var(--bg-3); }
+.timeline__seek-control button:disabled { opacity: .35; cursor: default; }
+.timeline__seek-control input { width: 70px; min-width: 0; padding: 2px 3px; color: var(--text); border: 0; border-radius: 4px; outline: 0; background: transparent; font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.timeline__seek-control input:focus { background: var(--bg-1); box-shadow: inset 0 0 0 1px var(--accent); }
+.timeline__seek-control span { color: var(--text-dim); font-size: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .timeline__hint { font-size: 11px; color: var(--text-dim); opacity: 0.7; }
 @media (max-width: 680px) {
   .timeline__hint { display: none; }
@@ -1336,6 +1343,7 @@ input[type='range']:disabled { opacity: 0.4; }
   border: 1px dashed var(--line);
   border-radius: 8px;
   margin: 0 8px 0 124px;
+  pointer-events: none;
 }
 
 .clip {
@@ -1481,8 +1489,8 @@ input[type='range']:disabled { opacity: 0.4; }
   position: absolute;
   top: 0;
   bottom: 8px;
-  width: 24px;
-  margin-left: -12px;
+  width: 36px;
+  margin-left: -18px;
   cursor: ew-resize;
   pointer-events: auto;
   touch-action: none;
@@ -1493,11 +1501,13 @@ input[type='range']:disabled { opacity: 0.4; }
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 11px;
+  left: 17px;
   width: 2px;
   background: #ff4d5e;
   pointer-events: none;
 }
+.timeline__playhead:focus-visible { outline: none; }
+.timeline__playhead:focus-visible .timeline__playhead-grab::after { content: ''; position: absolute; inset: -2px 5px 11px; border: 2px solid #fff; border-radius: 5px; }
 
 .timeline-waveform {
   position: absolute;
@@ -1709,8 +1719,8 @@ input[type='range']:disabled { opacity: 0.4; }
 .timeline__playhead-grab {
   position: absolute;
   top: -3px;
-  left: -2px;
-  width: 28px;
+  left: -1px;
+  width: 38px;
   height: 26px;
   cursor: ew-resize;
   pointer-events: none;
@@ -1720,7 +1730,7 @@ input[type='range']:disabled { opacity: 0.4; }
   content: '';
   position: absolute;
   top: 2px;
-  left: 7px;
+  left: 11px;
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
   border-top: 9px solid #ff4d5e;
@@ -1728,7 +1738,7 @@ input[type='range']:disabled { opacity: 0.4; }
 .timeline__playhead-time {
   position: absolute;
   top: 4px;
-  left: 16px;
+  left: 23px;
   padding: 2px 5px;
   border-radius: 5px;
   color: #fff;
@@ -1743,7 +1753,9 @@ input[type='range']:disabled { opacity: 0.4; }
   pointer-events: none;
 }
 .timeline__playhead:hover .timeline__playhead-time,
-.timeline__playhead:active .timeline__playhead-time { opacity: 1; transform: translateY(0); }
+.timeline__playhead:active .timeline__playhead-time,
+.timeline__playhead--dragging .timeline__playhead-time,
+.timeline__playhead:focus-visible .timeline__playhead-time { opacity: 1; transform: translateY(0); }
 
 /* ---------- Modal ---------- */
 .modal {
@@ -1863,6 +1875,11 @@ input[type='range']:disabled { opacity: 0.4; }
   .transport > button { flex: 0 0 auto; min-height: 44px; }
   .transport__time { flex: 0 0 auto; }
   .timeline__bar button, .timeline__bar .iconbtn { min-width: 40px; min-height: 40px; }
+  .timeline__bar { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  .timeline__bar::-webkit-scrollbar { display: none; }
+  .timeline__bar > * { flex: 0 0 auto; }
+  .timeline__bar-spacer { display: none; }
+  .timeline__seek-control input { width: 66px; min-height: 36px; }
   .step { width: 44px; height: 40px; }
   .num--step, .num--time { height: 40px; }
   .inspector { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
