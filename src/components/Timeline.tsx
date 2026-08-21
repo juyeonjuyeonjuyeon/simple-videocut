@@ -17,7 +17,7 @@ import {
 import { contrastText } from '../utils/color'
 import { normalizeVisualOrder, packVisualLanes } from '../utils/layers'
 import { startPointerDrag as startDrag } from '../utils/pointer'
-import { timelineWheelZoomFactor } from '../utils/timeline-zoom'
+import { timelineWheelIntent, timelineWheelZoomFactor } from '../utils/timeline-zoom'
 import type { Clip, Selection, PositionKeyframe, TimelineItemRef } from '../types'
 import { AudioWaveform, ClipThumbnailStrip } from './TimelineMedia'
 import Icon from './Icon'
@@ -260,14 +260,17 @@ export default function Timeline() {
     else if (x > el.scrollLeft + el.clientWidth - margin) el.scrollLeft = x - el.clientWidth + margin
   }, [fitMode, isPlaying, playhead, pxPerSec])
 
-  // Scroll / trackpad to zoom (toward cursor); horizontal to pan.
+  // Two-finger scrolling moves through tracks. Pinch or command/control+wheel
+  // zooms toward the cursor, matching the interaction used by desktop editors.
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
-      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      const intent = timelineWheelIntent(e)
+      if (intent === 'scroll') return
+      if (intent === 'horizontal-pan') {
         e.preventDefault()
-        el.scrollLeft += e.deltaX || e.deltaY
+        el.scrollLeft += e.deltaY
         return
       }
       e.preventDefault()
@@ -744,7 +747,7 @@ export default function Timeline() {
         {activeGroup && <span className="timeline__group-summary" title={translate(`${activeGroup.members.length}개 항목이 연결되어 있습니다.`, `${activeGroup.members.length} items are linked.`)}>{activeGroup.name} · {translate(`${activeGroup.members.length}개`, `${activeGroup.members.length}`)}</span>}
         {activeGroup && selectedItems.length < activeGroup.members.length && <button className="btn btn--sm" onClick={() => selectGroup(activeGroup.id)}>{translate('그룹 전체 선택', 'Select full group')}</button>}
         {selectedItems.some((item) => Boolean(groupFor(item))) && <button className="btn btn--sm" onClick={ungroupSelected}>{translate('그룹 해제', 'Ungroup')}</button>}
-        <span className="timeline__hint">{translate('스크롤=확대 · Shift+스크롤=이동', 'Scroll=zoom · Shift+scroll=pan')}</span>
+        <span className="timeline__hint">{translate('두 손가락=이동 · 핀치·⌘/Ctrl+스크롤=확대', 'Two fingers=scroll · Pinch/Cmd/Ctrl+scroll=zoom')}</span>
         <div className="timeline__bar-spacer" />
         <div className="timeline__seek-control" aria-label={translate('재생 헤드 위치', 'Playhead position')}>
           <button type="button" onClick={() => stepPlayhead(-1 / 30)} disabled={playhead <= 0} aria-label={translate('이전 프레임', 'Previous frame')} title={translate('이전 프레임', 'Previous frame')}>−1f</button>

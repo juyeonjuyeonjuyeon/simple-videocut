@@ -2,6 +2,28 @@ const LINE_DELTA_PX = 16
 const MAX_WHEEL_DELTA_PX = 120
 const WHEEL_ZOOM_SENSITIVITY = 0.00115
 
+export type TimelineWheelIntent = 'scroll' | 'horizontal-pan' | 'zoom'
+
+export interface TimelineWheelGesture {
+  deltaX: number
+  deltaY: number
+  ctrlKey?: boolean
+  metaKey?: boolean
+  shiftKey?: boolean
+}
+
+/**
+ * Keep native two-finger scrolling predictable. Chromium reports a trackpad
+ * pinch as ctrl+wheel, while command/control+wheel is the deliberate desktop
+ * zoom gesture. Shift keeps the familiar vertical-wheel-to-horizontal-pan
+ * fallback for mouse users.
+ */
+export function timelineWheelIntent(gesture: TimelineWheelGesture): TimelineWheelIntent {
+  if (gesture.ctrlKey || gesture.metaKey) return 'zoom'
+  if (gesture.shiftKey && gesture.deltaY !== 0) return 'horizontal-pan'
+  return 'scroll'
+}
+
 /**
  * Converts browser-dependent wheel units to a bounded pixel delta, then maps
  * that distance to a continuous logarithmic zoom. Small trackpad movements
