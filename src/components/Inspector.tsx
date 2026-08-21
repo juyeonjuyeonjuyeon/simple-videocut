@@ -654,6 +654,8 @@ export default function Inspector() {
   const contextTitle = selectedItems.length > 1 ? `${selectedItems.length}개 항목 선택됨`
     : selClip?.name || selOverlay?.name || selAudio?.name || (selText ? '텍스트' : '') || selBg?.name || '캔버스'
   const groupedSelection = selectedItems.some((item) => groups.some((group) => group.members.some((member) => member.type === item.type && member.id === item.id)))
+  const activeSelectionGroup = groups.find((group) => selectedItems.length > 1 && selectedItems.every((item) =>
+    group.members.some((member) => member.type === item.type && member.id === item.id)))
   const inspectorTabs: InspectorTabOption[] = useMemo(() => selText
     ? [{ id: 'basic', label: '내용' }, { id: 'style', label: '스타일' }, { id: 'transform', label: '배치' }, { id: 'time', label: '시간' }]
     : selAudio
@@ -692,8 +694,10 @@ export default function Inspector() {
       {!selection && <hr className="inspector__sep" />}
       {selectedItems.length > 1 ? (
         <div className="inspector__body inspector__multi">
-          <div className="inspector__hint">선택한 항목은 타임라인에서 함께 이동할 수 있습니다. 그룹으로 묶으면 다음 편집에서도 관계가 유지됩니다.</div>
-          <button className="btn btn--primary" onClick={groupSelected}>선택 항목 그룹 만들기</button>
+          <div className="inspector__hint">{activeSelectionGroup
+            ? `'${activeSelectionGroup.name}'으로 연결된 항목입니다. 이동하거나 메인 클립 길이를 바꾸면 연결된 항목이 함께 조정됩니다.`
+            : '선택한 항목은 타임라인에서 함께 이동할 수 있습니다. 그룹으로 묶으면 다음 편집에서도 관계가 유지됩니다.'}</div>
+          {!activeSelectionGroup && <button className="btn btn--primary" onClick={groupSelected}>선택 항목 그룹 만들기</button>}
           {groupedSelection && <button className="btn" onClick={ungroupSelected}>그룹 해제</button>}
           <button className="btn btn--danger" onClick={deleteSelected}>선택 항목 삭제</button>
         </div>

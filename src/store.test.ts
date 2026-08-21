@@ -107,6 +107,18 @@ describe('timeline splitting', () => {
     const resized = useEditor.getState().overlays[0]
     expect(resized.start).toBeCloseTo(0.75)
     expect(resized.timelineDuration).toBeCloseTo(1)
+
+    const second = { ...overlay, id: 'overlay-2', start: 2 }
+    useEditor.setState({ overlays: [...useEditor.getState().overlays, second] })
+    useEditor.getState().select({ type: 'overlay', id: 'overlay-1' })
+    useEditor.getState().select({ type: 'overlay', id: second.id }, true)
+    useEditor.getState().groupSelected()
+    expect(useEditor.getState().groups).toHaveLength(1)
+    expect(useEditor.getState().groups[0].members).toEqual(expect.arrayContaining([
+      { type: 'clip', id: 'clip-1' },
+      { type: 'overlay', id: 'overlay-1' },
+      { type: 'overlay', id: 'overlay-2' },
+    ]))
   })
 
   it('reorders text and media inside one shared visual stack', () => {

@@ -91,6 +91,8 @@ interface EditorState {
   select: (sel: Selection, additive?: boolean) => void
   groupSelected: () => void
   ungroupSelected: () => void
+  selectGroup: (id: string) => void
+  renameGroup: (id: string, name: string) => void
   moveTimelineItems: (items: TimelineItemRef[], delta: number) => void
   setAspectRatio: (r: AspectRatio) => void
   setPlayhead: (t: number) => void
@@ -852,13 +854,28 @@ export const useEditor = create<EditorState>((set, get) => ({
   }),
   groupSelected: () => set((s) => {
     if (s.selectedItems.length < 2) return s
-    const chosen = s.selectedItems
-    const includesChosen = (group: TimelineGroup) => group.members.some((member) => chosen.some((item) => item.type === member.type && item.id === member.id))
-    const groups = s.groups.filter((group) => !includesChosen(group))
-    return { groups: [...groups, { id: uid(), name: `그룹 ${groups.length + 1}`, members: chosen }] }
+    const key = (item: TimelineItemRef) => `${item.type}:${item.id}`
+    const chosenKeys = new Set(s.selectedItems.map(key))
+    const touching = s.groups.filter((group) => group.members.some((member) => chosenKeys.has(key(member))))
+    const merged = [...s.selectedItems, ...touching.flatMap((group) => group.members)]
+      .filter((member, index, all) => all.findIndex((candidate) => key(candidate) === key(member)) === index)
+    const groups = s.groups.filter((group) => !touching.includes(group))
+    const previous = touching[0]
+    return {
+      groups: [...groups, { id: previous?.id ?? uid(), name: previous?.name ?? `그룹 ${groups.length + 1}`, members: merged }],
+      selectedItems: merged,
+      selection: merged[merged.length - 1] ?? null,
+    }
   }),
   ungroupSelected: () => set((s) => ({
     groups: s.groups.filter((group) => !group.members.some((member) => s.selectedItems.some((item) => item.type === member.type && item.id === member.id))),
+  })),
+  selectGroup: (id) => set((s) => {
+    const members = s.groups.find((group) => group.id === id)?.members ?? []
+    return members.length ? { selectedItems: members, selection: members[members.length - 1] } : s
+  }),
+  renameGroup: (id, name) => set((s) => ({
+    groups: s.groups.map((group) => group.id === id ? { ...group, name: name.trim().slice(0, 120) || group.name } : group),
   })),
   moveTimelineItems: (items, delta) => set((s) => {
     const free = items.filter((item) => item.type !== 'clip')

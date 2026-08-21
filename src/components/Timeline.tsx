@@ -76,6 +76,8 @@ export default function Timeline() {
   const removeMarker = useEditor((s) => s.removeMarker)
   const groupSelected = useEditor((s) => s.groupSelected)
   const ungroupSelected = useEditor((s) => s.ungroupSelected)
+  const selectGroup = useEditor((s) => s.selectGroup)
+  const renameGroup = useEditor((s) => s.renameGroup)
   const moveTimelineItems = useEditor((s) => s.moveTimelineItems)
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -668,10 +670,11 @@ export default function Timeline() {
     kind: FreeKind, id: string, start: number, len: number, lane: number,
     laneH: number, color: string, label: string, selected: boolean,
     visual?: ReactNode, flags?: { hidden?: boolean; locked?: boolean },
-  ) => (
-    <div
+  ) => {
+    const linkedGroup = groupFor({ type: kind, id })
+    return <div
       key={id}
-      className={`tlclip${selected ? ' tlclip--selected' : ''}${flags?.hidden ? ' tlclip--hidden' : ''}${flags?.locked ? ' tlclip--locked' : ''}`}
+      className={`tlclip${selected ? ' tlclip--selected' : ''}${linkedGroup ? ' tlclip--grouped' : ''}${flags?.hidden ? ' tlclip--hidden' : ''}${flags?.locked ? ' tlclip--locked' : ''}`}
       style={{
         left: timelineX(start),
         width: Math.max(10, len * pxPerSec),
@@ -688,9 +691,10 @@ export default function Timeline() {
       {selected && !flags?.locked && <span className="tlclip__handle tlclip__handle--l" onPointerDown={(e) => onFreeTrim(e, kind, id, 'start')} />}
       {visual}
       {editing?.id === id ? renameInput : <span className="tlclip__body">{label}</span>}
+      {linkedGroup && <span className="timeline-group-badge" title={`${linkedGroup.name} · ${linkedGroup.members.length}개 연결`}>{linkedGroup.members.length}</span>}
       {selected && !flags?.locked && <span className="tlclip__handle tlclip__handle--r" onPointerDown={(e) => onFreeTrim(e, kind, id, 'end')} />}
     </div>
-  )
+  }
 
   const zoomValue = Math.round((Math.log(pxPerSec / MIN_PX_PER_SEC) / Math.log(MAX_PX_PER_SEC / MIN_PX_PER_SEC)) * 1000)
   const setZoomValue = (value: number) => {
@@ -722,11 +726,17 @@ export default function Timeline() {
     </div>
   )
 
+  const activeGroup = selection ? groupFor(selection) : undefined
+  const selectedIsActiveGroup = Boolean(activeGroup && selectedItems.length > 1 && selectedItems.every((item) =>
+    activeGroup.members.some((member) => member.type === item.type && member.id === item.id)))
+
   return (
     <div className="timeline">
       <div className="timeline__bar">
         <button className="iconbtn iconbtn--xs" onClick={() => addMarker(playhead)} title="현재 위치에 마커 추가 (M)" aria-label="마커 추가"><Icon name="marker" /></button>
-        {selectedItems.length > 1 && <button className="btn btn--sm" onClick={groupSelected}>그룹 만들기 ({selectedItems.length})</button>}
+        {selectedItems.length > 1 && !selectedIsActiveGroup && <button className="btn btn--sm" onClick={groupSelected}>그룹 만들기 ({selectedItems.length})</button>}
+        {activeGroup && <span className="timeline__group-summary" title={`${activeGroup.members.length}개 항목이 연결되어 있습니다.`}>{activeGroup.name} · {activeGroup.members.length}개</span>}
+        {activeGroup && selectedItems.length < activeGroup.members.length && <button className="btn btn--sm" onClick={() => selectGroup(activeGroup.id)}>그룹 전체 선택</button>}
         {selectedItems.some((item) => Boolean(groupFor(item))) && <button className="btn btn--sm" onClick={ungroupSelected}>그룹 해제</button>}
         <span className="timeline__hint">스크롤=확대 · Shift+스크롤=이동</span>
         <div className="timeline__bar-spacer" />
@@ -817,12 +827,13 @@ export default function Timeline() {
             {clips.length === 0 && <div className="timeline__placeholder">＋ 동영상·사진을 추가하세요</div>}
             {clips.map((c, i) => {
               const isSel = isSelected({ type: 'clip', id: c.id })
+              const linkedGroup = groupFor({ type: 'clip', id: c.id })
               const isDragging = dragId === c.id
               const clipWidth = Math.max(2, clipTimelineDuration(c) * pxPerSec)
               return (
                 <div
                   key={c.id}
-                  className={`clip${isSel ? ' clip--selected' : ''}${isDragging ? ' clip--dragging' : ''}`}
+                  className={`clip${isSel ? ' clip--selected' : ''}${linkedGroup ? ' clip--grouped' : ''}${isDragging ? ' clip--dragging' : ''}`}
                   style={{
                     left: isDragging ? dragLeft : timelineX(offsets[i]),
                     width: clipWidth,
@@ -840,6 +851,7 @@ export default function Timeline() {
                   {editing?.id === c.id
                     ? renameInput
                     : <span className="clip__label">{c.kind === 'image' ? '이미지 · ' : c.kind === 'color' ? '색상 · ' : '영상 · '}{c.name}</span>}
+                  {linkedGroup && <span className="timeline-group-badge" title={`${linkedGroup.name} · ${linkedGroup.members.length}개 연결`}>{linkedGroup.members.length}</span>}
                   <span className="clip__meta">
                     {c.speed !== 1 && `${c.speed}× `}
                     {c.repeat > 1 && `⟳${c.repeat} `}
@@ -964,6 +976,34 @@ export default function Timeline() {
           if (index < 0) return null
           return { start: offsets[index], length: clipTimelineDuration(st.clips[index]) }
         }
+        const spanFor = (ref: TimelineItemRef) => {
+          if (ref.type === 'clip') {
+            const offsets = clipStartOffsets(st.clips)
+            const index = st.clips.findIndex((clip) => clip.id === ref.id)
+            return index < 0 ? null : { start: offsets[index], length: clipTimelineDuration(st.clips[index]), type: ref.type }
+          }
+          if (ref.type === 'overlay') {
+            const value = st.overlays.find((entry) => entry.id === ref.id)
+            return value ? { start: value.start, length: overlayLength(value), type: ref.type } : null
+          }
+          if (ref.type === 'audio') {
+            const value = st.audios.find((entry) => entry.id === ref.id)
+            return value ? { start: value.start, length: audioLength(value), type: ref.type } : null
+          }
+          if (ref.type === 'background') {
+            const value = st.backgrounds.find((entry) => entry.id === ref.id)
+            return value ? { start: value.start, length: clipTimelineDuration(value), type: ref.type } : null
+          }
+          const value = st.texts.find((entry) => entry.id === ref.id)
+          return value ? { start: value.start, length: value.end - value.start, type: ref.type } : null
+        }
+        const groupReference = targetGroup
+          ? targetGroup.members.filter((member) => member.type !== target.type || member.id !== target.id)
+            .map(spanFor).filter((span): span is NonNullable<ReturnType<typeof spanFor>> => Boolean(span))
+            .sort((a, b) => Number(b.type === 'clip') - Number(a.type === 'clip') || b.length - a.length)[0]
+          : null
+        const groupFreeSpans = targetGroup?.members.filter((member) => member.type !== 'clip')
+          .map(spanFor).filter((span): span is NonNullable<ReturnType<typeof spanFor>> => Boolean(span)) ?? []
         const moveToPlayhead = () => {
           const p = useEditor.getState().playhead
           if (target.type === 'overlay') updateOverlay(target.id, { start: p })
@@ -974,34 +1014,74 @@ export default function Timeline() {
             if (t) updateText(target.id, { start: p, end: p + (t.end - t.start) })
           }
         }
+        const moveLayerToEdge = (direction: -1 | 1) => {
+          for (let index = 0; index < layerCount; index++) {
+            if (target.type === 'overlay') raiseOverlay(target.id, direction)
+            else if (target.type === 'background') raiseBackground(target.id, direction)
+            else if (target.type === 'text') raiseText(target.id, direction)
+          }
+        }
         return (
           <div className="timeline-menu" role="menu" style={{ left: menu.x, top: menu.y }}
             onPointerDown={(e) => e.stopPropagation()}>
-            {target.type === 'clip' && <>
-              <button role="menuitem" onClick={() => withTarget(target, () => moveClip(target.id, -1))}>← 왼쪽으로 이동</button>
-              <button role="menuitem" onClick={() => withTarget(target, () => moveClip(target.id, 1))}>오른쪽으로 이동 →</button>
+            {(selectedItems.length > 1 || targetGroup) && <div className="timeline-menu__label">그룹</div>}
+            {selectedItems.length > 1 && !selectedIsActiveGroup && <button role="menuitem" onClick={() => { groupSelected(); setMenu(null) }}>선택 항목 그룹 만들기 ({selectedItems.length})</button>}
+            {targetGroup && <>
+              <button role="menuitem" onClick={() => { selectGroup(targetGroup.id); setMenu(null) }}>그룹 전체 선택 ({targetGroup.members.length})</button>
+              {groupFreeSpans.length > 0 && <button role="menuitem" onClick={() => {
+                const start = Math.min(...groupFreeSpans.map((span) => span.start))
+                moveTimelineItems(targetGroup.members, useEditor.getState().playhead - start)
+                selectGroup(targetGroup.id)
+                setMenu(null)
+              }}>그룹 시작을 재생 헤드로 이동</button>}
+              <button role="menuitem" onClick={() => {
+                const name = window.prompt('그룹 이름', targetGroup.name)
+                if (name != null) renameGroup(targetGroup.id, name)
+                setMenu(null)
+              }}>그룹 이름 바꾸기…</button>
+              <button role="menuitem" onClick={() => withTarget(target, ungroupSelected)}>그룹 해제</button>
             </>}
-            {selectedItems.length > 1 && <button role="menuitem" onClick={() => { groupSelected(); setMenu(null) }}>선택 항목 그룹 만들기 ({selectedItems.length})</button>}
-            {targetGroup && <button role="menuitem" onClick={() => withTarget(target, ungroupSelected)}>그룹 해제</button>}
-            {target.type !== 'clip' && <button role="menuitem" onClick={() => withTarget(target, moveToPlayhead)}>재생 헤드 위치로 이동</button>}
-            {target.type !== 'clip' && mainLength > 0 && <>
-              <button role="menuitem" onClick={() => withTarget(target, () => fitSpan(0, mainLength))}>메인 트랙 전체 길이에 맞춤</button>
-              <button role="menuitem" disabled={!playheadClipSpan()} onClick={() => withTarget(target, () => {
-                const span = playheadClipSpan()
-                if (span) fitSpan(span.start, span.length)
-              })}>재생 헤드의 클립 구간에 맞춤</button>
-              <button role="menuitem" disabled={itemStart >= mainLength} onClick={() => withTarget(target, () => fitSpan(itemStart, mainLength - itemStart))}>현재 위치부터 메인 끝까지</button>
+
+            <div className="timeline-menu__label">위치</div>
+            {target.type === 'clip' ? <>
+              <button role="menuitem" disabled={st.clips[0]?.id === target.id} onClick={() => withTarget(target, () => reorderClip(target.id, 0))}>맨 앞으로 이동</button>
+              <button role="menuitem" onClick={() => withTarget(target, () => moveClip(target.id, -1))}>한 칸 앞으로 이동</button>
+              <button role="menuitem" onClick={() => withTarget(target, () => moveClip(target.id, 1))}>한 칸 뒤로 이동</button>
+              <button role="menuitem" disabled={st.clips[st.clips.length - 1]?.id === target.id} onClick={() => withTarget(target, () => reorderClip(target.id, st.clips.length - 1))}>맨 뒤로 이동</button>
+            </> : <button role="menuitem" onClick={() => withTarget(target, moveToPlayhead)}>재생 헤드 위치로 이동</button>}
+
+            {target.type !== 'clip' && (mainLength > 0 || groupReference) && <>
+              <div className="timeline-menu__label">길이 맞춤</div>
+              {groupReference && <button role="menuitem" onClick={() => withTarget(target, () => fitSpan(groupReference.start, groupReference.length))}>
+                그룹 기준 항목 구간에 맞춤{groupReference.type === 'clip' ? ' (메인 클립)' : ''}
+              </button>}
+              {mainLength > 0 && <>
+                <button role="menuitem" onClick={() => withTarget(target, () => fitSpan(0, mainLength))}>메인 트랙 전체 길이에 맞춤</button>
+                <button role="menuitem" disabled={!playheadClipSpan()} onClick={() => withTarget(target, () => {
+                  const span = playheadClipSpan()
+                  if (span) fitSpan(span.start, span.length)
+                })}>재생 헤드의 클립 구간에 맞춤</button>
+                <button role="menuitem" disabled={itemStart >= mainLength} onClick={() => withTarget(target, () => fitSpan(itemStart, mainLength - itemStart))}>현재 위치부터 메인 끝까지</button>
+              </>}
             </>}
+
             {(target.type === 'overlay' || target.type === 'background' || target.type === 'text') && <>
+              <div className="timeline-menu__label">레이어 순서</div>
+              <button role="menuitem" disabled={layerIndex < 0 || layerIndex >= layerCount - 1} onClick={() => withTarget(target, () => moveLayerToEdge(1))}>맨 위로 올리기</button>
               <button role="menuitem" disabled={layerIndex < 0 || layerIndex >= layerCount - 1} onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, 1) : target.type === 'background' ? raiseBackground(target.id, 1) : raiseText(target.id, 1))}>레이어 한 단계 위로</button>
               <button role="menuitem" disabled={layerIndex <= 0} onClick={() => withTarget(target, () => target.type === 'overlay' ? raiseOverlay(target.id, -1) : target.type === 'background' ? raiseBackground(target.id, -1) : raiseText(target.id, -1))}>레이어 한 단계 아래로</button>
+              <button role="menuitem" disabled={layerIndex <= 0} onClick={() => withTarget(target, () => moveLayerToEdge(-1))}>맨 아래로 내리기</button>
             </>}
+
+            {(target.type === 'clip' || target.type === 'overlay' || target.type === 'background') && <div className="timeline-menu__label">트랙 이동</div>}
             {target.type === 'clip' && <>
-              <button role="menuitem" onClick={() => withTarget(target, () => moveClipToOverlay(target.id))}>오버레이로 이동</button>
-              <button role="menuitem" onClick={() => withTarget(target, () => moveClipToBackground(target.id))}>배경으로 이동</button>
+              <button role="menuitem" onClick={() => withTarget(target, () => moveClipToOverlay(target.id))}>오버레이 레이어로 이동</button>
+              <button role="menuitem" onClick={() => withTarget(target, () => moveClipToBackground(target.id))}>배경 레이어로 이동</button>
             </>}
             {target.type === 'overlay' && <button role="menuitem" onClick={() => withTarget(target, () => moveOverlayToMain(target.id))}>메인 트랙으로 이동</button>}
             {target.type === 'background' && <button role="menuitem" onClick={() => withTarget(target, () => moveBackgroundToMain(target.id))}>메인 트랙으로 이동</button>}
+
+            <div className="timeline-menu__label">편집</div>
             {canMute &&
               <button role="menuitem" onClick={() => withTarget(target, () => target.type === 'audio' ? updateAudio(target.id, { muted: !item?.muted }) : target.type === 'overlay' ? updateOverlay(target.id, { muted: !item?.muted }) : updateBackground(target.id, { muted: !item?.muted }))}>{item?.muted ? '음소거 해제' : '음소거'}</button>}
             {visualItem && <>

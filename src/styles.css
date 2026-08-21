@@ -1092,6 +1092,8 @@ input[type='range']:disabled { opacity: 0.4; }
 .timeline-menu button:hover,
 .timeline-menu button:focus-visible { background: rgba(255, 255, 255, 0.09); outline: none; }
 .timeline-menu button:disabled { color: rgba(248, 244, 247, 0.34); cursor: default; background: transparent; }
+.timeline-menu__label { position: sticky; top: -6px; z-index: 1; padding: 7px 10px 4px; color: #aaa2aa; background: #27232a; font-size: 9px; font-weight: 800; letter-spacing: .08em; }
+.timeline-menu__label:not(:first-child) { margin-top: 4px; border-top: 1px solid rgba(255, 255, 255, 0.09); }
 .timeline-menu__separator { height: 1px; margin: 5px 4px; background: rgba(255, 255, 255, 0.12); }
 .timeline-menu .timeline-menu__danger { color: #ff9aab; }
 
@@ -1153,6 +1155,7 @@ input[type='range']:disabled { opacity: 0.4; }
 .timeline__seek-control input:focus { background: var(--bg-1); box-shadow: inset 0 0 0 1px var(--accent); }
 .timeline__seek-control span { color: var(--text-dim); font-size: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .timeline__hint { font-size: 11px; color: var(--text-dim); opacity: 0.7; }
+.timeline__group-summary { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 7px; color: #bfe7ef; border: 1px solid rgba(114, 183, 199, .42); border-radius: 6px; background: rgba(36, 86, 97, .28); font-size: 10px; font-weight: 700; }
 @media (max-width: 680px) {
   .timeline__hint { display: none; }
 }
@@ -1566,6 +1569,12 @@ input[type='range']:disabled { opacity: 0.4; }
   pointer-events: none;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
+.clip--grouped,
+.tlclip--grouped { box-shadow: inset 0 -2px 0 #72b7c7; }
+.clip--grouped.clip--selected,
+.tlclip--grouped.tlclip--selected { box-shadow: inset 0 -2px 0 #72b7c7, inset 0 0 0 2px var(--accent); }
+.timeline-group-badge { position: absolute; right: 5px; top: 4px; z-index: 5; min-width: 17px; height: 17px; padding: 0 4px; display: grid; place-items: center; color: #eafcff; border: 1px solid rgba(234, 252, 255, .52); border-radius: 99px; background: rgba(25, 76, 88, .82); font-size: 9px; font-weight: 800; line-height: 1; pointer-events: none; }
+.clip .timeline-group-badge { right: 7px; top: 6px; }
 
 .keyframes__controls { display: grid; grid-template-columns: 36px 1fr 36px; gap: 5px; }
 .keyframes__toggle { justify-content: center; }
