@@ -31,6 +31,14 @@
 
 React 18 · TypeScript · Vite · Zustand(상태 관리) · ffmpeg.wasm(웹) · Electron/FFmpeg(VideoToolbox, macOS)
 
+## 제품 정책
+
+출시 예정 제품명 **개간단컷**의 무료·Pro 기능 범위, 7일 체험, 평생 이용권,
+광고·구독 정책과 경쟁 전략은 [제품·수익화 전략](docs/product-and-monetization-strategy.md)에 정리되어 있습니다.
+
+iPhone·iPad 화면 구조, 패널 전환 원칙과 기기별 검증 기준은
+[모바일 UI·UX 기준](docs/mobile-ui-ux.md)에 정리되어 있습니다.
+
 ## 실행
 
 ```bash
