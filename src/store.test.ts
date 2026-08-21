@@ -186,4 +186,21 @@ describe('timeline splitting', () => {
     expect(useEditor.getState().overlays).toHaveLength(1)
     expect(useEditor.getState().clips).toHaveLength(1)
   })
+
+  it('adds an offline sticker through the same restorable overlay path', () => {
+    useEditor.setState({
+      mediaLibrary: [], clips: [clip(1)], overlays: [], visualOrder: [],
+      playhead: 0.75, selection: null, selectedItems: [],
+    })
+
+    useEditor.getState().addSticker('sparkles')
+
+    const state = useEditor.getState()
+    expect(state.mediaLibrary).toHaveLength(0)
+    expect(state.overlays[0]).toMatchObject({
+      kind: 'image', start: 0.75, trimStart: 0, trimEnd: 5,
+      sticker: { kind: 'sparkles' }, muted: true,
+    })
+    expect(state.overlays[0].file.type).toBe('image/png')
+  })
 })

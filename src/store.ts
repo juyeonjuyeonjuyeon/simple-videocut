@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup, VisualLayerRef, MediaAsset, ShapeKind } from './types'
+import type { Clip, Overlay, AudioClip, TextOverlay, Background, Selection, AspectRatio, ExportSettings, Crop, TimelineMarker, KeyframeEasing, TimelineItemRef, TimelineGroup, VisualLayerRef, MediaAsset, ShapeKind, StickerKind } from './types'
 import { NO_CROP, FONT_OPTIONS } from './types'
 import type { ProjectState } from './utils/project'
 import { assertMediaCapacity, probeVideo, probeImage, probeAudio, nextClipColor, isVideoFile, isImageFile, isAudioFile } from './utils/media'
@@ -8,6 +8,7 @@ import { keyframeAt, positionAt } from './utils/motion'
 import { normalizeVisualOrder } from './utils/layers'
 import { OVERLAY_STYLE_DEFAULTS } from './utils/overlay-style'
 import { createShapePlaceholderFile, resolveShapeStyle, shapeLabel, SHAPE_STYLE_DEFAULTS } from './utils/shape'
+import { createStickerPlaceholderFile, stickerLabel } from './utils/sticker'
 import { translate } from './i18n'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
@@ -63,6 +64,7 @@ interface EditorState {
 
   // ---- overlay (PiP) layers ----
   addShape: (kind: ShapeKind) => void
+  addSticker: (kind: StickerKind) => void
   addOverlayFiles: (files: FileList | File[]) => Promise<void>
   updateOverlay: (id: string, patch: Partial<Overlay>) => void
   removeOverlay: (id: string) => void
@@ -565,6 +567,26 @@ export const useEditor = create<EditorState>((set, get) => ({
       opacity: 1, locked: false, hidden: false, fadeIn: 0, fadeOut: 0, positionKeyframes: [],
       ...OVERLAY_STYLE_DEFAULTS,
       shape: { ...SHAPE_STYLE_DEFAULTS, kind },
+    }
+    set((state) => ({
+      overlays: [...state.overlays, overlay],
+      visualOrder: [...normalizeVisualOrder(state.overlays, state.texts, state.visualOrder), { type: 'overlay', id }],
+      selection: { type: 'overlay', id }, selectedItems: [{ type: 'overlay', id }],
+    }))
+  },
+
+  addSticker: (kind) => {
+    const file = createStickerPlaceholderFile(kind)
+    const id = uid()
+    const overlay: Overlay = {
+      id, kind: 'image', name: translate(`${stickerLabel(kind)} 스티커`, `${stickerLabel(kind)} sticker`), src: URL.createObjectURL(file), file,
+      sourceSize: file.size, duration: IMAGE_NOMINAL_MAX, trimStart: 0, trimEnd: DEFAULT_IMAGE_DUR,
+      hasAudio: false, color: nextClipColor(), start: get().playhead,
+      x: .5, y: .5, scale: .24, scaleY: undefined, aspectLocked: true, angle: 0,
+      speed: 1, volume: 1, muted: true, ...TRANSFORM_DEFAULTS, repeat: 1,
+      opacity: 1, locked: false, hidden: false, fadeIn: 0, fadeOut: 0, positionKeyframes: [],
+      ...OVERLAY_STYLE_DEFAULTS,
+      sticker: { kind },
     }
     set((state) => ({
       overlays: [...state.overlays, overlay],

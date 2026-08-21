@@ -13,6 +13,13 @@ export type OverlayMaskShape = 'none' | 'rounded' | 'circle' | 'ellipse' | 'hear
 
 export type ShapeKind = 'rectangle' | 'circle' | 'triangle' | 'diamond' | 'star' | 'heart' | 'hexagon' | 'arrow' | 'line'
 
+/** Small, original vector illustrations bundled with the editor. */
+export type StickerKind = 'heart-pop' | 'sparkles' | 'smile' | 'flower' | 'sun' | 'speech' | 'arrow-note' | 'check'
+
+export interface StickerStyle {
+  kind: StickerKind
+}
+
 export interface ShapeStyle {
   kind: ShapeKind
   fillColor: string
@@ -188,6 +195,8 @@ export interface Overlay {
   maskShape?: OverlayMaskShape
   /** Built-in vector shape. Its placeholder File only keeps project media validation portable. */
   shape?: ShapeStyle
+  /** Built-in original sticker. Rendered locally in preview and export. */
+  sticker?: StickerStyle
   fadeIn?: number
   fadeOut?: number
   positionKeyframes?: PositionKeyframe[]

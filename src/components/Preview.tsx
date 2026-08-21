@@ -19,6 +19,7 @@ import { positionAt } from '../utils/motion'
 import Icon from './Icon'
 import { maskClipPath, maskPathData, resolveOverlayStyle } from '../utils/overlay-style'
 import { resolveShapeStyle, shapePathData } from '../utils/shape'
+import StickerGraphic from './StickerGraphic'
 import { useLanguage } from '../i18n'
 import { resolveMainPlacement } from '../utils/main-placement'
 import BackgroundRemovedImage from './BackgroundRemovedImage'
@@ -350,7 +351,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
       }
       const media = overlayEls.current.get(o.id)
       const clip = wrap?.querySelector<HTMLElement>('.preview__overlay-clip')
-      if (clip && wrap) clip.style.clipPath = o.shape ? 'none' : maskClipPath(resolveOverlayStyle(o).maskShape, wrap.offsetWidth, wrap.offsetHeight)
+      if (clip && wrap) clip.style.clipPath = o.shape || o.sticker ? 'none' : maskClipPath(resolveOverlayStyle(o).maskShape, wrap.offsetWidth, wrap.offsetHeight)
       if (media) {
         media.style.transform = `${cssCropFill(o.crop)} ${cssTransform(o.rotate, o.flipH, o.flipV)}`.trim()
         media.style.clipPath = 'none'
@@ -878,11 +879,13 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
                 zIndex: visualPreviewZ(visualOrder, { type: 'overlay', id: o.id }),
               }}
               onPointerDown={(e) => onOverlayDown(e, o.id)}
-              onDoubleClick={(e) => { e.stopPropagation(); if (sel && !o.shape) onOpenCrop() }}
+              onDoubleClick={(e) => { e.stopPropagation(); if (sel && !o.shape && !o.sticker) onOpenCrop() }}
             >
-              <div className="preview__overlay-clip" style={{ clipPath: o.shape ? 'none' : maskClipPath(visualStyle.maskShape), filter: shadow }}>
+              <div className="preview__overlay-clip" style={{ clipPath: o.shape || o.sticker ? 'none' : maskClipPath(visualStyle.maskShape), filter: shadow }}>
                 {o.shape ? (
                   <ShapeOverlayGraphic overlay={o} frameHeight={box.h} />
+                ) : o.sticker ? (
+                  <StickerGraphic kind={o.sticker.kind} className="preview__sticker" style={{ transform: cssTransform(o.rotate, o.flipH, o.flipV) }} />
                 ) : o.kind === 'video' ? (
                   <video
                     ref={(el) => { if (el) overlayEls.current.set(o.id, el); else overlayEls.current.delete(o.id) }}
@@ -899,7 +902,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
                   />
                 )}
               </div>
-              {!o.shape && <OverlayDecoration overlay={o} frameHeight={box.h} />}
+              {!o.shape && !o.sticker && <OverlayDecoration overlay={o} frameHeight={box.h} />}
             </div>
           )
         })}
@@ -916,7 +919,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
               zIndex: PREVIEW_Z.editor,
             }}
             onPointerDown={(event) => onOverlayDown(event, selOverlay.id)}
-            onDoubleClick={(event) => { event.stopPropagation(); if (!selOverlay.shape) onOpenCrop() }}
+            onDoubleClick={(event) => { event.stopPropagation(); if (!selOverlay.shape && !selOverlay.sticker) onOpenCrop() }}
           >
             {!selOverlay.locked && (['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'] as const).map((handle) => (
               <span key={handle} className={`preview__resize preview__resize--${handle}`} onPointerDown={(event) => onResizeDown(event, selOverlay.id, handle)} />
@@ -993,7 +996,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
         {guides.y != null && <div className="preview-guide preview-guide--y" style={{ top: `${guides.y * 100}%` }} />}
         {rotationReadout && <div className="preview__rotation-readout">{rotationReadout.angle}°</div>}
 
-        {((selClip && selClip.kind !== 'color') || (selOverlay && !selOverlay.shape)) && !(selOverlay?.locked) && (
+        {((selClip && selClip.kind !== 'color') || (selOverlay && !selOverlay.shape && !selOverlay.sticker)) && !(selOverlay?.locked) && (
           <div className="preview__selection-tools" onPointerDown={(event) => event.stopPropagation()}>
             <button type="button" onClick={onOpenCrop}><Icon name="crop" />{tr('자르기', 'Crop')}</button>
           </div>

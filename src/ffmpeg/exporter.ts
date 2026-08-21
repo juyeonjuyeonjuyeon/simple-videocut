@@ -8,6 +8,7 @@ import { positionExpression } from '../utils/motion'
 import { normalizeVisualOrder } from '../utils/layers'
 import { overlayOutputSize, renderOverlayEffectAssets } from '../utils/overlay-style'
 import { renderShapePng } from '../utils/shape'
+import { renderStickerPng } from '../utils/sticker'
 import { resolveMainPlacement } from '../utils/main-placement'
 import { cachedBackgroundRemovedImage, DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-removal'
 
@@ -470,6 +471,19 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     const overlayEffects: Array<{ width: number; height: number; padding: number; maskName: string | null; decorationName: string | null }> = []
     for (let k = 0; k < overlays.length; k++) {
       const overlay = overlays[k]
+      if (overlay.sticker) {
+        const body = overlayOutputSize(overlay, 1, 1, W, H)
+        const rendered = await renderStickerPng(overlay, body.width, body.height, H)
+        const fileName = `sticker${k}.png`
+        await fp.writeFile(fileName, rendered.data)
+        overlayFiles.push(fileName)
+        overlayTrimStarts.push(0)
+        overlayAudioFlags.push(false)
+        overlayEffects.push({ width: rendered.width, height: rendered.height, padding: 0, maskName: null, decorationName: null })
+        visualIndex++
+        progressReporter.report(0.05 + (0.2 * visualIndex) / Math.max(1, visualCount))
+        continue
+      }
       if (overlay.shape) {
         const body = overlayOutputSize(overlay, 1, 1, W, H)
         const rendered = await renderShapePng(overlay, body.width, body.height, H)

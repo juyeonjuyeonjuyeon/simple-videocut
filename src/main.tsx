@@ -4,6 +4,7 @@ import App from './App'
 import { useEditor } from './store'
 import { LanguageProvider } from './i18n'
 import './styles.css'
+import './feature-styles.css'
 
 // Dev-only: expose the editor store for debugging in the browser console.
 if (import.meta.env.DEV) {

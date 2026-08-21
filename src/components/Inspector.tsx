@@ -10,6 +10,8 @@ import { normalizeVisualOrder } from '../utils/layers'
 import FontPicker from './FontPicker'
 import { maskPathData, OVERLAY_STYLE_DEFAULTS, resolveOverlayStyle } from '../utils/overlay-style'
 import { resolveShapeStyle, SHAPE_OPTIONS, SHAPE_STYLE_DEFAULTS } from '../utils/shape'
+import StickerGraphic from './StickerGraphic'
+import { stickerLabel } from '../utils/sticker'
 import ShapeIcon from './ShapeIcon'
 import { translate, useLanguage } from '../i18n'
 import { DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-removal'
@@ -491,14 +493,15 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
   const position = positionAt(ov, localTime)
   const visualStyle = resolveOverlayStyle(ov)
   const shapeStyle = ov.shape ? resolveShapeStyle(ov.shape) : null
+  const sticker = ov.sticker
 
   return (
     <div className="inspector__body">
       {tab === 'basic' && <>
         <InspectorBlock title={translate('기본 정보', 'Basic info')}>
           <div className="inspector__group">
-            <NameField icon={<Icon name={ov.shape ? 'shape' : ov.kind === 'image' ? 'image' : 'layers'} />} name={ov.name} onChange={(v) => update(ov.id, { name: v })} />
-            <div className="inspector__hint">{ov.shape ? translate('도형', 'Shape') : translate('레이어', 'Layer')} · {translate('길이', 'Duration')} {formatTime(overlayLength(ov))}</div>
+            <NameField icon={<Icon name={ov.shape ? 'shape' : sticker ? 'heart' : ov.kind === 'image' ? 'image' : 'layers'} />} name={ov.name} onChange={(v) => update(ov.id, { name: v })} />
+            <div className="inspector__hint">{ov.shape ? translate('도형', 'Shape') : sticker ? translate('스티커', 'Sticker') : translate('레이어', 'Layer')} · {translate('길이', 'Duration')} {formatTime(overlayLength(ov))}</div>
           </div>
         </InspectorBlock>
         <InspectorBlock title={translate('레이어 상태', 'Layer state')}>
@@ -510,7 +513,7 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
             <button className="btn" disabled={idx <= 0} onClick={() => raise(ov.id, -1)}>▼ {translate('아래로', 'Down')}</button>
             <button className="btn" disabled={idx >= visualOrder.length - 1} onClick={() => raise(ov.id, 1)}>{translate('위로', 'Up')} ▲</button>
           </div>
-          {!ov.shape && <button className="btn" onClick={() => toMain(ov.id)}><Icon name="video" />{translate('메인 트랙으로 이동', 'Move to main track')}</button>}
+          {!ov.shape && !sticker && <button className="btn" onClick={() => toMain(ov.id)}><Icon name="video" />{translate('메인 트랙으로 이동', 'Move to main track')}</button>}
         </InspectorBlock>
         <button className="btn btn--danger" onClick={() => remove(ov.id)}>{translate('레이어 삭제', 'Delete layer')}</button>
       </>}
@@ -532,7 +535,7 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
           <TransformRow rotate={ov.rotate} flipH={ov.flipH} flipV={ov.flipV} onPatch={patch} />
           <div className="inspector__group"><Range label={translate('자유 회전', 'Free rotation')} value={ov.angle || 0} min={-180} max={180} step={1} unit="°" onChange={(v) => update(ov.id, { angle: v })} /></div>
         </InspectorBlock>
-        {!ov.shape && <InspectorBlock title={translate('자르기', 'Crop')}><CropRow crop={ov.crop} onPatch={patch} onOpen={onOpenCrop} /></InspectorBlock>}
+        {!ov.shape && !sticker && <InspectorBlock title={translate('자르기', 'Crop')}><CropRow crop={ov.crop} onPatch={patch} onOpen={onOpenCrop} /></InspectorBlock>}
         <InspectorBlock title={translate('움직임', 'Motion')}>
           <PositionKeyframeRow frames={ov.positionKeyframes} localTime={localTime}
             onToggle={() => togglePositionKeyframe('overlay', ov.id)}
@@ -542,8 +545,14 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
         </InspectorBlock>
       </>}
       {tab === 'style' && <>
-        {!shapeStyle && ov.kind === 'image' && <InspectorBlock title={translate('배경 제거', 'Remove background')}>
+        {!shapeStyle && !sticker && ov.kind === 'image' && <InspectorBlock title={translate('배경 제거', 'Remove background')}>
           <BackgroundRemovalRow enabled={ov.backgroundRemovalEnabled} sensitivity={ov.backgroundRemovalSensitivity} onPatch={patch} />
+        </InspectorBlock>}
+        {sticker && <InspectorBlock title={translate('스티커', 'Sticker')}>
+          <div className="sticker-inspector-card">
+            <StickerGraphic kind={sticker.kind} />
+            <div><b>{stickerLabel(sticker.kind)}</b><span>{translate('앱에 포함된 자체 제작 디자인', 'Original design bundled with the app')}</span></div>
+          </div>
         </InspectorBlock>}
         {shapeStyle ? <InspectorBlock title={translate('도형', 'Shape')}>
           <div className="shape-style-picker" role="radiogroup" aria-label={translate('도형 종류', 'Shape type')}>
@@ -563,7 +572,7 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
             {shapeStyle.kind === 'rectangle' && <Range label={translate('모서리 둥글기', 'Corner radius')} value={Math.round(shapeStyle.cornerRadius * 200)} min={0} max={100} step={1} unit="%"
               onChange={(cornerRadius) => update(ov.id, { shape: { ...shapeStyle, cornerRadius: cornerRadius / 200 } })} />}
           </div>
-        </InspectorBlock> : <InspectorBlock title={translate('마스크 모양', 'Mask shape')}>
+        </InspectorBlock> : !sticker && <InspectorBlock title={translate('마스크 모양', 'Mask shape')}>
           <div className="mask-picker" role="radiogroup" aria-label={translate('오버레이 마스크 모양', 'Overlay mask shape')}>
             {MASK_OPTIONS.map((option) => (
               <button type="button" role="radio" aria-checked={visualStyle.maskShape === option.value} key={option.value}
@@ -576,7 +585,7 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
           </div>
           <div className="inspector__hint">{translate('마스크는 원본을 지우지 않고 보이는 모양만 바꿉니다.', 'Masks change only the visible shape without altering the source.')}</div>
         </InspectorBlock>}
-        <InspectorBlock title={translate('테두리', 'Border')}>
+        {!sticker && <InspectorBlock title={translate('테두리', 'Border')}>
           <div className="inspector__group">
             <Range label={translate('굵기', 'Width')} value={Math.round(visualStyle.borderWidth * 720)} min={0} max={40} step={1} unit="px"
               onChange={(value) => update(ov.id, { borderWidth: value / 720 })} />
@@ -591,7 +600,7 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
               </select>
             </label>
           </div>
-        </InspectorBlock>
+        </InspectorBlock>}
         <InspectorBlock title={translate('그림자', 'Shadow')}>
           <div className="inspector__group">
             <label className="switch">
@@ -616,7 +625,7 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
           : { ...OVERLAY_STYLE_DEFAULTS })}>{translate('스타일 초기화', 'Reset style')}</button>
       </>}
       {tab === 'time' && <>
-        {!ov.shape && <InspectorBlock title={translate('트림', 'Trim')}>
+        {!ov.shape && !sticker && <InspectorBlock title={translate('트림', 'Trim')}>
           <div className="inspector__group">
             <Range label={translate('시작 트림', 'Trim start')} badge={formatTime(ov.trimStart)} value={ov.trimStart} min={0} max={ov.duration} step={0.1} unit={translate('초', 's')}
               onChange={(v) => update(ov.id, { trimStart: Math.min(v, ov.trimEnd - 0.1) })} />
@@ -624,10 +633,10 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
               onChange={(v) => update(ov.id, { trimEnd: Math.max(v, ov.trimStart + 0.1) })} />
           </div>
         </InspectorBlock>}
-        {!ov.shape && ov.kind === 'video' && <InspectorBlock title={translate('속도', 'Speed')}><SpeedRow speed={ov.speed} onPatch={patch} /></InspectorBlock>}
+        {!ov.shape && !sticker && ov.kind === 'video' && <InspectorBlock title={translate('속도', 'Speed')}><SpeedRow speed={ov.speed} onPatch={patch} /></InspectorBlock>}
         <InspectorBlock title={translate('페이드', 'Fade')}><FadeRow length={overlayLength(ov)} fadeIn={ov.fadeIn} fadeOut={ov.fadeOut} onPatch={patch} label={translate('화면·소리 페이드', 'Video and audio fade')} /></InspectorBlock>
-        <InspectorBlock title={ov.shape ? translate('길이', 'Duration') : translate('길이와 반복', 'Duration and repeat')}>
-          {!ov.shape && <RepeatRow repeat={ov.repeat} onPatch={patch} />}
+        <InspectorBlock title={ov.shape || sticker ? translate('길이', 'Duration') : translate('길이와 반복', 'Duration and repeat')}>
+          {!ov.shape && !sticker && <RepeatRow repeat={ov.repeat} onPatch={patch} />}
           <DurationRow seconds={overlayLength(ov)} onSet={(t) => update(ov.id, exactDurationPatch((ov.trimEnd - ov.trimStart) / ov.speed, t))} />
         </InspectorBlock>
       </>}

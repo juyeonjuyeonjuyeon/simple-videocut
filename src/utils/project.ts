@@ -1,4 +1,5 @@
 import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, ExportSettings, TimelineMarker, TimelineGroup, VisualLayerRef, MediaAsset } from '../types'
+import { isStickerKind } from './sticker'
 
 const DB_NAME = 'simplecut-db'
 const STORE = 'projects'
@@ -579,6 +580,10 @@ const validateItem = (value: unknown, track: string) => {
     if ('shadowX' in item) finite(item.shadowX, -40 / 720, 40 / 720, `${track} 그림자 가로 위치`)
     if ('shadowY' in item) finite(item.shadowY, -40 / 720, 40 / 720, `${track} 그림자 세로 위치`)
     if ('maskShape' in item && !['none', 'rounded', 'circle', 'ellipse', 'heart', 'star', 'hexagon'].includes(String(item.maskShape))) throw new Error(`${track} 마스크 모양이 잘못되었습니다.`)
+    if ('sticker' in item && item.sticker !== undefined) {
+      const sticker = record(item.sticker, `${track} 스티커`)
+      if (!isStickerKind(sticker.kind)) throw new Error(`${track} 스티커 종류가 잘못되었습니다.`)
+    }
     if ('positionKeyframes' in item) validatePositionKeyframes(item.positionKeyframes, ((item.trimEnd as number) - (item.trimStart as number)) / (item.speed as number) * (item.repeat as number), track)
   } else if (track === '클립') {
     if ('canvasX' in item && item.canvasX !== undefined) finite(item.canvasX, 0, 1, `${track} 캔버스 가로 위치`)

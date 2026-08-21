@@ -18,6 +18,7 @@ import HelpDialog from './components/HelpDialog'
 import CropDialog from './components/CropDialog'
 import ThemePicker from './components/ThemePicker'
 import ShapePicker from './components/ShapePicker'
+import StickerPicker from './components/StickerPicker'
 import ShowcasePreviewDialog from './components/ShowcasePreviewDialog'
 import { localizedErrorMessage, useLanguage } from './i18n'
 
@@ -50,6 +51,7 @@ export default function App() {
   const addFiles = useEditor((s) => s.addFiles)
   const addOverlayFiles = useEditor((s) => s.addOverlayFiles)
   const addShape = useEditor((s) => s.addShape)
+  const addSticker = useEditor((s) => s.addSticker)
   const addAudioFiles = useEditor((s) => s.addAudioFiles)
   const addBackground = useEditor((s) => s.addBackground)
   const splitAtPlayhead = useEditor((s) => s.splitAtPlayhead)
@@ -78,6 +80,7 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false)
   const [showCropEditor, setShowCropEditor] = useState(false)
   const [showShapes, setShowShapes] = useState(false)
+  const [showStickers, setShowStickers] = useState(false)
   const [showShowcasePreview, setShowShowcasePreview] = useState(false)
   const [showProjectHome, setShowProjectHome] = useState(false)
   const [projectDialogMode, setProjectDialogMode] = useState<'manage' | 'saveAs' | null>(null)
@@ -478,6 +481,7 @@ export default function App() {
             <button className="btn btn--sm" onClick={splitAtPlayhead} disabled={!hasClips} title={t('단축키: S', 'Shortcut: S')}><Icon name="split" />{t('분할', 'Split')}</button>
             <button className="btn btn--sm" onClick={addBackground}><Icon name="palette" />{t('배경', 'Background')}</button>
             <button className="btn btn--sm" onClick={addText}><Icon name="text" />{t('텍스트', 'Text')}</button>
+            <button className="btn btn--sm" onClick={() => setShowStickers(true)}><Icon name="heart" />{t('스티커', 'Sticker')}</button>
             <button className="btn btn--sm" onClick={() => setShowShapes(true)}><Icon name="shape" />{t('도형', 'Shape')}</button>
             <button className="iconbtn" onClick={undo} disabled={!canUndo} aria-label={t('실행 취소', 'Undo')}><Icon name="undo" /></button>
             <button className="iconbtn" onClick={redo} disabled={!canRedo} aria-label={t('다시 실행', 'Redo')}><Icon name="redo" /></button>
@@ -498,6 +502,12 @@ export default function App() {
       {showShapes && <ShapePicker onClose={() => setShowShapes(false)} onSelect={(kind) => {
         addShape(kind)
         setShowShapes(false)
+        setInspectorOpen(true)
+        if (window.innerWidth <= 860) setMediaPanelOpen(false)
+      }} />}
+      {showStickers && <StickerPicker onClose={() => setShowStickers(false)} onSelect={(kind) => {
+        addSticker(kind)
+        setShowStickers(false)
         setInspectorOpen(true)
         if (window.innerWidth <= 860) setMediaPanelOpen(false)
       }} />}
