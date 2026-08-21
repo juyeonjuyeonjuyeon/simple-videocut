@@ -21,6 +21,16 @@ const fitBox = (width: number, height: number, ratio: number) => {
   return { width: Math.floor(w), height: Math.floor(h) }
 }
 
+const sourceAspectCache = new Map<string, number>()
+const rememberSourceAspect = (src: string, aspect: number) => {
+  if (!Number.isFinite(aspect) || aspect <= 0) return
+  if (sourceAspectCache.size >= 100 && !sourceAspectCache.has(src)) {
+    const oldest = sourceAspectCache.keys().next().value
+    if (oldest) sourceAspectCache.delete(oldest)
+  }
+  sourceAspectCache.set(src, aspect)
+}
+
 export default function CropDialog({ onClose }: Props) {
   const selection = useEditor((state) => state.selection)
   const clips = useEditor((state) => state.clips)
@@ -34,7 +44,7 @@ export default function CropDialog({ onClose }: Props) {
   const item = clip ?? overlay
   const [draft, setDraft] = useState<Crop>(() => ({ ...(item?.crop ?? NO_CROP) }))
   const [cropAspect, setCropAspect] = useState<number | null>(null)
-  const [sourceAspect, setSourceAspect] = useState(16 / 9)
+  const [sourceAspect, setSourceAspect] = useState<number | null>(() => item ? sourceAspectCache.get(item.src) ?? null : null)
   const [stageBox, setStageBox] = useState({ width: 0, height: 0 })
   const workspaceRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
@@ -47,6 +57,10 @@ export default function CropDialog({ onClose }: Props) {
   useLayoutEffect(() => {
     const workspace = workspaceRef.current
     if (!workspace) return
+    if (sourceAspect == null) {
+      setStageBox({ width: 0, height: 0 })
+      return
+    }
     const measure = () => {
       const rect = workspace.getBoundingClientRect()
       setStageBox(fitBox(Math.max(0, rect.width - 40), Math.max(0, rect.height - 40), sourceAspect))
@@ -59,6 +73,11 @@ export default function CropDialog({ onClose }: Props) {
 
   if (!item || item.kind === 'color') return null
 
+  const setMeasuredSourceAspect = (aspect: number) => {
+    rememberSourceAspect(item.src, aspect)
+    setSourceAspect(aspect)
+  }
+
   const geometry = () => {
     const bounds = stageRef.current?.getBoundingClientRect()
     if (!bounds || bounds.width <= 0 || bounds.height <= 0) return null
@@ -69,6 +88,7 @@ export default function CropDialog({ onClose }: Props) {
     event.preventDefault()
     event.stopPropagation()
     if (event.button !== 0) return
+    if (sourceAspect == null) return
     const bounds = geometry()
     if (!bounds) return
     const initial = draft
@@ -94,6 +114,7 @@ export default function CropDialog({ onClose }: Props) {
   }
 
   const selectRatio = (ratio: number | null) => {
+    if (sourceAspect == null) return
     setCropAspect(ratio)
     if (ratio != null) setDraft((current) => cropForAspect(current, sourceAspect, ratio))
   }
@@ -132,7 +153,7 @@ export default function CropDialog({ onClose }: Props) {
   const size = cropSize(draft)
   const zoomValue = Math.round((1 - Math.min(size.width, size.height)) * 100)
   const ratios = [
-    { label: '원본', value: sourceAspect },
+    { label: '원본', value: sourceAspect ?? 1 },
     { label: '16:9', value: 16 / 9 },
     { label: '4:3', value: 4 / 3 },
     { label: '1:1', value: 1 },
@@ -156,12 +177,12 @@ export default function CropDialog({ onClose }: Props) {
             {item.kind === 'image' ? (
               <img src={item.src} alt="자르기 원본" draggable={false} onLoad={(event) => {
                 const image = event.currentTarget
-                if (image.naturalWidth && image.naturalHeight) setSourceAspect(image.naturalWidth / image.naturalHeight)
+                if (image.naturalWidth && image.naturalHeight) setMeasuredSourceAspect(image.naturalWidth / image.naturalHeight)
               }} />
             ) : (
               <video src={item.src} muted playsInline preload="auto" onLoadedMetadata={(event) => {
                 const video = event.currentTarget
-                if (video.videoWidth && video.videoHeight) setSourceAspect(video.videoWidth / video.videoHeight)
+                if (video.videoWidth && video.videoHeight) setMeasuredSourceAspect(video.videoWidth / video.videoHeight)
                 try { video.currentTime = Math.max(0, Math.min(sourceTime, video.duration || sourceTime)) } catch { /* media may still be seeking */ }
               }} />
             )}
@@ -176,9 +197,9 @@ export default function CropDialog({ onClose }: Props) {
 
         <div className="crop-dialog__controls">
           <div className="crop-dialog__ratios" role="group" aria-label="자르기 비율">
-            <button type="button" className={cropAspect == null ? 'is-active' : ''} onClick={() => selectRatio(null)}>자유</button>
+            <button type="button" disabled={sourceAspect == null} className={cropAspect == null ? 'is-active' : ''} onClick={() => selectRatio(null)}>자유</button>
             {ratios.map((ratio) => (
-              <button type="button" key={ratio.label} className={cropAspect === ratio.value ? 'is-active' : ''} onClick={() => selectRatio(ratio.value)}>{ratio.label}</button>
+              <button type="button" disabled={sourceAspect == null} key={ratio.label} className={cropAspect === ratio.value ? 'is-active' : ''} onClick={() => selectRatio(ratio.value)}>{ratio.label}</button>
             ))}
           </div>
           <label className="crop-dialog__zoom">
