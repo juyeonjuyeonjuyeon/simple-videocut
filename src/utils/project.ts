@@ -713,7 +713,7 @@ function assertBaseProject(value: unknown): Record<string, unknown> {
       if (!Array.isArray(group.members) || group.members.length < 2 || group.members.length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error('그룹 구성 정보가 잘못되었습니다.')
       for (const memberCandidate of group.members) {
         const member = record(memberCandidate, '그룹 구성')
-        if (!['clip', 'overlay', 'audio', 'text', 'background'].includes(String(member.type))) throw new Error('그룹 항목 종류가 잘못되었습니다.')
+        if (!['clip', 'overlay', 'audio', 'text', 'caption', 'background'].includes(String(member.type))) throw new Error('그룹 항목 종류가 잘못되었습니다.')
         text(member.id, 100, '그룹 항목 ID')
       }
     }

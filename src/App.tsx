@@ -19,6 +19,7 @@ import CropDialog from './components/CropDialog'
 import ThemePicker from './components/ThemePicker'
 import ShapePicker from './components/ShapePicker'
 import ShowcasePreviewDialog from './components/ShowcasePreviewDialog'
+import CaptionDialog from './components/CaptionDialog'
 import { localizedErrorMessage, useLanguage } from './i18n'
 
 const ACTIVE_PROJECT_KEY = 'simplecut-active-project-name'
@@ -80,6 +81,7 @@ export default function App() {
   const [showCropEditor, setShowCropEditor] = useState(false)
   const [showShapes, setShowShapes] = useState(false)
   const [showShowcasePreview, setShowShowcasePreview] = useState(false)
+  const [showCaptions, setShowCaptions] = useState(false)
   const [showProjectHome, setShowProjectHome] = useState(false)
   const [projectDialogMode, setProjectDialogMode] = useState<'manage' | 'saveAs' | null>(null)
   const [lastProjectName, setLastProjectName] = useState<string | null>(() => {
@@ -302,12 +304,13 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable
-      const modalOpen = showExport || showHelp || showCropEditor || showShapes || showShowcasePreview || showProjectHome || projectDialogMode !== null
+      const modalOpen = showExport || showHelp || showCropEditor || showShapes || showShowcasePreview || showCaptions || showProjectHome || projectDialogMode !== null
       if (e.key === 'Escape' && modalOpen) {
         e.preventDefault()
         if (showShowcasePreview) { setPlaying(false); setShowShowcasePreview(false) }
         else if (showCropEditor) setShowCropEditor(false)
         else if (showShapes) setShowShapes(false)
+        else if (showCaptions) setShowCaptions(false)
         else if (showHelp) setShowHelp(false)
         else if (showExport) setShowExport(false)
         else if (projectDialogMode) setProjectDialogMode(null)
@@ -479,6 +482,7 @@ export default function App() {
             <button className="btn btn--sm" onClick={splitAtPlayhead} disabled={!hasClips} title={t('단축키: S', 'Shortcut: S')}><Icon name="split" />{t('분할', 'Split')}</button>
             <button className="btn btn--sm" onClick={addBackground}><Icon name="palette" />{t('배경', 'Background')}</button>
             <button className="btn btn--sm" onClick={addText}><Icon name="text" />{t('텍스트', 'Text')}</button>
+            <button className="btn btn--sm" onClick={() => { setPlaying(false); setShowCaptions(true) }}><Icon name="comment" />{t('자막', 'Captions')}</button>
             <button className="btn btn--sm" onClick={() => setShowShapes(true)}><Icon name="shape" />{t('도형', 'Shape')}</button>
             <button className="iconbtn" onClick={undo} disabled={!canUndo} aria-label={t('실행 취소', 'Undo')}><Icon name="undo" /></button>
             <button className="iconbtn" onClick={redo} disabled={!canRedo} aria-label={t('다시 실행', 'Redo')}><Icon name="redo" /></button>
@@ -496,6 +500,7 @@ export default function App() {
       {showExport && <ExportDialog onClose={() => setShowExport(false)} />}
       {showShowcasePreview && <ShowcasePreviewDialog projectName={activeProjectName} onClose={() => setShowShowcasePreview(false)} />}
       {showCropEditor && <CropDialog onClose={() => setShowCropEditor(false)} />}
+      {showCaptions && <CaptionDialog onClose={() => setShowCaptions(false)} />}
       {showShapes && <ShapePicker onClose={() => setShowShapes(false)} onSelect={(kind) => {
         addShape(kind)
         setShowShapes(false)

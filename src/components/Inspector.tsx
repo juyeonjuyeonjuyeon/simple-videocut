@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useEditor } from '../store'
-import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop, PositionKeyframe, KeyframeEasing, OverlayBorderStyle, OverlayMaskShape } from '../types'
+import type { Clip, TextOverlay, Overlay, AudioClip, Background, Crop, PositionKeyframe, KeyframeEasing, OverlayBorderStyle, OverlayMaskShape, CaptionCue, CaptionTrack } from '../types'
 import { NO_CROP } from '../types'
 import { formatTime, formatClock, parseClock, clipTimelineDuration, overlayLength, audioLength, totalDuration, exactDurationPatch } from '../utils/time'
 import { rotateBy } from '../utils/transform'
@@ -755,6 +755,55 @@ function TextInspector({ text, tab }: { text: TextOverlay; tab: InspectorTab }) 
   )
 }
 
+// ---- dedicated caption cue ----
+function CaptionInspector({ track, cue, tab }: { track: CaptionTrack; cue: CaptionCue; tab: InspectorTab }) {
+  const updateTrack = useEditor((s) => s.updateCaptionTrack)
+  const updateCue = useEditor((s) => s.updateCaptionCue)
+  const removeCue = useEditor((s) => s.removeCaptionCue)
+  const setPlayhead = useEditor((s) => s.setPlayhead)
+  const setCue = (patch: Partial<Omit<CaptionCue, 'id'>>) => updateCue(track.id, cue.id, patch)
+
+  return (
+    <div className="inspector__body">
+      {tab === 'basic' && <>
+        <InspectorBlock title={translate('자막 내용', 'Caption text')}>
+          <div className="inspector__group">
+            <textarea className="textarea" rows={4} value={cue.text} disabled={track.locked}
+              onChange={(event) => setCue({ text: event.target.value })} aria-label={translate('자막 내용', 'Caption text')} />
+            <div className="inspector__hint">{translate('일반 텍스트와 달리 자막은 전용 트랙의 시간 순서대로 관리됩니다.', 'Unlike free text, captions are managed in time order on a dedicated track.')}</div>
+          </div>
+        </InspectorBlock>
+        <InspectorBlock title={translate('자막 트랙', 'Caption track')}>
+          <div className="inspector__group">
+            <NameField icon={<Icon name="text" />} name={track.name} onChange={(name) => updateTrack(track.id, { name })} />
+            <label className="style-select">
+              <span>{translate('언어', 'Language')}</span>
+              <select value={track.language} onChange={(event) => updateTrack(track.id, { language: event.target.value })}>
+                <option value="und">{translate('지정 안 함', 'Not specified')}</option>
+                <option value="ko">{translate('한국어', 'Korean')}</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+            <label className="switch"><input type="checkbox" checked={track.hidden} onChange={(event) => updateTrack(track.id, { hidden: event.target.checked })} /><span>{translate('자막 트랙 숨기기', 'Hide caption track')}</span></label>
+            <label className="switch"><input type="checkbox" checked={track.locked} onChange={(event) => updateTrack(track.id, { locked: event.target.checked })} /><span>{translate('자막 트랙 잠그기', 'Lock caption track')}</span></label>
+          </div>
+        </InspectorBlock>
+        <button className="btn btn--danger" disabled={track.locked} onClick={() => removeCue(track.id, cue.id)}>{translate('이 자막 삭제', 'Delete this caption')}</button>
+      </>}
+      {tab === 'time' && <>
+        <InspectorBlock title={translate('표시 시간', 'Timing')}>
+          <div className="inspector__group">
+            <div className="field__label"><span>{translate('시작', 'Start')}</span><TimeField seconds={cue.start} onChange={(start) => setCue({ start: Math.max(0, Math.min(start, cue.end - 0.05)) })} /></div>
+            <div className="field__label"><span>{translate('종료', 'End')}</span><TimeField seconds={cue.end} onChange={(end) => setCue({ end: Math.max(cue.start + 0.05, end) })} /></div>
+            <DurationRow seconds={cue.end - cue.start} onSet={(duration) => setCue({ end: cue.start + duration })} />
+            <button className="btn btn--sm" onClick={() => setPlayhead(cue.start)}>{translate('시작 위치로 이동', 'Go to caption start')}</button>
+          </div>
+        </InspectorBlock>
+      </>}
+    </div>
+  )
+}
+
 // ---- background layer ----
 function BackgroundInspector({ bg, tab }: { bg: Background; tab: InspectorTab }) {
   const update = useEditor((s) => s.updateBackground)
@@ -795,6 +844,7 @@ export default function Inspector({ onOpenCrop }: { onOpenCrop: () => void }) {
   const overlays = useEditor((s) => s.overlays)
   const audios = useEditor((s) => s.audios)
   const texts = useEditor((s) => s.texts)
+  const captionTracks = useEditor((s) => s.captionTracks)
   const backgrounds = useEditor((s) => s.backgrounds)
   const aspectRatio = useEditor((s) => s.aspectRatio)
   const setAspectRatio = useEditor((s) => s.setAspectRatio)
@@ -808,14 +858,19 @@ export default function Inspector({ onOpenCrop }: { onOpenCrop: () => void }) {
   const selOverlay = selection?.type === 'overlay' ? overlays.find((o) => o.id === selection.id) : null
   const selAudio = selection?.type === 'audio' ? audios.find((a) => a.id === selection.id) : null
   const selText = selection?.type === 'text' ? texts.find((t) => t.id === selection.id) : null
+  const selCaption = selection?.type === 'caption'
+    ? captionTracks.flatMap((track) => track.cues.map((cue) => ({ track, cue }))).find((entry) => entry.cue.id === selection.id) ?? null
+    : null
   const selBg = selection?.type === 'background' ? backgrounds.find((b) => b.id === selection.id) : null
   const contextTitle = selectedItems.length > 1 ? t(`${selectedItems.length}개 항목 선택됨`, `${selectedItems.length} items selected`)
-    : selClip?.name || selOverlay?.name || selAudio?.name || (selText ? t('텍스트', 'Text') : '') || selBg?.name || t('캔버스', 'Canvas')
+    : selClip?.name || selOverlay?.name || selAudio?.name || (selText ? t('텍스트', 'Text') : '') || (selCaption ? t('자막', 'Caption') : '') || selBg?.name || t('캔버스', 'Canvas')
   const groupedSelection = selectedItems.some((item) => groups.some((group) => group.members.some((member) => member.type === item.type && member.id === item.id)))
   const activeSelectionGroup = groups.find((group) => selectedItems.length > 1 && selectedItems.every((item) =>
     group.members.some((member) => member.type === item.type && member.id === item.id)))
-  const inspectorTabs: InspectorTabOption[] = useMemo(() => selText
-    ? [{ id: 'basic', label: t('내용', 'Content') }, { id: 'style', label: t('스타일', 'Style') }, { id: 'transform', label: t('배치', 'Layout') }, { id: 'time', label: t('시간', 'Timing') }]
+  const inspectorTabs: InspectorTabOption[] = useMemo(() => selCaption
+    ? [{ id: 'basic', label: t('자막', 'Caption') }, { id: 'time', label: t('시간', 'Timing') }]
+    : selText
+      ? [{ id: 'basic', label: t('내용', 'Content') }, { id: 'style', label: t('스타일', 'Style') }, { id: 'transform', label: t('배치', 'Layout') }, { id: 'time', label: t('시간', 'Timing') }]
     : selAudio
       ? [{ id: 'basic', label: t('오디오', 'Audio') }, { id: 'time', label: t('시간', 'Timing') }]
       : selOverlay
@@ -824,7 +879,7 @@ export default function Inspector({ onOpenCrop }: { onOpenCrop: () => void }) {
           ? [{ id: 'basic', label: t('기본', 'Basic') }, ...(selClip.kind === 'color' ? [] : [{ id: 'transform' as const, label: t('변형', 'Transform') }]), ...(selClip.kind === 'image' ? [{ id: 'style' as const, label: t('스타일', 'Style') }] : []), { id: 'time', label: t('시간', 'Timing') }, ...(selClip.kind === 'video' ? [{ id: 'audio' as const, label: t('오디오', 'Audio') }] : [])]
           : selBg
             ? [{ id: 'basic', label: t('기본', 'Basic') }, { id: 'time', label: t('시간', 'Timing') }]
-            : [], [selAudio, selBg, selClip, selOverlay, selText, t])
+            : [], [selAudio, selBg, selCaption, selClip, selOverlay, selText, t])
   const selectionKey = selection ? `${selection.type}:${selection.id}` : 'canvas'
   useEffect(() => { setActiveTab('basic') }, [selectionKey])
   useEffect(() => {
@@ -867,6 +922,8 @@ export default function Inspector({ onOpenCrop }: { onOpenCrop: () => void }) {
         <AudioInspector audio={selAudio} tab={activeTab} />
       ) : selText ? (
         <TextInspector text={selText} tab={activeTab} />
+      ) : selCaption ? (
+        <CaptionInspector track={selCaption.track} cue={selCaption.cue} tab={activeTab} />
       ) : selBg ? (
         <BackgroundInspector bg={selBg} tab={activeTab} />
       ) : (

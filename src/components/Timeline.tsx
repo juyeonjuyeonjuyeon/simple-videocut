@@ -34,10 +34,11 @@ const SNAP_PX = 7
 const DRAG_THRESHOLD = 4
 const OV_LANE_H = 34
 const AUD_LANE_H = 30
+const CAPTION_LANE_H = 32
 const LONG_PRESS_MS = 520
 const TRACK_HEADER_W = 116
 
-type FreeKind = 'overlay' | 'audio' | 'text' | 'background'
+type FreeKind = 'overlay' | 'audio' | 'text' | 'caption' | 'background'
 
 const clampPps = (p: number) => Math.max(MIN_PX_PER_SEC, Math.min(p, MAX_PX_PER_SEC))
 
@@ -47,6 +48,7 @@ export default function Timeline() {
   const overlays = useEditor((s) => s.overlays)
   const audios = useEditor((s) => s.audios)
   const texts = useEditor((s) => s.texts)
+  const captionTracks = useEditor((s) => s.captionTracks)
   const backgrounds = useEditor((s) => s.backgrounds)
   const markers = useEditor((s) => s.markers)
   const selection = useEditor((s) => s.selection)
@@ -60,6 +62,9 @@ export default function Timeline() {
   const setPlaying = useEditor((s) => s.setPlaying)
   const updateClip = useEditor((s) => s.updateClip)
   const updateText = useEditor((s) => s.updateText)
+  const updateCaptionTrack = useEditor((s) => s.updateCaptionTrack)
+  const updateCaptionCue = useEditor((s) => s.updateCaptionCue)
+  const addCaptionCue = useEditor((s) => s.addCaptionCue)
   const updateOverlay = useEditor((s) => s.updateOverlay)
   const updateAudio = useEditor((s) => s.updateAudio)
   const updateBackground = useEditor((s) => s.updateBackground)
@@ -82,6 +87,14 @@ export default function Timeline() {
   const selectGroup = useEditor((s) => s.selectGroup)
   const renameGroup = useEditor((s) => s.renameGroup)
   const moveTimelineItems = useEditor((s) => s.moveTimelineItems)
+
+  const captionLocation = (id: string) => {
+    for (const track of useEditor.getState().captionTracks) {
+      const cue = track.cues.find((candidate) => candidate.id === id)
+      if (cue) return { track, cue }
+    }
+    return null
+  }
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [trackW, setTrackW] = useState(0)
@@ -170,17 +183,22 @@ export default function Timeline() {
       : type === 'overlay' ? st.overlays.find((o) => o.id === id)?.name
       : type === 'audio' ? st.audios.find((a) => a.id === id)?.name
       : type === 'background' ? st.backgrounds.find((b) => b.id === id)?.name
+      : type === 'caption' ? st.captionTracks.flatMap((track) => track.cues).find((cue) => cue.id === id)?.text
       : st.texts.find((t) => t.id === id)?.text
     setEditVal(init ?? '')
     setEditing({ type, id })
   }
   const commitEdit = () => {
     if (!editing) return
-    const v = editVal.trim() || (editing.type === 'text' ? translate('텍스트', 'Text') : translate('이름 없음', 'Untitled'))
+    const v = editVal.trim() || (editing.type === 'text' ? translate('텍스트', 'Text') : editing.type === 'caption' ? translate('자막', 'Caption') : translate('이름 없음', 'Untitled'))
     if (editing.type === 'clip') updateClip(editing.id, { name: v })
     else if (editing.type === 'overlay') updateOverlay(editing.id, { name: v })
     else if (editing.type === 'audio') updateAudio(editing.id, { name: v })
     else if (editing.type === 'background') updateBackground(editing.id, { name: v })
+    else if (editing.type === 'caption') {
+      const location = captionLocation(editing.id)
+      if (location) updateCaptionCue(location.track.id, editing.id, { text: v })
+    }
     else updateText(editing.id, { text: v })
     setEditing(null)
   }
@@ -247,6 +265,7 @@ export default function Timeline() {
   const nBgLanes = bgLanes.length ? Math.max(...bgLanes) + 1 : 0
   const visualOrder = normalizeVisualOrder(overlays, texts, storedVisualOrder)
   const visualFrontToBack = [...visualOrder].reverse()
+  const captionLaneMaps = captionTracks.map((track) => packLanes(track.cues.map((cue) => ({ start: cue.start, end: cue.end }))))
   const timelineX = (time: number) => TRACK_HEADER_W + time * pxPerSec
 
   // Keep the playhead in view only during playback. Manual keyframe/playhead
@@ -311,6 +330,7 @@ export default function Timeline() {
     st.overlays.forEach((o) => { if (o.id !== excludeId) targets.push(o.start, o.start + overlayLength(o)) })
     st.audios.forEach((a) => { if (a.id !== excludeId) targets.push(a.start, a.start + audioLength(a)) })
     st.texts.forEach((x) => { if (x.id !== excludeId) targets.push(x.start, x.end) })
+    st.captionTracks.forEach((track) => track.cues.forEach((cue) => { if (cue.id !== excludeId) targets.push(cue.start, cue.end) }))
     st.backgrounds.forEach((b) => { if (b.id !== excludeId) targets.push(b.start, b.start + clipTimelineDuration(b)) })
     st.markers.forEach((marker) => { if (marker.id !== excludeId) targets.push(marker.time) })
     const thresh = SNAP_PX / pxPerSec
@@ -516,9 +536,12 @@ export default function Timeline() {
       kind === 'overlay' ? st.overlays.find((o) => o.id === id)
       : kind === 'audio' ? st.audios.find((a) => a.id === id)
       : kind === 'background' ? st.backgrounds.find((b) => b.id === id)
+      : kind === 'caption' ? st.captionTracks.flatMap((track) => track.cues).find((cue) => cue.id === id)
       : st.texts.find((t) => t.id === id)
     if (!item) return
-    const locked = 'locked' in item && Boolean(item.locked)
+    const locked = kind === 'caption'
+      ? Boolean(st.captionTracks.find((track) => track.cues.some((cue) => cue.id === id))?.locked)
+      : 'locked' in item && Boolean(item.locked)
     const s0 = item.start
     const startX = e.clientX
     const startY = e.clientY
@@ -574,7 +597,16 @@ export default function Timeline() {
     select({ type: kind, id })
     const st = useEditor.getState()
     const startX = e.clientX
-    if (kind === 'text') {
+    if (kind === 'caption') {
+      const location = captionLocation(id)
+      if (!location || location.track.locked) return
+      const s0 = location.cue.start, e0 = location.cue.end
+      startDrag((ev) => {
+        const dt = (ev.clientX - startX) / pxPerSec
+        if (edge === 'start') updateCaptionCue(location.track.id, id, { start: Math.max(0, Math.min(snap(s0 + dt, id), e0 - 0.05)) })
+        else updateCaptionCue(location.track.id, id, { end: Math.max(s0 + 0.05, snap(e0 + dt, id)) })
+      })
+    } else if (kind === 'text') {
       const t = st.texts.find((x) => x.id === id)
       if (!t) return
       const s0 = t.start, e0 = t.end
@@ -727,13 +759,35 @@ export default function Timeline() {
             else updateBackground(target.id, { hidden: !state?.hidden })
           }}><Icon name={state?.hidden ? 'eyeOff' : 'eye'} /></button>
         )}
-        {target && target.type !== 'clip' && target.type !== 'audio' && (
+        {target && (target.type === 'overlay' || target.type === 'text' || target.type === 'background') && (
           <button type="button" className="timeline__track-action" aria-label={lockLabel} title={lockLabel} onClick={() => {
             if (target.type === 'overlay') updateOverlay(target.id, { locked: !state?.locked })
             else if (target.type === 'text') updateText(target.id, { locked: !state?.locked })
             else updateBackground(target.id, { locked: !state?.locked })
           }}><Icon name={state?.locked ? 'lock' : 'unlock'} /></button>
         )}
+      </div>
+    )
+  }
+
+  const captionTrackHeader = (trackId: string) => {
+    const track = captionTracks.find((candidate) => candidate.id === trackId)
+    if (!track) return null
+    const visibilityLabel = track.hidden ? translate('자막 표시', 'Show captions') : translate('자막 숨기기', 'Hide captions')
+    const lockLabel = track.locked ? translate('자막 잠금 해제', 'Unlock captions') : translate('자막 잠금', 'Lock captions')
+    return (
+      <div className="timeline__track-header" onPointerDown={(event) => event.stopPropagation()}>
+        <button type="button" className="timeline__track-name" title={track.name}
+          onClick={() => track.cues[0] && select({ type: 'caption', id: track.cues[0].id })}>{track.name}</button>
+        <button type="button" className="timeline__track-action" aria-label={translate('현재 위치에 자막 추가', 'Add caption at playhead')}
+          title={translate('현재 위치에 자막 추가', 'Add caption at playhead')} disabled={track.locked} onClick={() => {
+            const cueId = addCaptionCue(track.id, playhead)
+            if (cueId) select({ type: 'caption', id: cueId })
+          }}><Icon name="plus" /></button>
+        <button type="button" className="timeline__track-action" aria-label={visibilityLabel} title={visibilityLabel}
+          onClick={() => updateCaptionTrack(track.id, { hidden: !track.hidden })}><Icon name={track.hidden ? 'eyeOff' : 'eye'} /></button>
+        <button type="button" className="timeline__track-action" aria-label={lockLabel} title={lockLabel}
+          onClick={() => updateCaptionTrack(track.id, { locked: !track.locked })}><Icon name={track.locked ? 'lock' : 'unlock'} /></button>
       </div>
     )
   }
@@ -801,6 +855,25 @@ export default function Timeline() {
               <span>{marker.label}</span>
             </button>
           ))}
+
+          {/* Captions use their own semantic tracks and never alter the visual-layer stack. */}
+          {captionTracks.map((track, trackIndex) => {
+            const lanes = captionLaneMaps[trackIndex]
+            const laneCount = lanes.length ? Math.max(...lanes) + 1 : 1
+            return (
+              <div key={`captions:${track.id}`} className="timeline__lane timeline__lane--caption"
+                style={{ height: laneCount * CAPTION_LANE_H }} onPointerDown={onTimelineBackgroundDown}>
+                {captionTrackHeader(track.id)}
+                {track.cues.length === 0 && <div className="timeline__lane-placeholder">{translate('＋ 현재 위치에 자막 추가', '+ Add a caption at the playhead')}</div>}
+                {track.cues.map((cue, cueIndex) => freeChip(
+                  'caption', cue.id, cue.start, cue.end - cue.start, lanes[cueIndex] ?? 0, CAPTION_LANE_H, '#8e5d5e',
+                  `${translate('자막', 'Caption')} · ${cue.text || translate('(내용 없음)', '(empty)')}`,
+                  isSelected({ type: 'caption', id: cue.id }), undefined,
+                  { hidden: track.hidden, locked: track.locked },
+                ))}
+              </div>
+            )
+          })}
 
           {/* One visible row per composited layer. Top row is always frontmost. */}
           {visualFrontToBack.map((ref) => {
@@ -953,6 +1026,9 @@ export default function Timeline() {
       {menu && (() => {
         const target = menu.target
         const st = useEditor.getState()
+        const captionItem = target.type === 'caption'
+          ? st.captionTracks.flatMap((track) => track.cues.map((cue) => ({ track, cue }))).find((entry) => entry.cue.id === target.id)
+          : undefined
         const item = target.type === 'overlay' ? st.overlays.find((x) => x.id === target.id)
           : target.type === 'audio' ? st.audios.find((x) => x.id === target.id)
           : target.type === 'background' ? st.backgrounds.find((x) => x.id === target.id)
@@ -972,11 +1048,12 @@ export default function Timeline() {
           : target.type === 'background' ? st.backgrounds.findIndex((entry) => entry.id === target.id) : -1
         const layerCount = sharedVisualLayer ? menuVisualOrder.length : target.type === 'background' ? st.backgrounds.length : 0
         const mainLength = totalDuration(st.clips)
-        const itemStart = item?.start ?? visualItem?.start ?? 0
+        const itemStart = item?.start ?? visualItem?.start ?? captionItem?.cue.start ?? 0
         const targetGroup = groupFor(target)
         const fitSpan = (start: number, length: number) => {
           const safeLength = Math.max(0.1, length)
           if (target.type === 'text') updateText(target.id, { start, end: start + safeLength })
+          else if (target.type === 'caption' && captionItem) updateCaptionCue(captionItem.track.id, target.id, { start, end: start + safeLength })
           else if (target.type === 'overlay' && item && 'speed' in item) {
             const media = item as { trimStart: number; trimEnd: number; speed: number }
             updateOverlay(target.id, { start, ...exactDurationPatch((media.trimEnd - media.trimStart) / media.speed, safeLength) })
@@ -1011,6 +1088,10 @@ export default function Timeline() {
             const value = st.backgrounds.find((entry) => entry.id === ref.id)
             return value ? { start: value.start, length: clipTimelineDuration(value), type: ref.type } : null
           }
+          if (ref.type === 'caption') {
+            const value = st.captionTracks.flatMap((track) => track.cues).find((entry) => entry.id === ref.id)
+            return value ? { start: value.start, length: value.end - value.start, type: ref.type } : null
+          }
           const value = st.texts.find((entry) => entry.id === ref.id)
           return value ? { start: value.start, length: value.end - value.start, type: ref.type } : null
         }
@@ -1026,6 +1107,7 @@ export default function Timeline() {
           if (target.type === 'overlay') updateOverlay(target.id, { start: p })
           else if (target.type === 'audio') updateAudio(target.id, { start: p })
           else if (target.type === 'background') updateBackground(target.id, { start: p })
+          else if (target.type === 'caption' && captionItem) updateCaptionCue(captionItem.track.id, target.id, { start: p, end: p + (captionItem.cue.end - captionItem.cue.start) })
           else if (target.type === 'text') {
             const t = useEditor.getState().texts.find((x) => x.id === target.id)
             if (t) updateText(target.id, { start: p, end: p + (t.end - t.start) })
@@ -1112,6 +1194,14 @@ export default function Timeline() {
                 : target.type === 'background'
                   ? updateBackground(target.id, { locked: !visualItem.locked })
                   : updateText(target.id, { locked: !visualItem.locked }))}>{visualItem.locked ? translate('레이어 잠금 해제', 'Unlock layer') : translate('레이어 잠그기', 'Lock layer')}</button>
+            </>}
+            {captionItem && <>
+              <button role="menuitem" onClick={() => withTarget(target, () => updateCaptionTrack(captionItem.track.id, { hidden: !captionItem.track.hidden }))}>
+                {captionItem.track.hidden ? translate('자막 트랙 표시', 'Show caption track') : translate('자막 트랙 숨기기', 'Hide caption track')}
+              </button>
+              <button role="menuitem" onClick={() => withTarget(target, () => updateCaptionTrack(captionItem.track.id, { locked: !captionItem.track.locked }))}>
+                {captionItem.track.locked ? translate('자막 트랙 잠금 해제', 'Unlock caption track') : translate('자막 트랙 잠그기', 'Lock caption track')}
+              </button>
             </>}
             <button role="menuitem" onClick={() => withTarget(target, duplicateSelected)}>{translate('복제', 'Duplicate')}</button>
             <div className="timeline-menu__separator" />

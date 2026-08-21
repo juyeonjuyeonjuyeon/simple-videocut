@@ -185,6 +185,24 @@ describe('timeline splitting', () => {
     })
   })
 
+  it('moves, duplicates, and deletes caption cues through shared timeline actions', () => {
+    const trackId = useEditor.getState().addCaptionTrack('편집 자막')
+    const cueId = useEditor.getState().addCaptionCue(trackId, 0.5)!
+    useEditor.getState().select({ type: 'caption', id: cueId })
+
+    useEditor.getState().moveTimelineItems([{ type: 'caption', id: cueId }], 0.75)
+    expect(useEditor.getState().captionTracks[0].cues[0].start).toBeCloseTo(1.25)
+
+    useEditor.getState().duplicateSelected()
+    const duplicated = useEditor.getState().selection
+    expect(duplicated?.type).toBe('caption')
+    expect(useEditor.getState().captionTracks[0].cues).toHaveLength(2)
+
+    useEditor.getState().deleteSelected()
+    expect(useEditor.getState().captionTracks[0].cues).toHaveLength(1)
+    expect(useEditor.getState().captionTracks[0].cues[0].id).toBe(cueId)
+  })
+
   it('migrates older projects to an empty dedicated caption collection', () => {
     const legacyProject: ProjectState = {
       clips: [clip(1)], overlays: [], audios: [], backgrounds: [], texts: [],

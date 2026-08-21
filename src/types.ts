@@ -361,6 +361,7 @@ export type Selection =
   | { type: 'overlay'; id: string }
   | { type: 'audio'; id: string }
   | { type: 'text'; id: string }
+  | { type: 'caption'; id: string }
   | { type: 'background'; id: string }
   | null
 

@@ -1,15 +1,18 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const testPort = process.env.PLAYWRIGHT_PORT || '5173'
+const isolated = process.env.PLAYWRIGHT_ISOLATED === '1'
+
 export default defineConfig({
   testDir: './tests',
   fullyParallel: true,
   retries: 1,
   reporter: 'html',
-  use: { baseURL: 'http://127.0.0.1:5173', trace: 'on-first-retry' },
+  use: { baseURL: `http://127.0.0.1:${testPort}`, trace: 'on-first-retry' },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1',
-    url: 'http://127.0.0.1:5173',
-    reuseExistingServer: true,
+    command: `npm run dev -- --host 127.0.0.1 --port ${testPort}`,
+    url: `http://127.0.0.1:${testPort}`,
+    reuseExistingServer: !isolated,
   },
   projects: [
     { name: 'mobile', use: { ...devices['iPhone 13'] } },

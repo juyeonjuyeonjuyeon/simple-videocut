@@ -835,7 +835,16 @@ export const useEditor = create<EditorState>((set, get) => ({
     })),
 
   removeCaptionTrack: (id) =>
-    set((s) => ({ captionTracks: s.captionTracks.filter((track) => track.id !== id) })),
+    set((s) => {
+      const cueIds = new Set(s.captionTracks.find((track) => track.id === id)?.cues.map((cue) => cue.id) ?? [])
+      return {
+        captionTracks: s.captionTracks.filter((track) => track.id !== id),
+        groups: s.groups.map((group) => ({ ...group, members: group.members.filter((member) => member.type !== 'caption' || !cueIds.has(member.id)) }))
+          .filter((group) => group.members.length >= 2),
+        selection: s.selection?.type === 'caption' && cueIds.has(s.selection.id) ? null : s.selection,
+        selectedItems: s.selectedItems.filter((item) => item.type !== 'caption' || !cueIds.has(item.id)),
+      }
+    }),
 
   addCaptionCue: (trackId, at) => {
     const state = get()
@@ -874,11 +883,19 @@ export const useEditor = create<EditorState>((set, get) => ({
     })),
 
   removeCaptionCue: (trackId, cueId) =>
-    set((s) => ({
-      captionTracks: s.captionTracks.map((track) => track.id === trackId && !track.locked
-        ? { ...track, cues: track.cues.filter((cue) => cue.id !== cueId) }
-        : track),
-    })),
+    set((s) => {
+      const track = s.captionTracks.find((candidate) => candidate.id === trackId)
+      if (!track || track.locked) return s
+      return {
+        captionTracks: s.captionTracks.map((candidate) => candidate.id === trackId
+          ? { ...candidate, cues: candidate.cues.filter((cue) => cue.id !== cueId) }
+          : candidate),
+        groups: s.groups.map((group) => ({ ...group, members: group.members.filter((member) => member.type !== 'caption' || member.id !== cueId) }))
+          .filter((group) => group.members.length >= 2),
+        selection: s.selection?.type === 'caption' && s.selection.id === cueId ? null : s.selection,
+        selectedItems: s.selectedItems.filter((item) => item.type !== 'caption' || item.id !== cueId),
+      }
+    }),
 
   // ---------- timeline markers ----------
   addMarker: (time) => {
@@ -1013,6 +1030,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const starts = free.map((item) => item.type === 'overlay' ? s.overlays.find((x) => x.id === item.id)?.start
       : item.type === 'audio' ? s.audios.find((x) => x.id === item.id)?.start
       : item.type === 'background' ? s.backgrounds.find((x) => x.id === item.id)?.start
+      : item.type === 'caption' ? s.captionTracks.flatMap((track) => track.cues).find((x) => x.id === item.id)?.start
       : s.texts.find((x) => x.id === item.id)?.start).filter((value): value is number => value != null)
     const applied = Math.max(delta, -(starts.length ? Math.min(...starts) : 0))
     const has = (type: TimelineItemRef['type'], id: string) => free.some((item) => item.type === type && item.id === id)
@@ -1021,6 +1039,10 @@ export const useEditor = create<EditorState>((set, get) => ({
       audios: s.audios.map((item) => has('audio', item.id) ? { ...item, start: item.start + applied } : item),
       backgrounds: s.backgrounds.map((item) => has('background', item.id) ? { ...item, start: item.start + applied } : item),
       texts: s.texts.map((item) => has('text', item.id) ? { ...item, start: item.start + applied, end: item.end + applied } : item),
+      captionTracks: s.captionTracks.map((track) => track.locked ? track : {
+        ...track,
+        cues: track.cues.map((cue) => has('caption', cue.id) ? { ...cue, start: cue.start + applied, end: cue.end + applied } : cue),
+      }),
     }
   }),
   setAspectRatio: (r) => set({ aspectRatio: r }),
@@ -1041,6 +1063,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       overlays: s.overlays.filter((item) => !has('overlay', item.id)),
       audios: s.audios.filter((item) => !has('audio', item.id)),
       texts: s.texts.filter((item) => !has('text', item.id)),
+      captionTracks: s.captionTracks.map((track) => track.locked ? track : { ...track, cues: track.cues.filter((cue) => !has('caption', cue.id)) }),
       backgrounds: s.backgrounds.filter((item) => !has('background', item.id)),
       visualOrder: s.visualOrder.filter((item) => !has(item.type, item.id)),
       groups, selection: null, selectedItems: [],
@@ -1085,6 +1108,18 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (!b) return
       const copy: Background = { ...b, id: uid(), start: b.start + clipTimelineDuration(b) }
       set({ backgrounds: [...s.backgrounds, copy], selection: { type: 'background', id: copy.id } })
+    } else if (sel.type === 'caption') {
+      const track = s.captionTracks.find((candidate) => candidate.cues.some((cue) => cue.id === sel.id))
+      const cue = track?.cues.find((candidate) => candidate.id === sel.id)
+      if (!track || !cue || track.locked) return
+      const length = cue.end - cue.start
+      const copy: CaptionCue = { ...cue, id: uid(), start: cue.end, end: cue.end + length }
+      set({
+        captionTracks: s.captionTracks.map((candidate) => candidate.id === track.id
+          ? { ...candidate, cues: [...candidate.cues, copy].sort((a, b) => a.start - b.start || a.end - b.end) }
+          : candidate),
+        selection: { type: 'caption', id: copy.id },
+      })
     }
   },
 
