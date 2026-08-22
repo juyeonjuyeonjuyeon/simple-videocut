@@ -13,6 +13,7 @@ import { basicMotionFadeIn, basicMotionFrames } from './utils/basic-motion'
 import { resolveVisualFilter } from './utils/color-filter'
 import { translate } from './i18n'
 import { canvasDimensionsForPreset, normalizeCanvasDimensions, scaledCanvasDimensions } from './utils/canvas'
+import { sanitizeMosaicRegions } from './utils/mosaic'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
 const registerNativeMedia = async (file: File) => {
@@ -357,6 +358,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.speed = Math.max(0.1, Math.min(next.speed, 4))
         next.volume = Math.max(0, Math.min(next.volume, 2))
         next.crop = clampCrop(next.crop)
+        next.mosaicRegions = sanitizeMosaicRegions(next.mosaicRegions)
         if (next.backgroundRemovalSensitivity != null) next.backgroundRemovalSensitivity = Math.max(0, Math.min(next.backgroundRemovalSensitivity, 100))
         Object.assign(next, resolveVisualFilter(next))
         if (next.canvasX != null) next.canvasX = Math.max(0, Math.min(next.canvasX, 1))
@@ -523,6 +525,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.repeat = Math.max(1, Math.min(Math.round(next.repeat), 99))
         next.start = Math.max(0, next.start)
         next.crop = clampCrop(next.crop)
+        next.mosaicRegions = sanitizeMosaicRegions(next.mosaicRegions)
         if (next.backgroundRemovalSensitivity != null) next.backgroundRemovalSensitivity = Math.max(0, Math.min(next.backgroundRemovalSensitivity, 100))
         Object.assign(next, resolveVisualFilter(next))
         next.opacity = Math.max(0, Math.min(next.opacity ?? 1, 1))
@@ -660,6 +663,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         next.aspectLocked = next.aspectLocked ?? true
         next.start = Math.max(0, next.start)
         next.crop = clampCrop(next.crop)
+        next.mosaicRegions = sanitizeMosaicRegions(next.mosaicRegions)
         if (next.backgroundRemovalSensitivity != null) next.backgroundRemovalSensitivity = Math.max(0, Math.min(next.backgroundRemovalSensitivity, 100))
         Object.assign(next, resolveVisualFilter(next))
         next.repeat = Math.max(1, Math.min(Math.round(next.repeat), 99))

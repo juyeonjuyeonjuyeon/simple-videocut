@@ -24,6 +24,17 @@ export type OverlayBorderStyle = 'solid' | 'dashed' | 'dotted' | 'double'
 
 export type OverlayMaskShape = 'none' | 'rounded' | 'circle' | 'ellipse' | 'heart' | 'star' | 'hexagon'
 
+export interface MosaicRegion {
+  id: string
+  /** Region in source-image coordinates, normalized to 0..1. */
+  x: number
+  y: number
+  width: number
+  height: number
+  /** Pixel block size at a 720px-tall output. */
+  pixelSize: number
+}
+
 export type ShapeKind = 'rectangle' | 'circle' | 'triangle' | 'diamond' | 'star' | 'heart' | 'hexagon' | 'arrow' | 'line'
 
 /** Small, original vector illustrations bundled with the editor. */
@@ -84,6 +95,8 @@ export interface Transform {
   backgroundRemovalEnabled?: boolean
   /** Similar-colour range removed from edge-connected background pixels (0..100). */
   backgroundRemovalSensitivity?: number
+  /** Non-destructive source regions rendered as pixel mosaic. */
+  mosaicRegions?: MosaicRegion[]
 }
 
 /** A reusable source kept in the project media bin independently of timeline usage. */
@@ -131,6 +144,7 @@ export interface Clip extends VisualFilterSettings {
   crop: Crop
   backgroundRemovalEnabled?: boolean
   backgroundRemovalSensitivity?: number
+  mosaicRegions?: MosaicRegion[]
   /** Canvas position; omitted values keep older projects centered and automatically contained. */
   canvasX?: number
   canvasY?: number
@@ -188,6 +202,7 @@ export interface Overlay extends VisualFilterSettings {
   crop: Crop
   backgroundRemovalEnabled?: boolean
   backgroundRemovalSensitivity?: number
+  mosaicRegions?: MosaicRegion[]
   repeat: number
   /** Exact occupied timeline length. When set, the final repeat is cut short. */
   timelineDuration?: number

@@ -53,6 +53,19 @@
 .color-filter-presets__sample--cool { filter: hue-rotate(12deg) saturate(.92); }
 .color-filter-presets__sample--soft { filter: saturate(.76); }
 .color-filter-presets__sample--vivid { filter: saturate(1.28); }
+.background-removal-status { display: grid; gap: 6px; padding: 8px 9px; border-radius: 8px; color: var(--text-dim); background: var(--bg-1); font-size: 10px; line-height: 1.45; }
+.background-removal-status > i { display: block; height: 4px; overflow: hidden; border-radius: 999px; background: var(--bg-3); }
+.background-removal-status > i > b { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .18s ease; }
+.background-removal-status--fallback { color: var(--warning, #d7923b); }
+.mosaic-dialog__stage { overflow: hidden; background: #050607; }
+.mosaicedit__rect { position: absolute; box-sizing: border-box; border: 1px solid rgba(255,255,255,.82); outline: 1px solid rgba(0,0,0,.35); cursor: move; touch-action: none; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.mosaicedit__rect.is-selected { border: 2px solid var(--accent); outline: 1px solid #fff; }
+.mosaicedit__rect > span { position: absolute; left: 7px; top: 7px; padding: 4px 6px; border-radius: 5px; color: #fff; background: rgba(10,12,15,.76); font-size: 10px; line-height: 1; white-space: nowrap; }
+.mosaic-dialog__controls { gap: 10px; }
+.mosaic-dialog__areas { min-width: 0; display: flex; align-items: center; gap: 6px; overflow-x: auto; }
+.mosaic-dialog__areas button { min-height: 34px; display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--text-dim); background: var(--bg-1); white-space: nowrap; cursor: pointer; }
+.mosaic-dialog__areas button.is-active { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg-1)); }
+.mosaic-dialog__areas .ui-icon { width: 14px; height: 14px; }
 .text-style-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .text-style-presets > button { min-width: 0; display: grid; gap: 6px; place-items: center; padding: 8px 5px; border: 1px solid var(--line); border-radius: 9px; color: var(--text); background: var(--bg-1); font-size: 10px; cursor: pointer; }
 .text-style-presets > button:hover,

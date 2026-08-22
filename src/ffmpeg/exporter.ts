@@ -11,6 +11,7 @@ import { renderShapePng } from '../utils/shape'
 import { renderStickerPng } from '../utils/sticker'
 import { resolveMainPlacement } from '../utils/main-placement'
 import { cachedBackgroundRemovedImage, DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-removal'
+import { appendMosaicFilters } from './mosaic'
 import { ffmpegColorFilter } from '../utils/color-filter'
 
 // Keep the encoding engine on the same origin. Exports must not depend on a
@@ -473,7 +474,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     const overlayAudioFlags: boolean[] = []
     const overlayFiles: string[] = []
     const overlayTrimStarts: number[] = []
-    const overlayEffects: Array<{ width: number; height: number; padding: number; maskName: string | null; decorationName: string | null }> = []
+    const overlayEffects: Array<{ width: number; height: number; sourceWidth: number; sourceHeight: number; padding: number; maskName: string | null; decorationName: string | null }> = []
     for (let k = 0; k < overlays.length; k++) {
       const overlay = overlays[k]
       if (overlay.sticker) {
@@ -484,7 +485,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         overlayFiles.push(fileName)
         overlayTrimStarts.push(0)
         overlayAudioFlags.push(false)
-        overlayEffects.push({ width: rendered.width, height: rendered.height, padding: 0, maskName: null, decorationName: null })
+        overlayEffects.push({ width: rendered.width, height: rendered.height, sourceWidth: rendered.width, sourceHeight: rendered.height, padding: 0, maskName: null, decorationName: null })
         visualIndex++
         progressReporter.report(0.05 + (0.2 * visualIndex) / Math.max(1, visualCount))
         continue
@@ -497,7 +498,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         overlayFiles.push(fileName)
         overlayTrimStarts.push(0)
         overlayAudioFlags.push(false)
-        overlayEffects.push({ width: rendered.width, height: rendered.height, padding: 0, maskName: null, decorationName: null })
+        overlayEffects.push({ width: rendered.width, height: rendered.height, sourceWidth: rendered.width, sourceHeight: rendered.height, padding: 0, maskName: null, decorationName: null })
         visualIndex++
         progressReporter.report(0.05 + (0.2 * visualIndex) / Math.max(1, visualCount))
         continue
@@ -514,17 +515,19 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       const decorationName = assets.decoration ? `ovdecor${k}.png` : null
       if (assets.mask && maskName) await fp.writeFile(maskName, assets.mask)
       if (assets.decoration && decorationName) await fp.writeFile(decorationName, assets.decoration)
-      overlayEffects.push({ ...size, padding: assets.padding, maskName, decorationName })
+      overlayEffects.push({ ...size, sourceWidth: prepared.width || size.width, sourceHeight: prepared.height || size.height, padding: assets.padding, maskName, decorationName })
     }
     const backgroundAudioFlags: boolean[] = []
     const backgroundFiles: string[] = []
     const backgroundTrimStarts: number[] = []
+    const backgroundSizes: Array<{ width: number; height: number }> = []
     for (let k = 0; k < backgrounds.length; k++) {
       const b = backgrounds[k]
       if (b.kind === 'color') {
         backgroundAudioFlags.push(false)
         backgroundFiles.push('')
         backgroundTrimStarts.push(0)
+        backgroundSizes.push({ width: W, height: H })
         continue
       }
       if (!b.sourceSize) throw new Error(`원본 배경 파일이 비어 있습니다: ${b.name}`)
@@ -533,6 +536,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       backgroundFiles.push(prepared.fileName)
       backgroundTrimStarts.push(prepared.trimStart)
       backgroundAudioFlags.push(prepared.hasAudio)
+      backgroundSizes.push({ width: prepared.width || W, height: prepared.height || H })
     }
     const audioFiles: string[] = []
     const audioTrimStarts: number[] = []
@@ -636,9 +640,10 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         const freeRotation = c.canvasAngle
           ? `rotate=a=${rad.toFixed(5)}:ow=rotw(${rad.toFixed(5)}):oh=roth(${rad.toFixed(5)}):c=0x00000000,`
           : ''
+        filters.push(`[${inputIdxOf[p]}:v]setpts=PTS/${sp},trim=duration=${segDur.toFixed(3)},setpts=PTS-STARTPTS[mainraw${p}]`)
+        const mosaic = appendMosaicFilters(filters, `[mainraw${p}]`, c.mosaicRegions, `mainm${p}`, inputSizes[p].width, inputSizes[p].height, targetWidth, targetHeight, H)
         filters.push(
-          `[${inputIdxOf[p]}:v]setpts=PTS/${sp},trim=duration=${segDur.toFixed(3)},setpts=PTS-STARTPTS,` +
-            `${spatialFilters(c)}scale=${targetWidth}:${targetHeight},setsar=1,fps=30,format=rgba,${ffmpegColorFilter(c)}${freeRotation}` +
+          `${mosaic}${spatialFilters(c)}scale=${targetWidth}:${targetHeight},setsar=1,fps=30,format=rgba,${ffmpegColorFilter(c)}${freeRotation}` +
             `${videoEnvelope(segDur, c.fadeIn, c.fadeOut)}null[mainclip${p}]`,
         )
         filters.push(`color=c=0x00000000:s=${W}x${H}:r=30:d=${segDur.toFixed(3)},format=rgba[maincanvas${p}]`)
@@ -682,8 +687,10 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         )
       } else {
         const speedF = b.kind === 'video' ? `setpts=PTS/${b.speed},` : ''
+        filters.push(`[${bgInputIdx[k]}:v]${speedF}null[bgraw${k}]`)
+        const mosaic = appendMosaicFilters(filters, `[bgraw${k}]`, b.mosaicRegions, `bgm${k}`, backgroundSizes[k].width, backgroundSizes[k].height, W, H, H)
         filters.push(
-          `[${bgInputIdx[k]}:v]${speedF}${spatialFilters(b)}` +
+          `${mosaic}${spatialFilters(b)}` +
           `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},format=rgba,${ffmpegColorFilter(b)}` +
           `${videoEnvelope(len, b.fadeIn, b.fadeOut, b.opacity ?? 1)}` +
           `tpad=start_duration=${shift.toFixed(3)}:start_mode=add:color=0x00000000[bgv${k}]`,
@@ -712,7 +719,9 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       const rotF = o.angle
         ? `rotate=a=${rad.toFixed(5)}:ow=rotw(${rad.toFixed(5)}):oh=roth(${rad.toFixed(5)}):c=0x00000000,`
         : ''
-      filters.push(`[${ovIdx}:v]${speedF}${spatialFilters(o)}scale=${ovW}:${ovH},format=rgba,${ffmpegColorFilter(o)}null[ovbase${k}]`)
+      filters.push(`[${ovIdx}:v]${speedF}null[ovraw${k}]`)
+      const mosaic = appendMosaicFilters(filters, `[ovraw${k}]`, o.mosaicRegions, `ovm${k}`, effect.sourceWidth, effect.sourceHeight, ovW, ovH, H)
+      filters.push(`${mosaic}${spatialFilters(o)}scale=${ovW}:${ovH},format=rgba,${ffmpegColorFilter(o)}null[ovbase${k}]`)
       let styled = `[ovbase${k}]`
       const indexes = overlayEffectIndexes[k]
       if (indexes.mask >= 0) {

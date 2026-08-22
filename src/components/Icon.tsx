@@ -4,7 +4,7 @@ export type IconName = 'brand' | 'plus' | 'folder' | 'play' | 'pause' | 'repeat'
   'music' | 'palette' | 'text' | 'undo' | 'redo' | 'copy' | 'trash' | 'download' | 'upload' | 'share' | 'close' |
   'warning' | 'screen' | 'video' | 'image' | 'mute' | 'rotate' | 'flipH' | 'flipV' | 'save' | 'panel' | 'crop' | 'lock' | 'unlock' | 'library' | 'search' |
   'eye' | 'eyeOff' | 'zoomIn' | 'zoomOut' | 'fit' | 'marker' | 'grid' | 'list' | 'project' | 'help' | 'shape' | 'settings' | 'removeBackground' |
-  'heart' | 'comment' | 'more' | 'user' | 'previousEdit' | 'nextEdit'
+  'heart' | 'comment' | 'more' | 'user' | 'previousEdit' | 'nextEdit' | 'mosaic'
 
 // Every icon uses the same 24px grid, optical centre, round joins and stroke
 // weight. Filled shapes are reserved for primary actions such as play.
@@ -55,6 +55,7 @@ const paths: Record<IconName, ReactNode> = {
   help: <><circle cx="12" cy="12" r="9"/><path d="M9.3 9a2.8 2.8 0 0 1 5.4 1.1c0 2.1-2.7 2.4-2.7 4.6M12 18h.01"/></>,
   shape: <><rect x="3.5" y="8" width="9.5" height="9.5" rx="2"/><circle cx="16.5" cy="8" r="4"/></>,
   removeBackground: <><path d="m4 20 11.2-11.2 2 2L6 22H4z"/><path d="M16.5 2.5v4M14.5 4.5h4M7 3.5v3M5.5 5h3M19 15v4M17 17h4"/></>,
+  mosaic: <><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/></>,
   heart: <path d="M20.8 8.8c0 5.2-8.8 10.1-8.8 10.1S3.2 14 3.2 8.8A4.7 4.7 0 0 1 12 6.5a4.7 4.7 0 0 1 8.8 2.3Z"/>,
   comment: <path d="M20 15.2a3 3 0 0 1-3 3H9l-5 3v-6a3 3 0 0 1-1-2.2V7a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3Z"/>,
   more: <><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></>,

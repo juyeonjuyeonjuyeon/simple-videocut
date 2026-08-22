@@ -15,6 +15,7 @@ import { stickerLabel } from '../utils/sticker'
 import ShapeIcon from './ShapeIcon'
 import { translate, useLanguage } from '../i18n'
 import { DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-removal'
+import { getBackgroundRemovalStatus, subscribeBackgroundRemovalStatus } from '../utils/background-removal-ai'
 import { BASIC_MOTION_OPTIONS } from '../utils/basic-motion'
 import { resolveVisualFilter, VISUAL_FILTER_OPTIONS } from '../utils/color-filter'
 import { inferTextStylePreset, TEXT_STYLE_OPTIONS, textStylePatch, type TextStylePreset } from '../utils/text-style'
@@ -25,6 +26,7 @@ type Patch = Partial<Pick<Clip & Overlay,
   'timelineDuration' | 'fadeIn' | 'fadeOut' | 'opacity' | 'locked' | 'hidden' | 'scaleY' | 'aspectLocked' |
   'canvasX' | 'canvasY' | 'canvasScale' | 'canvasScaleY' | 'canvasAspectLocked' | 'canvasAngle' |
   'backgroundRemovalEnabled' | 'backgroundRemovalSensitivity' |
+  'mosaicRegions' |
   'filterPreset' | 'filterAmount' |
   'borderWidth' | 'borderColor' | 'borderStyle' | 'shadowEnabled' | 'shadowColor' | 'shadowOpacity' |
   'shadowBlur' | 'shadowX' | 'shadowY' | 'maskShape'>>
@@ -93,6 +95,9 @@ function BackgroundRemovalRow({ enabled, sensitivity, onPatch }: {
   onPatch: (patch: Patch) => void
 }) {
   const value = sensitivity ?? DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY
+  const [status, setStatus] = useState(getBackgroundRemovalStatus)
+  useEffect(() => subscribeBackgroundRemovalStatus(setStatus), [])
+  const activeStatus = enabled && status.phase !== 'idle' && status.phase !== 'ready'
   return (
     <div className="inspector__group background-removal-control">
       <button type="button" className={`btn${enabled ? ' btn--on' : ' btn--primary'}`}
@@ -105,11 +110,29 @@ function BackgroundRemovalRow({ enabled, sensitivity, onPatch }: {
       </button>
       {enabled && <Range label={translate('민감도', 'Sensitivity')} value={value} min={0} max={100} step={1} unit="%"
         onChange={(backgroundRemovalSensitivity) => onPatch({ backgroundRemovalSensitivity })} />}
+      {activeStatus && <div className={`background-removal-status background-removal-status--${status.phase}`} role="status">
+        <span>{status.phase === 'downloading'
+          ? translate(`처음 한 번 AI 모델을 준비하는 중 ${Math.round(status.progress * 100)}%`, `Preparing the AI model once ${Math.round(status.progress * 100)}%`)
+          : status.phase === 'processing'
+            ? translate('기기 안에서 피사체를 인식하는 중…', 'Recognizing the subject on this device…')
+            : translate('AI를 사용할 수 없어 단순 색상 방식으로 처리했습니다.', 'AI was unavailable, so the color-based fallback was used.')}</span>
+        {status.phase === 'downloading' && <i aria-hidden="true"><b style={{ width: `${Math.round(status.progress * 100)}%` }} /></i>}
+      </div>}
       <div className="inspector__hint">{enabled
-        ? translate('민감도를 높이면 가장자리와 비슷한 색을 더 넓게 제거합니다. 원본 파일은 변경되지 않습니다.', 'Higher sensitivity removes a wider range of edge-like colours. The source file is unchanged.')
-        : translate('이미지 가장자리의 배경색을 자동 감지해 투명하게 만듭니다.', 'Automatically detects edge background colours and makes them transparent.')}</div>
+        ? translate('로컬 AI가 피사체를 인식합니다. 민감도를 높이면 불확실한 가장자리를 더 제거하며 원본은 바뀌지 않습니다.', 'Local AI recognizes the subject. Higher sensitivity removes more uncertain edges without changing the source.')
+        : translate('사진을 업로드하지 않고 이 기기 안에서 피사체를 인식해 배경을 투명하게 만듭니다.', 'Recognizes the subject on this device and makes the background transparent without uploading the photo.')}</div>
     </div>
   )
+}
+
+function MosaicRow({ count, onOpen, onClear }: { count: number; onOpen: () => void; onClear: () => void }) {
+  return <div className="inspector__group">
+    <button type="button" className={`btn${count ? ' btn--on' : ' btn--primary'}`} onClick={onOpen}><Icon name="mosaic" />{count
+      ? translate(`모자이크 영역 편집 (${count})`, `Edit mosaic areas (${count})`)
+      : translate('영역 모자이크 추가', 'Add area mosaic')}</button>
+    {count > 0 && <button type="button" className="btn btn--sm" onClick={onClear}>{translate('모자이크 모두 지우기', 'Clear all mosaic areas')}</button>}
+    <div className="inspector__hint">{translate('얼굴·번호판처럼 가릴 부분을 여러 개 지정하고 픽셀 크기를 조절할 수 있습니다.', 'Mark multiple areas such as faces or license plates and adjust the pixel size.')}</div>
+  </div>
 }
 
 // Open-ended numeric control (no slider): −/＋ steppers + numeric input.
@@ -428,7 +451,7 @@ function PositionKeyframeRow({ frames = [], localTime, onToggle, onClear, onSeek
 }
 
 // ---- main clip ----
-function ClipInspector({ clip, tab, onOpenCrop }: { clip: Clip; tab: InspectorTab; onOpenCrop: () => void }) {
+function ClipInspector({ clip, tab, onOpenCrop, onOpenMosaic }: { clip: Clip; tab: InspectorTab; onOpenCrop: () => void; onOpenMosaic: () => void }) {
   const update = useEditor((s) => s.updateClip)
   const move = useEditor((s) => s.moveClip)
   const remove = useEditor((s) => s.removeClip)
@@ -521,6 +544,7 @@ function ClipInspector({ clip, tab, onOpenCrop }: { clip: Clip; tab: InspectorTa
       </>}
       {tab === 'style' && <>
         <InspectorBlock title={translate('색 필터', 'Color filter')}><ColorFilterRow preset={clip.filterPreset} amount={clip.filterAmount} onPatch={patch} /></InspectorBlock>
+        <InspectorBlock title={translate('영역 모자이크', 'Area mosaic')}><MosaicRow count={clip.mosaicRegions?.length ?? 0} onOpen={onOpenMosaic} onClear={() => update(clip.id, { mosaicRegions: [] })} /></InspectorBlock>
         {clip.kind === 'image' && <InspectorBlock title={translate('배경 제거', 'Remove background')}>
           <BackgroundRemovalRow enabled={clip.backgroundRemovalEnabled} sensitivity={clip.backgroundRemovalSensitivity} onPatch={patch} />
         </InspectorBlock>}
@@ -547,7 +571,7 @@ function ClipInspector({ clip, tab, onOpenCrop }: { clip: Clip; tab: InspectorTa
 }
 
 // ---- overlay ----
-function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: InspectorTab; onOpenCrop: () => void }) {
+function OverlayInspector({ ov, tab, onOpenCrop, onOpenMosaic }: { ov: Overlay; tab: InspectorTab; onOpenCrop: () => void; onOpenMosaic: () => void }) {
   const update = useEditor((s) => s.updateOverlay)
   const updatePosition = useEditor((s) => s.updateLayerPosition)
   const togglePositionKeyframe = useEditor((s) => s.togglePositionKeyframe)
@@ -622,6 +646,7 @@ function OverlayInspector({ ov, tab, onOpenCrop }: { ov: Overlay; tab: Inspector
       </>}
       {tab === 'style' && <>
         <InspectorBlock title={translate('색 필터', 'Color filter')}><ColorFilterRow preset={ov.filterPreset} amount={ov.filterAmount} onPatch={patch} /></InspectorBlock>
+        {!shapeStyle && !sticker && <InspectorBlock title={translate('영역 모자이크', 'Area mosaic')}><MosaicRow count={ov.mosaicRegions?.length ?? 0} onOpen={onOpenMosaic} onClear={() => update(ov.id, { mosaicRegions: [] })} /></InspectorBlock>}
         {!shapeStyle && !sticker && ov.kind === 'image' && <InspectorBlock title={translate('배경 제거', 'Remove background')}>
           <BackgroundRemovalRow enabled={ov.backgroundRemovalEnabled} sensitivity={ov.backgroundRemovalSensitivity} onPatch={patch} />
         </InspectorBlock>}
@@ -882,8 +907,9 @@ function BackgroundInspector({ bg, tab }: { bg: Background; tab: InspectorTab })
   )
 }
 
-export default function Inspector({ onOpenCrop, onClose, expanded, onToggleExpanded }: {
+export default function Inspector({ onOpenCrop, onOpenMosaic, onClose, expanded, onToggleExpanded }: {
   onOpenCrop: () => void
+  onOpenMosaic: () => void
   onClose?: () => void
   expanded?: boolean
   onToggleExpanded?: () => void
@@ -988,9 +1014,9 @@ export default function Inspector({ onOpenCrop, onClose, expanded, onToggleExpan
           <button className="btn btn--danger" onClick={deleteSelected}>{translate('선택 항목 삭제', 'Delete selected items')}</button>
         </div>
       ) : selClip ? (
-        <ClipInspector clip={selClip} tab={activeTab} onOpenCrop={onOpenCrop} />
+        <ClipInspector clip={selClip} tab={activeTab} onOpenCrop={onOpenCrop} onOpenMosaic={onOpenMosaic} />
       ) : selOverlay ? (
-        <OverlayInspector ov={selOverlay} tab={activeTab} onOpenCrop={onOpenCrop} />
+        <OverlayInspector ov={selOverlay} tab={activeTab} onOpenCrop={onOpenCrop} onOpenMosaic={onOpenMosaic} />
       ) : selAudio ? (
         <AudioInspector audio={selAudio} tab={activeTab} />
       ) : selText ? (

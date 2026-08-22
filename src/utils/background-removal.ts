@@ -1,3 +1,5 @@
+import { renderAiBackgroundRemovedImage } from './background-removal-ai'
+
 export const DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY = 35
 
 export interface BackgroundRemovalPixels {
@@ -20,6 +22,7 @@ export interface BackgroundRemovalImage {
   height: number
   removedPixels: number
   background: [number, number, number]
+  engine: 'ai' | 'color'
 }
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(value, max))
@@ -161,6 +164,12 @@ export async function renderBackgroundRemovedImage(
   sensitivity = DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY,
   maxDimension = 4096,
 ): Promise<BackgroundRemovalImage> {
+  try {
+    const result = await renderAiBackgroundRemovedImage(source, sensitivity, maxDimension)
+    return { ...result, background: [0, 0, 0], engine: 'ai' }
+  } catch (error) {
+    console.warn(`로컬 AI 배경 제거를 사용할 수 없어 색상 방식으로 전환합니다: ${(error as Error).message}`)
+  }
   const decoded = await decodeImage(await sourceBlob(source))
   try {
     const scale = Math.min(1, Math.max(1, maxDimension) / Math.max(decoded.width, decoded.height))
@@ -175,7 +184,7 @@ export async function renderBackgroundRemovedImage(
     const pixels = context.getImageData(0, 0, width, height)
     const result = removeConnectedBackground(pixels.data, width, height, sensitivity)
     context.putImageData(new ImageData(new Uint8ClampedArray(result.data), width, height), 0, 0)
-    return { blob: await canvasPng(canvas), width, height, removedPixels: result.removedPixels, background: result.background }
+    return { blob: await canvasPng(canvas), width, height, removedPixels: result.removedPixels, background: result.background, engine: 'color' }
   } finally {
     decoded.release()
   }
@@ -189,7 +198,7 @@ export function cachedBackgroundRemovedImage(
   maxDimension = 4096,
 ): Promise<BackgroundRemovalImage> {
   const fileKey = source.file ? `${source.file.name}:${source.file.size}:${source.file.lastModified}` : ''
-  const key = `${source.src}|${fileKey}|${clamp(sensitivity, 0, 100)}|${Math.max(1, maxDimension)}`
+  const key = `ai-v1|${source.nativeMediaId ?? ''}|${source.src}|${fileKey}|${clamp(sensitivity, 0, 100)}|${Math.max(1, maxDimension)}`
   const cached = renderedCache.get(key)
   if (cached) return cached
   if (renderedCache.size >= 12) renderedCache.delete(renderedCache.keys().next().value!)

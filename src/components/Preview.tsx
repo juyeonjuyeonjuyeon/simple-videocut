@@ -27,6 +27,7 @@ import { colorFilterCss, colorFilterDomId, resolveVisualFilter, svgColorMatrixVa
 import { resolveTwoPointerGesture, type GesturePoint } from '../utils/preview-gesture'
 import { canvasRatio } from '../utils/canvas'
 import { hapticTick } from '../utils/haptics'
+import MosaicLayer from './MosaicLayer'
 
 const DRIFT = 0.35 // seconds before we hard-seek a media element back in sync
 const SNAP_PX = 8
@@ -1052,6 +1053,16 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
               }} onLoad={(event) => {
                 if (activeMain?.kind === 'image') setMainNaturalSize({ id: activeMain.id, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
               }} />
+              {activeMain && activeMain.kind !== 'color' && <MosaicLayer
+                regions={activeMain.mosaicRegions}
+                getSource={() => activeMain?.kind === 'video' ? mainVideoRef.current : mainImgRef.current}
+                style={{
+                  left: `${-((mainCrop?.left ?? 0) / mainKeptWidth) * 100}%`,
+                  top: `${-((mainCrop?.top ?? 0) / mainKeptHeight) * 100}%`,
+                  width: `${100 / mainKeptWidth}%`,
+                  height: `${100 / mainKeptHeight}%`,
+                }}
+              />}
             </div>
           </div>
         </div>
@@ -1106,6 +1117,11 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
                     alt=""
                   />
                 )}
+                {!o.shape && !o.sticker && <MosaicLayer
+                  regions={o.mosaicRegions}
+                  getSource={() => overlayEls.current.get(o.id)}
+                  style={{ transform: `${cssCropFill(o.crop)} ${cssTransform(o.rotate, o.flipH, o.flipV)}`.trim() }}
+                />}
               </div>
               {!o.shape && !o.sticker && <OverlayDecoration overlay={o} frameHeight={box.h} />}
             </div>

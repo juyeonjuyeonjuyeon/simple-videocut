@@ -481,6 +481,21 @@ const validatePositionKeyframes = (value: unknown, length: number, label: string
     if (!['linear', 'ease-in-out'].includes(String(frame.easing))) throw new Error(`${label} 키프레임 움직임이 잘못되었습니다.`)
   }
 }
+const validateMosaicRegions = (value: unknown, label: string) => {
+  if (!Array.isArray(value) || value.length > 12) throw new Error(`${label} 모자이크 영역이 잘못되었습니다.`)
+  for (const candidate of value) {
+    const region = record(candidate, `${label} 모자이크 영역`)
+    text(region.id, 100, `${label} 모자이크 ID`)
+    finite(region.x, 0, 1, `${label} 모자이크 가로 위치`)
+    finite(region.y, 0, 1, `${label} 모자이크 세로 위치`)
+    finite(region.width, 0.03, 1, `${label} 모자이크 너비`)
+    finite(region.height, 0.03, 1, `${label} 모자이크 높이`)
+    finite(region.pixelSize, 4, 80, `${label} 모자이크 강도`)
+    if ((region.x as number) + (region.width as number) > 1.00001 || (region.y as number) + (region.height as number) > 1.00001) {
+      throw new Error(`${label} 모자이크 영역이 화면 밖에 있습니다.`)
+    }
+  }
+}
 const validateLibraryAsset = (value: unknown) => {
   const asset = record(value, '미디어 보관함')
   text(asset.id, 100, '미디어 보관함 ID')
@@ -556,6 +571,7 @@ const validateItem = (value: unknown, track: string) => {
       bool(item.backgroundRemovalEnabled, `${track} 배경 제거`)
     }
     if ('backgroundRemovalSensitivity' in item && item.backgroundRemovalSensitivity !== undefined) finite(item.backgroundRemovalSensitivity, 0, 100, `${track} 배경 제거 민감도`)
+    if ('mosaicRegions' in item && item.mosaicRegions !== undefined) validateMosaicRegions(item.mosaicRegions, track)
     if ('filterPreset' in item && item.filterPreset !== undefined && !isVisualFilterPreset(item.filterPreset)) throw new Error(`${track} 색 필터 종류가 잘못되었습니다.`)
     if ('filterAmount' in item && item.filterAmount !== undefined) finite(item.filterAmount, 0, 100, `${track} 색 필터 강도`)
     if (item.kind === 'color') {

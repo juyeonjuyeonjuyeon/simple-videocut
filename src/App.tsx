@@ -16,6 +16,7 @@ import { startPointerDrag } from './utils/pointer'
 import MediaPanel from './components/MediaPanel'
 import HelpDialog from './components/HelpDialog'
 import CropDialog from './components/CropDialog'
+import MosaicDialog from './components/MosaicDialog'
 import ThemePicker from './components/ThemePicker'
 import ShapePicker from './components/ShapePicker'
 import StickerPicker from './components/StickerPicker'
@@ -88,6 +89,7 @@ export default function App() {
   const [showExport, setShowExport] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const [showCropEditor, setShowCropEditor] = useState(false)
+  const [showMosaicEditor, setShowMosaicEditor] = useState(false)
   const [showShapes, setShowShapes] = useState(false)
   const [showStickers, setShowStickers] = useState(false)
   const [showShowcasePreview, setShowShowcasePreview] = useState(false)
@@ -339,11 +341,12 @@ export default function App() {
       if (e.defaultPrevented) return
       const tag = (e.target as HTMLElement)?.tagName
       const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable
-      const modalOpen = showExport || showHelp || showCropEditor || showShapes || showShowcasePreview || showProjectHome || projectDialogMode !== null
+      const modalOpen = showExport || showHelp || showCropEditor || showMosaicEditor || showShapes || showShowcasePreview || showProjectHome || projectDialogMode !== null
       if (e.key === 'Escape' && modalOpen) {
         e.preventDefault()
         if (showShowcasePreview) { setPlaying(false); setShowShowcasePreview(false) }
         else if (showCropEditor) setShowCropEditor(false)
+        else if (showMosaicEditor) setShowMosaicEditor(false)
         else if (showShapes) setShowShapes(false)
         else if (showHelp) setShowHelp(false)
         else if (showExport) setShowExport(false)
@@ -580,6 +583,7 @@ export default function App() {
         </section>
         {inspectorOpen && <Inspector
           onOpenCrop={() => { setPlaying(false); setShowCropEditor(true) }}
+          onOpenMosaic={() => { setPlaying(false); setShowMosaicEditor(true) }}
           onClose={closeInspector}
           expanded={inspectorExpanded}
           onToggleExpanded={() => setInspectorExpanded((expanded) => !expanded)}
@@ -593,6 +597,7 @@ export default function App() {
       {showExport && <ExportDialog onClose={() => setShowExport(false)} />}
       {showShowcasePreview && <ShowcasePreviewDialog projectName={activeProjectName} onClose={() => setShowShowcasePreview(false)} />}
       {showCropEditor && <CropDialog onClose={() => setShowCropEditor(false)} />}
+      {showMosaicEditor && <MosaicDialog onClose={() => setShowMosaicEditor(false)} />}
       {showShapes && <ShapePicker onClose={() => setShowShapes(false)} onSelect={(kind) => {
         addShape(kind)
         setShowShapes(false)
