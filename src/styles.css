@@ -2549,6 +2549,9 @@ html[data-language='en'] .timeline__ruler::before { content: 'Track'; }
   .app--compact-panels .media-panel__search input { height: 44px; }
   .app--compact-panels .timeline__bar button,
   .app--compact-panels .timeline__bar .iconbtn { min-width: 44px; min-height: 44px; }
+  .app--compact-panels .transport__inspector-action { display: inline-flex; }
+  .app--compact-panels .transport--selection .transport__insert-action { display: none; }
+  .app--compact-panels .transport:not(.transport--selection) .transport__selection-action { display: none; }
 }
 
 @media (min-width: 861px) and (max-width: 1100px) {
@@ -2596,9 +2599,6 @@ html[data-language='en'] .timeline__ruler::before { content: 'Track'; }
   .transport__spacer { display: none; }
   .transport > button { flex: 0 0 auto; min-height: 44px; }
   .transport__time { flex: 0 0 auto; }
-  .transport__inspector-action { display: inline-flex; }
-  .transport--selection .transport__insert-action { display: none; }
-  .transport:not(.transport--selection) .transport__selection-action { display: none; }
   .timeline__bar button, .timeline__bar .iconbtn { min-width: 44px; min-height: 44px; }
   .timeline__bar { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
   .timeline__bar::-webkit-scrollbar { display: none; }
@@ -2632,18 +2632,63 @@ html[data-language='en'] .timeline__ruler::before { content: 'Track'; }
   .clip__handle, .tlclip__handle, .textclip__handle { width: 22px; }
   .clip__handle--l::before, .tlclip__handle--l::before, .textclip__handle--l::before { left: 8px; }
   .clip__handle--r::before, .tlclip__handle--r::before, .textclip__handle--r::before { right: 8px; }
-  .preview__resize { width: 26px; height: 26px; }
-  .preview__resize--tl { top: -13px; left: -13px; }
-  .preview__resize--tr { top: -13px; right: -13px; }
-  .preview__resize--bl { bottom: -13px; left: -13px; }
-  .preview__resize--br { bottom: -13px; right: -13px; }
-  .preview__resize--t, .preview__resize--b { width: 38px; height: 18px; margin-left: -19px; }
-  .preview__resize--t { top: -9px; }
-  .preview__resize--b { bottom: -9px; }
-  .preview__resize--l, .preview__resize--r { width: 18px; height: 38px; margin-top: -19px; }
-  .preview__resize--l { left: -9px; }
-  .preview__resize--r { right: -9px; }
-  .preview__rotate { width: 28px; height: 28px; margin-left: -14px; bottom: -44px; }
+  .preview__resize {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  .preview__resize::before {
+    content: '';
+    box-sizing: border-box;
+    width: 26px;
+    height: 26px;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .28);
+  }
+  .preview__resize--tl { top: -22px; left: -22px; }
+  .preview__resize--tr { top: -22px; right: -22px; }
+  .preview__resize--bl { bottom: -22px; left: -22px; }
+  .preview__resize--br { bottom: -22px; right: -22px; }
+  .preview__resize--t, .preview__resize--b { width: 44px; height: 44px; margin-left: -22px; }
+  .preview__resize--t::before, .preview__resize--b::before { width: 32px; height: 14px; border-radius: 999px; }
+  .preview__resize--t { top: -22px; }
+  .preview__resize--b { bottom: -22px; }
+  .preview__resize--l, .preview__resize--r { width: 44px; height: 44px; margin-top: -22px; }
+  .preview__resize--l::before, .preview__resize--r::before { width: 14px; height: 32px; border-radius: 999px; }
+  .preview__resize--l { left: -22px; }
+  .preview__resize--r { right: -22px; }
+  .preview__resize--text { top: auto; right: -22px; bottom: -22px; left: auto; }
+  .preview__rotate {
+    width: 44px;
+    height: 44px;
+    margin-left: -22px;
+    top: auto;
+    bottom: 28px;
+    border: 0;
+    background: transparent;
+  }
+  .preview__rotate::after {
+    content: '';
+    position: absolute;
+    inset: 7px;
+    border: 2px solid var(--accent);
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .28);
+  }
+  .preview__rotate::before { display: none; }
+  .preview__rotate .ui-icon { position: relative; z-index: 1; }
+  .preview__rotate--text { top: -52px; bottom: auto; }
+  .preview__rotate--text::before { top: auto; bottom: -8px; height: 15px; display: block; }
+  .preview__selection-tools { display: none; }
+  .timeline__playhead { width: 52px; margin-left: -26px; }
+  .timeline__playhead-grab { width: 52px; height: 36px; }
   .crophandle { min-width: 26px; min-height: 26px; }
 }
 

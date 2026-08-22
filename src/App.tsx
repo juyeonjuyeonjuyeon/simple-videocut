@@ -442,6 +442,12 @@ export default function App() {
     }
   }
 
+  const cropSelection = selection?.type === 'clip'
+    ? clips.find((clip) => clip.id === selection.id && clip.kind !== 'color')
+    : selection?.type === 'overlay'
+      ? overlays.find((overlay) => overlay.id === selection.id && !overlay.shape && !overlay.sticker)
+      : null
+
   return (
     <div className={`app${compactPanels ? ' app--compact-panels' : ''}`} style={appStyle} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <header className="topbar">
@@ -513,11 +519,15 @@ export default function App() {
             </div>
             <div className="transport__spacer" />
             <button className="btn btn--sm" onClick={splitAtPlayhead} disabled={!hasClips} title={t('단축키: S', 'Shortcut: S')}><Icon name="split" />{t('분할', 'Split')}</button>
-            {selection && <button className="btn btn--sm transport__inspector-action" onClick={() => {
+            {compactPanels && selection && <button className="btn btn--sm transport__inspector-action" onClick={() => {
               setMediaPanelOpen(false)
               setInspectorExpanded(false)
               setInspectorOpen(true)
             }}><Icon name="panel" />{t('편집', 'Edit')}</button>}
+            {compactPanels && cropSelection && <button className="btn btn--sm transport__inspector-action" onClick={() => {
+              setPlaying(false)
+              setShowCropEditor(true)
+            }}><Icon name="crop" />{t('자르기', 'Crop')}</button>}
             <button className="btn btn--sm transport__insert-action" onClick={addBackground}><Icon name="palette" />{t('배경', 'Background')}</button>
             <button className="btn btn--sm transport__insert-action" onClick={addText}><Icon name="text" />{t('텍스트', 'Text')}</button>
             <button className="btn btn--sm transport__insert-action" onClick={() => setShowStickers(true)}><Icon name="heart" />{t('스티커', 'Sticker')}</button>

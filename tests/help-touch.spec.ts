@@ -51,3 +51,37 @@ test('touch users can select several timeline items and reach large trim handles
   await expect(page.locator('.timeline-group-badge')).toHaveCount(2)
   await expect(page.getByRole('button', { name: '여러 항목' })).toHaveAttribute('aria-pressed', 'false')
 })
+
+test('touch preview handles and playhead have comfortable hit targets', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === 'desktop', 'Touch target sizing is covered on touch projects')
+
+  await page.goto('/')
+  await page.locator('header input[type=file]').nth(3).setInputFiles(appIcon)
+  await page.getByRole('button', { name: '왼쪽 미디어 패널 열기·닫기' }).click()
+  const asset = page.locator('.media-asset').filter({ hasText: 'app-icon.svg' })
+  await asset.click()
+  await asset.getByRole('button', { name: '레이어에 추가' }).click()
+  await page.getByRole('button', { name: '미디어 패널 닫기' }).click()
+
+  const controls = page.locator('.preview__overlay-controls')
+  await expect(controls).toBeVisible()
+  const handleSizes = await controls.locator('.preview__resize').evaluateAll((handles) => handles.map((handle) => {
+    const rect = handle.getBoundingClientRect()
+    return { width: Math.round(rect.width), height: Math.round(rect.height) }
+  }))
+  expect(handleSizes).toHaveLength(8)
+  expect(Math.min(...handleSizes.map((size) => size.width))).toBeGreaterThanOrEqual(44)
+  expect(Math.min(...handleSizes.map((size) => size.height))).toBeGreaterThanOrEqual(44)
+
+  const rotateBox = await controls.locator('.preview__rotate').boundingBox()
+  const playheadBox = await page.getByRole('slider', { name: '타임라인 재생 헤드' }).boundingBox()
+  expect(rotateBox).not.toBeNull()
+  expect(playheadBox).not.toBeNull()
+  expect(rotateBox!.width).toBeGreaterThanOrEqual(44)
+  expect(rotateBox!.height).toBeGreaterThanOrEqual(44)
+  expect(playheadBox!.width).toBeGreaterThanOrEqual(48)
+
+  await expect(page.locator('.preview__selection-tools')).toBeHidden()
+  await page.getByRole('button', { name: '자르기', exact: true }).tap()
+  await expect(page.getByRole('dialog', { name: '자르기', exact: true })).toBeVisible()
+})
