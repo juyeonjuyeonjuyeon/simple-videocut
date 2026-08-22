@@ -3,7 +3,7 @@ import { BASIC_MOTION_OPTIONS, basicMotionFadeIn, basicMotionFrames, isBasicMoti
 
 describe('basic motion presets', () => {
   it('keeps the supported preset list intentionally small', () => {
-    expect(BASIC_MOTION_OPTIONS.map((option) => option.value)).toEqual(['none', 'fade', 'rise', 'slide-left', 'drift'])
+    expect(BASIC_MOTION_OPTIONS.map((option) => option.value)).toEqual(['none', 'fade', 'rise', 'fall', 'slide-left', 'slide-right', 'drift', 'float', 'sway'])
     expect(isBasicMotionPreset('rise')).toBe(true)
     expect(isBasicMotionPreset('bounce-3d')).toBe(false)
   })
@@ -20,5 +20,6 @@ describe('basic motion presets', () => {
     expect(basicMotionFadeIn('rise', 30)).toBe(0.45)
     expect(basicMotionFadeIn('fade', 0.2)).toBe(0.1)
     expect(basicMotionFadeIn('drift', 5)).toBe(0)
+    expect(basicMotionFadeIn('sway', 5)).toBe(0)
   })
 })

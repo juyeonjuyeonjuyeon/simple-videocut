@@ -511,6 +511,7 @@ const validateItem = (value: unknown, track: string) => {
   if (track !== '텍스트') text(item.name, PROJECT_LIMITS.maxNameLength, `${track} 이름`)
   if (track === '텍스트') {
     text(item.text, PROJECT_LIMITS.maxTextLength, '텍스트 내용')
+    if ('role' in item && !['text', 'caption'].includes(String(item.role))) throw new Error('텍스트 역할 값이 잘못되었습니다.')
     finite(item.start, 0, PROJECT_LIMITS.maxDurationSeconds, '텍스트 시작')
     finite(item.end, 0, PROJECT_LIMITS.maxDurationSeconds, '텍스트 종료')
     if ((item.end as number) < (item.start as number)) throw new Error('텍스트 시간 범위가 잘못되었습니다.')

@@ -4,7 +4,7 @@ export type IconName = 'brand' | 'plus' | 'folder' | 'play' | 'pause' | 'repeat'
   'music' | 'palette' | 'text' | 'undo' | 'redo' | 'copy' | 'trash' | 'download' | 'upload' | 'share' | 'close' |
   'warning' | 'screen' | 'video' | 'image' | 'mute' | 'rotate' | 'flipH' | 'flipV' | 'save' | 'panel' | 'crop' | 'lock' | 'unlock' | 'library' | 'search' |
   'eye' | 'eyeOff' | 'zoomIn' | 'zoomOut' | 'fit' | 'marker' | 'grid' | 'list' | 'project' | 'help' | 'shape' | 'settings' | 'removeBackground' |
-  'heart' | 'comment' | 'more' | 'user' | 'previousEdit' | 'nextEdit' | 'mosaic'
+  'heart' | 'comment' | 'more' | 'user' | 'previousEdit' | 'nextEdit' | 'mosaic' | 'captions'
 
 // Every icon uses the same 24px grid, optical centre, round joins and stroke
 // weight. Filled shapes are reserved for primary actions such as play.
@@ -20,6 +20,7 @@ const paths: Record<IconName, ReactNode> = {
   music: <><path d="M9 17V6.5L18 4v10.5"/><circle cx="6.5" cy="17.25" r="2.5"/><circle cx="15.5" cy="14.75" r="2.5"/></>,
   palette: <><path d="M12 3.5a8.5 8.5 0 1 0 0 17h1.35a1.9 1.9 0 0 0 0-3.8H12a2.4 2.4 0 0 1 0-4.8h8.35A8.5 8.5 0 0 0 12 3.5Z"/><circle cx="7.1" cy="10" r=".8" fill="currentColor" stroke="none"/><circle cx="9" cy="6.9" r=".8" fill="currentColor" stroke="none"/><circle cx="13" cy="6.4" r=".8" fill="currentColor" stroke="none"/><circle cx="16.2" cy="8.5" r=".8" fill="currentColor" stroke="none"/></>,
   text: <path d="M5 5.5h14M12 5.5v13M8.25 18.5h7.5"/>,
+  captions: <><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M6.5 10h4M6.5 14h5.5M14 10h3.5M14 14h3.5"/></>,
   undo: <path d="m8.5 7.5-4 4 4 4M5 11.5h8a5.5 5.5 0 0 1 5.5 5.5"/>,
   redo: <path d="m15.5 7.5 4 4-4 4M19 11.5h-8A5.5 5.5 0 0 0 5.5 17"/>,
   copy: <><rect x="8" y="8" width="11" height="11" rx="2.25"/><path d="M16 8V6.25A2.25 2.25 0 0 0 13.75 4h-7.5A2.25 2.25 0 0 0 4 6.25v7.5A2.25 2.25 0 0 0 6.25 16H8"/></>,

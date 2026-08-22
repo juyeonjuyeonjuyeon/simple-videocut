@@ -22,4 +22,11 @@ describe('visual color filters', () => {
     expect(resolveVisualFilter({ filterPreset: 'unknown' as 'none', filterAmount: 500 })).toEqual({ filterPreset: 'none', filterAmount: 100 })
     expect(colorFilterCss('clip:unsafe value', { filterPreset: 'warm', filterAmount: 50 })).toBe('url(#simplecut-color-clip-unsafe-value)')
   })
+
+  it('keeps every look compatible with preview and export matrices', () => {
+    for (const preset of ['cinema', 'sunset', 'aqua', 'vintage', 'dream', 'noir'] as const) {
+      expect(visualFilterMatrix({ filterPreset: preset, filterAmount: 100 })).toHaveLength(20)
+      expect(ffmpegColorFilter({ filterPreset: preset, filterAmount: 100 })).toContain('colorchannelmixer=')
+    }
+  })
 })

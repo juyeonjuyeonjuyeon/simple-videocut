@@ -20,6 +20,7 @@ import { BASIC_MOTION_OPTIONS } from '../utils/basic-motion'
 import { resolveVisualFilter, VISUAL_FILTER_OPTIONS } from '../utils/color-filter'
 import { inferTextStylePreset, TEXT_STYLE_OPTIONS, textStylePatch, type TextStylePreset } from '../utils/text-style'
 import { CANVAS_PRESETS, CANVAS_MAX_HEIGHT, CANVAS_MAX_WIDTH, CANVAS_MIN_SIDE } from '../utils/canvas'
+import { analyzeAudioGain } from '../utils/audio-level'
 
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
@@ -755,6 +756,17 @@ function AudioInspector({ audio, tab }: { audio: AudioClip; tab: InspectorTab })
   const clips = useEditor((s) => s.clips)
   const base = audio.trimEnd - audio.trimStart
   const mainLength = totalDuration(clips)
+  const [levelStatus, setLevelStatus] = useState<'idle' | 'working' | 'done' | 'error'>('idle')
+  const autoLevel = async () => {
+    setLevelStatus('working')
+    try {
+      const gain = await analyzeAudioGain(audio.file, audio.src, `${audio.nativeMediaId || audio.src}:${audio.sourceSize}`)
+      update(audio.id, { volume: gain, muted: false })
+      setLevelStatus('done')
+    } catch {
+      setLevelStatus('error')
+    }
+  }
 
   return (
     <div className="inspector__body">
@@ -765,7 +777,11 @@ function AudioInspector({ audio, tab }: { audio: AudioClip; tab: InspectorTab })
             <div className="inspector__hint">{translate('오디오', 'Audio')} · {translate('길이', 'Duration')} {formatTime(audioLength(audio))} · {translate('원본', 'Source')} {formatTime(audio.duration)}</div>
           </div>
         </InspectorBlock>
-        <InspectorBlock title={translate('음량', 'Volume')}><VolumeRow volume={audio.volume} muted={audio.muted} onPatch={(p) => update(audio.id, p)} /></InspectorBlock>
+        <InspectorBlock title={translate('음량', 'Volume')}>
+          <VolumeRow volume={audio.volume} muted={audio.muted} onPatch={(p) => update(audio.id, p)} />
+          <button className="btn btn--sm" type="button" disabled={levelStatus === 'working'} onClick={() => void autoLevel()}>{levelStatus === 'working' ? translate('음량 분석 중…', 'Analyzing level…') : translate('자동 음량 맞춤', 'Auto level')}</button>
+          <div className={`inspector__hint${levelStatus === 'error' ? ' inspector__hint--error' : ''}`}>{levelStatus === 'done' ? translate(`이 파일에 맞는 음량 ${Math.round(audio.volume * 100)}%를 적용했습니다.`, `Applied ${Math.round(audio.volume * 100)}% for this file.`) : levelStatus === 'error' ? translate('이 파일의 소리를 분석하지 못했습니다. 음량 슬라이더로 직접 조절해 주세요.', 'This file could not be analyzed. Adjust the volume slider manually.') : translate('녹음의 평균 음량과 가장 큰 소리를 분석해 재생·내보내기에 같은 값을 적용합니다.', 'Analyzes average and peak level, then applies the same volume to preview and export.')}</div>
+        </InspectorBlock>
         <InspectorBlock title={translate('페이드', 'Fade')}><FadeRow length={audioLength(audio)} fadeIn={audio.fadeIn} fadeOut={audio.fadeOut} onPatch={(p) => update(audio.id, p)} label={translate('소리 페이드', 'Audio fade')} /></InspectorBlock>
         <button className="btn btn--danger" onClick={() => remove(audio.id)}>{translate('오디오 삭제', 'Delete audio')}</button>
       </>}

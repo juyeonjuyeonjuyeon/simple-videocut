@@ -14,6 +14,12 @@ export const VISUAL_FILTER_OPTIONS: ReadonlyArray<{ value: VisualFilterPreset; l
   { value: 'cool', label: '시원함', labelEn: 'Cool' },
   { value: 'soft', label: '부드러움', labelEn: 'Soft' },
   { value: 'vivid', label: '선명함', labelEn: 'Vivid' },
+  { value: 'cinema', label: '시네마', labelEn: 'Cinema' },
+  { value: 'sunset', label: '노을', labelEn: 'Sunset' },
+  { value: 'aqua', label: '아쿠아', labelEn: 'Aqua' },
+  { value: 'vintage', label: '빈티지', labelEn: 'Vintage' },
+  { value: 'dream', label: '몽환', labelEn: 'Dream' },
+  { value: 'noir', label: '누아르', labelEn: 'Noir' },
 ]
 
 const IDENTITY: ColorMatrix = [
@@ -43,6 +49,12 @@ const TARGETS: Record<VisualFilterPreset, ColorMatrix> = {
   cool: [.91, .01, 0, 0, 0, 0, 1.01, .01, 0, 0, 0, .02, 1.1, 0, 0, 0, 0, 0, 1, 0],
   soft: saturationMatrix(.76),
   vivid: saturationMatrix(1.28),
+  cinema: [1.06, .02, 0, 0, 0, 0, .98, .01, 0, 0, 0, .01, .86, 0, 0, 0, 0, 0, 1, 0],
+  sunset: [1.12, .03, 0, 0, 0, .01, .96, 0, 0, 0, 0, .02, .76, 0, 0, 0, 0, 0, 1, 0],
+  aqua: [.84, .01, 0, 0, 0, 0, 1.04, .02, 0, 0, 0, .02, 1.12, 0, 0, 0, 0, 0, 1, 0],
+  vintage: [.76, .16, .05, 0, 0, .08, .76, .08, 0, 0, .05, .15, .66, 0, 0, 0, 0, 0, 1, 0],
+  dream: [.9, .06, .04, 0, 0, .03, .91, .05, 0, 0, .07, .04, .94, 0, 0, 0, 0, 0, 1, 0],
+  noir: [.25, .65, .1, 0, 0, .25, .65, .1, 0, 0, .25, .65, .1, 0, 0, 0, 0, 0, 1, 0],
 }
 
 export const isVisualFilterPreset = (value: unknown): value is VisualFilterPreset =>

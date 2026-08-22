@@ -14,6 +14,8 @@ import { resolveVisualFilter } from './utils/color-filter'
 import { translate } from './i18n'
 import { canvasDimensionsForPreset, normalizeCanvasDimensions, scaledCanvasDimensions } from './utils/canvas'
 import { sanitizeMosaicRegions } from './utils/mosaic'
+import type { SubtitleCue } from './utils/subtitles'
+import { textStylePatch, type TextStylePreset } from './utils/text-style'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
 const registerNativeMedia = async (file: File) => {
@@ -84,6 +86,7 @@ interface EditorState {
 
   // ---- text overlays ----
   addText: () => void
+  addCaptions: (cues: SubtitleCue[], options?: { offset?: number; replace?: boolean; style?: TextStylePreset }) => void
   updateText: (id: string, patch: Partial<TextOverlay>) => void
   removeText: (id: string) => void
   raiseText: (id: string, dir: -1 | 1) => void
@@ -784,7 +787,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const dur = projectDuration(s.clips, s.overlays, s.audios, s.texts, s.backgrounds)
     const start = Math.min(s.playhead, Math.max(0, dur - 2))
     const text: TextOverlay = {
-      id: uid(), text: translate('텍스트 입력', 'Enter text'), start, end: Math.min(start + 3, dur || start + 3),
+      id: uid(), role: 'text', text: translate('텍스트 입력', 'Enter text'), start, end: Math.min(start + 3, dur || start + 3),
       x: 0.5, y: 0.85, size: 0.07, color: '#ffffff', colorAlpha: 1,
       box: true, boxColor: '#000000', boxAlpha: 0.55,
       font: FONT_OPTIONS[0].value, strokeWidth: 0, strokeColor: '#000000',
@@ -798,6 +801,31 @@ export const useEditor = create<EditorState>((set, get) => ({
       selection: { type: 'text', id: text.id },
     }))
   },
+
+  addCaptions: (cues, options = {}) => set((s) => {
+    const offset = Math.max(0, options.offset ?? 0)
+    const style = textStylePatch(options.style ?? 'caption')
+    const captions: TextOverlay[] = cues.slice(0, 200).map((cue) => ({
+      id: uid(), role: 'caption', text: cue.text.slice(0, 10_000),
+      start: Math.max(0, cue.start + offset), end: Math.max(cue.start + offset + .05, cue.end + offset),
+      x: .5, y: .86, size: .055, ...style,
+      font: FONT_OPTIONS[0].value, align: 'center', angle: 0,
+      opacity: 1, locked: false, hidden: false, fadeIn: 0, fadeOut: 0, positionKeyframes: [],
+    }))
+    if (!captions.length) return s
+    const keptTexts = options.replace ? s.texts.filter((item) => item.role !== 'caption') : s.texts
+    const keptIds = new Set(keptTexts.map((item) => item.id))
+    const order = normalizeVisualOrder(s.overlays, s.texts, s.visualOrder)
+      .filter((item) => item.type !== 'text' || keptIds.has(item.id))
+    const visualOrder: VisualLayerRef[] = [...order, ...captions.map((item) => ({ type: 'text' as const, id: item.id }))]
+    return {
+      texts: [...keptTexts, ...captions],
+      visualOrder,
+      selection: { type: 'text', id: captions[0].id },
+      selectedItems: [{ type: 'text', id: captions[0].id }],
+      playhead: captions[0].start,
+    }
+  }),
 
   updateText: (id, patch) =>
     set((s) => ({

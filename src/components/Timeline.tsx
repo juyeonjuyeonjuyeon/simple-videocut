@@ -861,9 +861,9 @@ export default function Timeline() {
             return (
               <div key={`visual:${ref.type}:${ref.id}`} className="timeline__lane timeline__lane--visual timeline__lane--text" style={{ height: OV_LANE_H }}
                 onPointerDown={onTimelineBackgroundDown}>
-                {trackHeader(t.text || translate('텍스트', 'Text'), ref, { hidden: t.hidden, locked: t.locked })}
+                {trackHeader(`${t.role === 'caption' ? translate('자막', 'Caption') + ' · ' : ''}${t.text || translate('텍스트', 'Text')}`, ref, { hidden: t.hidden, locked: t.locked })}
                 {freeChip('text', t.id, t.start, t.end - t.start, 0, OV_LANE_H, '#3a4250',
-                  `${translate('텍스트', 'Text')} · ${t.text}`,
+                  `${t.role === 'caption' ? translate('자막', 'Caption') : translate('텍스트', 'Text')} · ${t.text}`,
                   isSelected(ref),
                   <>{fadeVisual(t.fadeIn, t.fadeOut, t.end - t.start)}{keyframeVisual(t.positionKeyframes, t.end - t.start)}</>,
                   { hidden: t.hidden, locked: t.locked })}

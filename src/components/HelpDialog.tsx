@@ -54,6 +54,7 @@ export default function HelpDialog({ onClose }: Props) {
               <li>{t('클립 양끝 손잡이를 드래그하면 길이를 조절합니다.', 'Drag either end handle to adjust duration.')}</li>
               <li>{t('우클릭하면 이동·길이 맞춤·그룹·삭제 메뉴가 열립니다.', 'Right-click for move, fit, group, and delete actions.')}</li>
               <li>{t('‘도형’에서 사각형·원·별 등을 추가하고 오른쪽 스타일 패널에서 색·테두리·그림자를 바꿉니다.', 'Add rectangles, circles, stars, and more from Shape, then edit fill, border, and shadow in the right panel.')}</li>
+              <li>{t('‘자막’에서 SRT·WebVTT 파일을 가져오면 문장별 편집 레이어가 생기고, 편집한 자막을 다시 SRT로 저장할 수 있습니다.', 'Import SRT or WebVTT from Captions to create editable cue layers, then save the edited captions back to SRT.')}</li>
               <li>{t('⌘/Ctrl을 누른 채 클릭하면 여러 항목을 선택합니다.', 'Hold ⌘/Ctrl while clicking to select multiple items.')}</li>
               <li>{t('타임라인에서 두 손가락 스크롤은 상하·좌우로 이동하고, 핀치 또는 Ctrl/⌘+스크롤은 확대·축소합니다.', 'Two-finger scrolling moves through the timeline; pinch or Ctrl/Cmd+scroll zooms it.')}</li>
               <li>{t('Finder·사진 앱·음성 메모의 파일을 편집기 화면에 끌어 놓아 바로 추가합니다.', 'Drag files from Finder, Photos, or Voice Memos directly into the editor.')}</li>

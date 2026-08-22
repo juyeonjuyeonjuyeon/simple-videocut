@@ -239,4 +239,25 @@ describe('timeline splitting', () => {
     })
     expect(state.overlays[0].file.type).toBe('image/png')
   })
+
+  it('imports timed captions without replacing ordinary title text', () => {
+    const title: TextOverlay = {
+      id: 'title', role: 'text', text: '제목', start: 0, end: 2, x: .5, y: .5, size: .08,
+      color: '#fff', colorAlpha: 1, box: false, boxColor: '#000', boxAlpha: 0,
+      font: 'sans-serif', strokeWidth: 0, strokeColor: '#000', shadow: false,
+      shadowColor: '#000', shadowBlur: 0, shadowDist: 0, align: 'center', angle: 0,
+    }
+    const oldCaption = { ...title, id: 'old-caption', role: 'caption' as const, text: '옛 자막' }
+    useEditor.setState({ texts: [title, oldCaption], visualOrder: [{ type: 'text', id: title.id }, { type: 'text', id: oldCaption.id }], playhead: 4 })
+
+    useEditor.getState().addCaptions([{ start: 1, end: 2.5, text: '새 자막' }], { offset: 4, replace: true, style: 'yellow' })
+
+    const state = useEditor.getState()
+    expect(state.texts).toHaveLength(2)
+    expect(state.texts[0]).toBe(title)
+    expect(state.texts[1]).toMatchObject({ role: 'caption', text: '새 자막', start: 5, end: 6.5, color: '#ffda55' })
+    expect(state.visualOrder).not.toContainEqual({ type: 'text', id: oldCaption.id })
+    expect(state.selection).toEqual({ type: 'text', id: state.texts[1].id })
+    expect(state.playhead).toBe(5)
+  })
 })

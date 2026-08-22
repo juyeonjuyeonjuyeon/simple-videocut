@@ -10,7 +10,7 @@ export interface CanvasDimensions {
 
 export type VisualKind = 'video' | 'image' | 'color'
 
-export type VisualFilterPreset = 'none' | 'mono' | 'warm' | 'cool' | 'soft' | 'vivid'
+export type VisualFilterPreset = 'none' | 'mono' | 'warm' | 'cool' | 'soft' | 'vivid' | 'cinema' | 'sunset' | 'aqua' | 'vintage' | 'dream' | 'noir'
 
 export interface VisualFilterSettings {
   filterPreset?: VisualFilterPreset
@@ -71,7 +71,7 @@ export interface TimelineMarker {
 export type KeyframeEasing = 'linear' | 'ease-in-out'
 
 /** Deliberately small motion set backed by the shared preview/export keyframe path. */
-export type BasicMotionPreset = 'none' | 'fade' | 'rise' | 'slide-left' | 'drift'
+export type BasicMotionPreset = 'none' | 'fade' | 'rise' | 'fall' | 'slide-left' | 'slide-right' | 'drift' | 'float' | 'sway'
 
 /** Position automation shared by picture-in-picture and text layers. */
 export interface PositionKeyframe {
@@ -270,6 +270,8 @@ export interface AudioClip {
 /** A text/subtitle overlay shown over a time range on the timeline. */
 export interface TextOverlay {
   id: string
+  /** Distinguishes ordinary titles from timed subtitle cues. */
+  role?: 'text' | 'caption'
   text: string
   start: number
   end: number
