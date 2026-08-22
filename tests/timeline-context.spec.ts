@@ -1,14 +1,14 @@
 import { expect, test } from '@playwright/test'
 import { fileURLToPath } from 'node:url'
 
-const dog = fileURLToPath(new URL('../public/dog.svg', import.meta.url))
+const appIcon = fileURLToPath(new URL('../public/app-icon.svg', import.meta.url))
 
 test('timeline context menu groups items and fits a layer to its grouped main clip', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Context-menu grouping geometry is covered once on desktop')
 
   await page.goto('/')
-  await page.locator('header input[type=file]').nth(3).setInputFiles(dog)
-  const asset = page.locator('.media-asset').filter({ hasText: 'dog.svg' })
+  await page.locator('header input[type=file]').nth(3).setInputFiles(appIcon)
+  const asset = page.locator('.media-asset').filter({ hasText: 'app-icon.svg' })
   await asset.click()
   await asset.getByRole('button', { name: '메인에 추가' }).click()
   await asset.getByRole('button', { name: '레이어에 추가' }).click()

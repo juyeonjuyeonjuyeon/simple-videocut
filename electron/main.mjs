@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { validateFFmpegArgs } from './ffmpeg-args.mjs'
 import { createNativeProjectStore } from './native-project-store.mjs'
+import { listSystemFontFamilies } from './font-catalog.mjs'
 
 const require = createRequire(import.meta.url)
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
@@ -18,6 +19,10 @@ let quitReady = false
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 let projectStore = null
 let videoEncoderPromise = null
+let fontFamiliesPromise = null
+let appLanguage = 'ko'
+
+const nativeCopy = (ko, en) => appLanguage === 'ko' ? ko : en
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'simplecut-media',
@@ -66,7 +71,14 @@ async function clearWorkspace() {
 }
 
 ipcMain.handle('native-ffmpeg:available', () => Boolean(ffmpegPath))
+ipcMain.on('app:language', (_event, language) => {
+  if (language === 'ko' || language === 'en') appLanguage = language
+})
 ipcMain.handle('native-ffmpeg:video-encoder', () => detectVideoEncoder())
+ipcMain.handle('native-fonts:list', () => {
+  if (!fontFamiliesPromise) fontFamiliesPromise = listSystemFontFamilies()
+  return fontFamiliesPromise
+})
 ipcMain.handle('native-media:register', async (_event, sourcePath, name) => nativeProjects().registerMedia(sourcePath, name))
 ipcMain.handle('native-media:import', async (_event, name, data) => nativeProjects().importMedia(name, data))
 ipcMain.handle('native-media:read', async (_event, id) => new Uint8Array(await readFile(nativeProjects().mediaPath(id))))
@@ -111,7 +123,7 @@ ipcMain.handle('native-ffmpeg:save-file', async (event, name, suggestedName) => 
   const window = BrowserWindow.fromWebContents(event.sender)
   const options = {
     defaultPath: safeSuggestion || fallback,
-    filters: [{ name: extension === 'webm' ? 'WebM 영상' : 'MP4 영상', extensions: [extension] }],
+    filters: [{ name: extension === 'webm' ? nativeCopy('WebM 영상', 'WebM video') : nativeCopy('MP4 영상', 'MP4 video'), extensions: [extension] }],
   }
   const result = window ? await dialog.showSaveDialog(window, options) : await dialog.showSaveDialog(options)
   if (result.canceled || !result.filePath) return 'cancelled'
@@ -198,10 +210,10 @@ function createWindow() {
     event.preventDefault()
     const { response } = await dialog.showMessageBox(window, {
       type: 'warning',
-      title: '렌더링 진행 중',
-      message: '영상 렌더링이 진행 중입니다.',
-      detail: '창을 최소화하면 렌더링은 계속됩니다. 지금 창을 닫으면 진행 중인 렌더링은 취소됩니다.',
-      buttons: ['계속 렌더링', '렌더링 취소하고 창 닫기'],
+      title: nativeCopy('렌더링 진행 중', 'Rendering in progress'),
+      message: nativeCopy('영상 렌더링이 진행 중입니다.', 'A video is currently rendering.'),
+      detail: nativeCopy('창을 최소화하면 렌더링은 계속됩니다. 지금 창을 닫으면 진행 중인 렌더링은 취소됩니다.', 'Minimize the window to keep rendering. Closing it now will cancel the render.'),
+      buttons: [nativeCopy('계속 렌더링', 'Keep rendering'), nativeCopy('렌더링 취소하고 창 닫기', 'Cancel render and close')],
       defaultId: 0,
       cancelId: 0,
     })

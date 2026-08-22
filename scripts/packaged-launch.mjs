@@ -17,7 +17,9 @@ try {
   await page.waitForLoadState('domcontentloaded')
   const title = await page.title()
   if (!title.includes('SimpleCut')) throw new Error(`예상하지 못한 앱 제목입니다: ${title}`)
-  process.stdout.write(`${title}\n`)
+  const fonts = await page.evaluate(() => globalThis.simplecutDesktop?.listFonts())
+  if (!fonts || fonts.length < 10) throw new Error(`패키지 앱에서 설치 글꼴을 찾지 못했습니다: ${fonts?.length ?? 0}개`)
+  process.stdout.write(`${title} · 설치 글꼴 ${fonts.length}개\n`)
 } finally {
   await app.close()
   testEnv.cleanup()

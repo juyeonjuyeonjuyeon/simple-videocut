@@ -1,3 +1,5 @@
+import { translate } from '../i18n'
+
 interface SavePickerWindow {
   showSaveFilePicker?: (opts: unknown) => Promise<{
     createWritable: () => Promise<{ write: (b: Blob) => Promise<void>; close: () => Promise<void> }>
@@ -17,19 +19,19 @@ export async function saveBlob(blob: Blob, filename: string): Promise<'saved' | 
     try {
       const handle = await w.showSaveFilePicker({
         suggestedName: filename,
-        types: [{ description: '파일', accept: { [blob.type || 'application/octet-stream']: ['.' + ext] } }],
+        types: [{ description: translate('파일', 'File'), accept: { [blob.type || 'application/octet-stream']: ['.' + ext] } }],
       })
       const ws = await handle.createWritable()
       await ws.write(blob)
       await ws.close()
       if (handle.getFile) {
         const saved = await handle.getFile()
-        if (saved.size !== blob.size) throw new Error(`저장된 파일 크기가 다릅니다. (${saved.size} / ${blob.size} bytes)`)
+        if (saved.size !== blob.size) throw new Error(translate(`저장된 파일 크기가 다릅니다. (${saved.size} / ${blob.size} bytes)`, `The saved file size does not match. (${saved.size} / ${blob.size} bytes)`))
       }
       return 'saved'
     } catch (e) {
       if ((e as DOMException).name === 'AbortError') throw e
-      const error = new Error(`파일 저장에 실패했습니다: ${(e as Error).message}`) as Error & { cause?: unknown }
+      const error = new Error(translate(`파일 저장에 실패했습니다: ${(e as Error).message}`, `Could not save the file: ${(e as Error).message}`)) as Error & { cause?: unknown }
       error.cause = e
       throw error
     }

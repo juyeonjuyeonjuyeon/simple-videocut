@@ -1,6 +1,8 @@
 export interface DesktopFFmpegBridge {
+  setLanguage?(language: 'ko' | 'en'): void
   available(): Promise<boolean>
   videoEncoder(): Promise<'h264_videotoolbox' | null>
+  listFonts(): Promise<string[]>
   registerMedia(file: File): Promise<{ id: string; size: number }>
   importMedia(name: string, data: Uint8Array): Promise<{ id: string; size: number }>
   readMedia(id: string): Promise<Uint8Array>

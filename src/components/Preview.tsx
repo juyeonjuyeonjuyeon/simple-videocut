@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useEditor } from '../store'
-import type { AspectRatio, Crop } from '../types'
+import type { AspectRatio, Overlay } from '../types'
 import {
   resolveTimelineTime,
   totalDuration,
@@ -16,8 +16,13 @@ import { hexToRgba } from '../utils/color'
 import { normalizeVisualOrder, PREVIEW_Z, visualPreviewZ } from '../utils/layers'
 import { startPointerDrag } from '../utils/pointer'
 import { positionAt } from '../utils/motion'
-import { cropForAspect, cropSize, moveCrop, resizeCrop, sanitizeCrop, zoomCrop, type CropHandle } from '../utils/crop'
 import Icon from './Icon'
+import { maskClipPath, maskPathData, resolveOverlayStyle } from '../utils/overlay-style'
+import { resolveShapeStyle, shapePathData } from '../utils/shape'
+import { useLanguage } from '../i18n'
+import { resolveMainPlacement } from '../utils/main-placement'
+import BackgroundRemovedImage from './BackgroundRemovedImage'
+import { captionStyleForCue } from '../utils/captions'
 
 const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
 const DRIFT = 0.35 // seconds before we hard-seek a media element back in sync
@@ -46,27 +51,100 @@ function fitBox(cw: number, ch: number, r: number): { w: number; h: number } {
   return { w: Math.floor(w), h: Math.floor(h) }
 }
 
-export default function Preview() {
+function OverlayDecoration({ overlay, frameHeight }: { overlay: Overlay; frameHeight: number }) {
+  const ref = useRef<SVGSVGElement>(null)
+  const [size, setSize] = useState({ width: 100, height: 100 })
+  const style = resolveOverlayStyle(overlay)
+  const borderWidth = style.borderWidth * frameHeight
+  const enabled = borderWidth >= 0.5
+
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const measure = () => setSize({ width: Math.max(1, element.clientWidth), height: Math.max(1, element.clientHeight) })
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    measure()
+    return () => observer.disconnect()
+  }, [enabled])
+
+  if (!enabled) return null
+  const path = (inset: number) => maskPathData(style.maskShape, size.width, size.height, inset)
+  const common = { fill: 'none', stroke: style.borderColor, strokeLinejoin: 'round' as const }
+  return (
+    <svg ref={ref} className="preview__overlay-decoration" viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" aria-hidden="true">
+      {style.borderStyle === 'double' ? <>
+        <path {...common} d={path(borderWidth / 6)} strokeWidth={Math.max(1, borderWidth / 3)} />
+        <path {...common} d={path(borderWidth * 5 / 6)} strokeWidth={Math.max(1, borderWidth / 3)} />
+      </> : (
+        <path {...common} d={path(borderWidth / 2)} strokeWidth={borderWidth}
+          strokeDasharray={style.borderStyle === 'dashed' ? `${borderWidth * 3} ${borderWidth * 2}` : style.borderStyle === 'dotted' ? `0.1 ${borderWidth * 1.9}` : undefined}
+          strokeLinecap={style.borderStyle === 'dotted' ? 'round' : 'butt'} />
+      )}
+    </svg>
+  )
+}
+
+function ShapeOverlayGraphic({ overlay, frameHeight }: { overlay: Overlay; frameHeight: number }) {
+  const ref = useRef<SVGSVGElement>(null)
+  const [size, setSize] = useState({ width: 100, height: 100 })
+  const shape = resolveShapeStyle(overlay.shape)
+  const style = resolveOverlayStyle(overlay)
+  const borderWidth = style.borderWidth * frameHeight
+  const path = shapePathData(shape.kind, size.width, size.height, borderWidth / 2 + 1, shape.cornerRadius)
+  const common = { fill: hexToRgba(shape.fillColor, shape.fillOpacity), stroke: style.borderColor, strokeLinejoin: 'round' as const }
+
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const measure = () => setSize({ width: Math.max(1, element.clientWidth), height: Math.max(1, element.clientHeight) })
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    measure()
+    return () => observer.disconnect()
+  }, [])
+
+  return (
+    <svg ref={ref} className={`preview__shape${overlay.scaleY != null && !(overlay.aspectLocked ?? true) ? ' preview__shape--free' : ''}`}
+      viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" aria-hidden="true"
+      style={{ transform: cssTransform(overlay.rotate, overlay.flipH, overlay.flipV) }}>
+      {style.borderStyle === 'double' && borderWidth >= .5 ? <>
+        <path {...common} d={path} strokeWidth={Math.max(1, borderWidth / 3)} />
+        <path {...common} fill="none" d={shapePathData(shape.kind, size.width, size.height, borderWidth * .85 + 1, shape.cornerRadius)} strokeWidth={Math.max(1, borderWidth / 3)} />
+      </> : (
+        <path {...common} d={path} strokeWidth={borderWidth}
+          strokeDasharray={style.borderStyle === 'dashed' ? `${borderWidth * 3} ${borderWidth * 2}` : style.borderStyle === 'dotted' ? `0.1 ${borderWidth * 1.9}` : undefined}
+          strokeLinecap={style.borderStyle === 'dotted' ? 'round' : 'butt'} />
+      )}
+    </svg>
+  )
+}
+
+export default function Preview({ onOpenCrop, presentation = false }: { onOpenCrop: () => void; presentation?: boolean }) {
+  const { t: tr } = useLanguage()
   const clips = useEditor((s) => s.clips)
   const overlays = useEditor((s) => s.overlays)
   const audios = useEditor((s) => s.audios)
   const texts = useEditor((s) => s.texts)
+  const captionTracks = useEditor((s) => s.captionTracks)
   const backgrounds = useEditor((s) => s.backgrounds)
   const storedVisualOrder = useEditor((s) => s.visualOrder)
-  const selection = useEditor((s) => s.selection)
+  const storedSelection = useEditor((s) => s.selection)
+  const selection = presentation ? null : storedSelection
   const playhead = useEditor((s) => s.playhead)
   const isPlaying = useEditor((s) => s.isPlaying)
   const aspectRatio = useEditor((s) => s.aspectRatio)
   const setPlayhead = useEditor((s) => s.setPlayhead)
   const setPlaying = useEditor((s) => s.setPlaying)
   const select = useEditor((s) => s.select)
+  const updateClip = useEditor((s) => s.updateClip)
   const updateOverlay = useEditor((s) => s.updateOverlay)
   const updateLayerPosition = useEditor((s) => s.updateLayerPosition)
   const updateText = useEditor((s) => s.updateText)
-  const updateClip = useEditor((s) => s.updateClip)
 
   const areaRef = useRef<HTMLDivElement>(null)
   const frameRef = useRef<HTMLDivElement>(null)
+  const mainWrapRef = useRef<HTMLDivElement>(null)
   const mainVideoRef = useRef<HTMLVideoElement>(null)
   const mainImgRef = useRef<HTMLImageElement>(null)
   const mainColorRef = useRef<HTMLDivElement>(null)
@@ -81,21 +159,28 @@ export default function Preview() {
   const audioCtx = useRef<AudioContext | null>(null)
   const gainNodes = useRef<Map<HTMLMediaElement, GainNode>>(new Map())
   const [box, setBox] = useState({ w: 0, h: 0 })
-  const [cropMode, setCropMode] = useState(false)
-  const [cropAspect, setCropAspect] = useState<number | null>(null)
-  const cropOriginal = useRef<{ kind: 'clip' | 'overlay'; id: string; crop: Crop } | null>(null)
+  const [mainNaturalSize, setMainNaturalSize] = useState<{ id: string; width: number; height: number } | null>(null)
   const [overlayControlHeight, setOverlayControlHeight] = useState(0)
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null })
-  const [rotationReadout, setRotationReadout] = useState<{ type: 'overlay' | 'text'; id: string; angle: number } | null>(null)
+  const [rotationReadout, setRotationReadout] = useState<{ type: 'clip' | 'overlay' | 'text'; id: string; angle: number } | null>(null)
   const selClip = selection?.type === 'clip' ? clips.find((c) => c.id === selection.id) : null
   const selOverlayId = selection?.type === 'overlay' ? selection.id : null
   const selOverlay = selOverlayId ? overlays.find((o) => o.id === selOverlayId) : null
   const selOverlayPosition = selOverlay ? positionAt(selOverlay, playhead - selOverlay.start) : null
   const visualOrder = normalizeVisualOrder(overlays, texts, storedVisualOrder)
-
-  // Leave crop mode when the selection changes.
-  const selectionKey = selection ? `${selection.type}:${selection.id}` : ''
-  useEffect(() => { setCropMode(false); setCropAspect(null); cropOriginal.current = null }, [selectionKey])
+  const mainTotal = totalDuration(clips)
+  const activeMainResult = clips.length && playhead < mainTotal - 1e-4 ? resolveTimelineTime(clips, playhead) : null
+  const activeMain = activeMainResult?.clip ?? null
+  const activeMainSize = activeMain && mainNaturalSize?.id === activeMain.id
+    ? mainNaturalSize
+    : { width: Math.max(1, box.w), height: Math.max(1, box.h) }
+  const mainPlacement = activeMain && activeMain.kind !== 'color'
+    ? resolveMainPlacement(activeMain, activeMainSize.width, activeMainSize.height, box.w, box.h)
+    : null
+  const mainCrop = activeMain?.crop
+  const mainKeptWidth = Math.max(0.01, 1 - (mainCrop?.left ?? 0) - (mainCrop?.right ?? 0))
+  const mainKeptHeight = Math.max(0.01, 1 - (mainCrop?.top ?? 0) - (mainCrop?.bottom ?? 0))
+  const mainQuarterTurn = activeMain?.rotate === 90 || activeMain?.rotate === 270
 
   // Keep editing controls above the content stack without changing the
   // selected overlay's actual compositing order.
@@ -112,150 +197,6 @@ export default function Preview() {
     measure()
     return () => observer.disconnect()
   }, [selOverlayId, box.w, box.h])
-
-  // ---- interactive crop / pan (works for the main clip and PiP overlays) ----
-  type CropKind = 'clip' | 'overlay'
-  const cropGeometryOf = (kind: CropKind, id: string) => {
-    const el = kind === 'clip' ? frameRef.current : wrapEls.current.get(id)
-    if (!el) return null
-    const bounds = el.getBoundingClientRect()
-    const width = kind === 'overlay' ? el.offsetWidth : bounds.width
-    const height = kind === 'overlay' ? el.offsetHeight : bounds.height
-    const angle = kind === 'overlay'
-      ? (useEditor.getState().overlays.find((overlay) => overlay.id === id)?.angle || 0) * Math.PI / 180
-      : 0
-    const centerX = bounds.left + bounds.width / 2
-    const centerY = bounds.top + bounds.height / 2
-    return {
-      width,
-      height,
-      point(clientX: number, clientY: number) {
-        if (kind === 'clip' || !angle) return { x: clientX - bounds.left, y: clientY - bounds.top }
-        const dx = clientX - centerX
-        const dy = clientY - centerY
-        return {
-          x: dx * Math.cos(angle) + dy * Math.sin(angle) + width / 2,
-          y: -dx * Math.sin(angle) + dy * Math.cos(angle) + height / 2,
-        }
-      },
-    }
-  }
-  const cropItem = (kind: CropKind, id: string) =>
-    kind === 'clip'
-      ? useEditor.getState().clips.find((c) => c.id === id)
-      : useEditor.getState().overlays.find((o) => o.id === id)
-  const cropUpdate = (kind: CropKind, id: string, crop: Crop) => {
-    const safeCrop = sanitizeCrop(crop)
-    if (kind === 'clip') updateClip(id, { crop: safeCrop })
-    else updateOverlay(id, { crop: safeCrop })
-  }
-
-  const beginCrop = (kind: CropKind, id: string) => {
-    const item = cropItem(kind, id)
-    if (!item) return
-    setPlaying(false)
-    cropOriginal.current = { kind, id, crop: { ...item.crop } }
-    setCropAspect(null)
-    setCropMode(true)
-  }
-  const finishCrop = () => { cropOriginal.current = null; setCropAspect(null); setCropMode(false) }
-  const cancelCrop = () => {
-    const original = cropOriginal.current
-    if (original) cropUpdate(original.kind, original.id, original.crop)
-    cropOriginal.current = null
-    setCropAspect(null)
-    setCropMode(false)
-  }
-
-  const withCropDrag = (onMove: (ev: PointerEvent) => void) => {
-    startPointerDrag(onMove)
-  }
-
-  const cropHandle = (kind: CropKind, id: string, handle: CropHandle) => (e: React.PointerEvent) => {
-    e.stopPropagation()
-    if (e.button !== 0) return
-    const geometry = cropGeometryOf(kind, id)
-    const initial = cropItem(kind, id)?.crop
-    if (!geometry || !initial) return
-    withCropDrag((ev) => {
-      const point = geometry.point(ev.clientX, ev.clientY)
-      const fx = Math.max(0, Math.min(point.x / geometry.width, 1))
-      const fy = Math.max(0, Math.min(point.y / geometry.height, 1))
-      cropUpdate(kind, id, resizeCrop(initial, handle, fx, fy, geometry.width / Math.max(1, geometry.height), cropAspect))
-    })
-  }
-
-  const cropPan = (kind: CropKind, id: string) => (e: React.PointerEvent) => {
-    e.stopPropagation()
-    if (e.button !== 0) return
-    const geometry = cropGeometryOf(kind, id)
-    const c0 = cropItem(kind, id)?.crop
-    if (!geometry || !c0) return
-    const start = geometry.point(e.clientX, e.clientY)
-    withCropDrag((ev) => {
-      const point = geometry.point(ev.clientX, ev.clientY)
-      const dx = (point.x - start.x) / geometry.width
-      const dy = (point.y - start.y) / geometry.height
-      cropUpdate(kind, id, moveCrop(c0, dx, dy))
-    })
-  }
-
-  // Uniformly grow/shrink the kept region about its center (zoom out / in).
-  const cropZoom = (kind: CropKind, id: string, factor: number) => {
-    const cur = cropItem(kind, id)
-    if (!cur) return
-    cropUpdate(kind, id, zoomCrop(cur.crop, factor))
-  }
-
-  const cropRatio = (kind: CropKind, id: string, ratio: number) => {
-    const cur = cropItem(kind, id)
-    const geometry = cropGeometryOf(kind, id)
-    if (!cur || !geometry) return
-    setCropAspect(ratio)
-    cropUpdate(kind, id, cropForAspect(cur.crop, geometry.width / Math.max(1, geometry.height), ratio))
-  }
-
-  const cropEditor = (kind: CropKind, id: string, crop: { top: number; right: number; bottom: number; left: number }) => (
-    <div className="cropedit" onPointerDown={(e) => e.stopPropagation()} onWheel={(event) => {
-      event.preventDefault()
-      cropZoom(kind, id, event.deltaY > 0 ? 1.06 : 0.94)
-    }}>
-      <div
-        className="cropedit__rect"
-        style={{ left: `${crop.left * 100}%`, top: `${crop.top * 100}%`, right: `${crop.right * 100}%`, bottom: `${crop.bottom * 100}%` }}
-        onPointerDown={cropPan(kind, id)}
-      >
-        <span className="cropedit__grid"><i /><i /><i /><i /></span>
-        {(['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'] as const).map((handle) => (
-          <span key={handle} className={`crophandle crophandle--${handle}`} onPointerDown={cropHandle(kind, id, handle)} />
-        ))}
-      </div>
-      <div className="cropedit__toolbar" style={kind === 'overlay' ? { rotate: `${-(useEditor.getState().overlays.find((overlay) => overlay.id === id)?.angle || 0)}deg` } : undefined} onPointerDown={(e) => e.stopPropagation()}>
-        <div className="cropedit__ratios" aria-label="자르기 비율">
-          <button type="button" className={cropAspect == null ? 'is-active' : ''} onClick={() => setCropAspect(null)}>자유</button>
-          <button type="button" className={cropAspect === 16 / 9 ? 'is-active' : ''} onClick={() => cropRatio(kind, id, 16 / 9)}>16:9</button>
-          <button type="button" className={cropAspect === 1 ? 'is-active' : ''} onClick={() => cropRatio(kind, id, 1)}>1:1</button>
-          <button type="button" className={cropAspect === 9 / 16 ? 'is-active' : ''} onClick={() => cropRatio(kind, id, 9 / 16)}>9:16</button>
-        </div>
-        <label className="cropedit__scale">
-          <span>확대</span>
-          <input type="range" min="0" max="90" step="1"
-            value={Math.round((1 - Math.min(1 - crop.left - crop.right, 1 - crop.top - crop.bottom)) * 100)}
-            onChange={(event) => {
-              const size = cropSize(crop)
-              const currentKept = Math.max(0.04, Math.min(size.width, size.height))
-              const wantedKept = Math.max(0.1, 1 - Number(event.target.value) / 100)
-              cropZoom(kind, id, wantedKept / currentKept)
-            }} />
-        </label>
-        <div className="cropedit__actions">
-          <button type="button" onClick={() => { setCropAspect(null); cropUpdate(kind, id, { top: 0, right: 0, bottom: 0, left: 0 }) }}>초기화</button>
-          <button type="button" onClick={cancelCrop}>취소</button>
-          <button type="button" className="cropedit__done" onClick={finishCrop}>적용</button>
-        </div>
-      </div>
-    </div>
-  )
 
   const ensureAudioGraph = () => {
     if (!audioCtx.current) {
@@ -323,6 +264,7 @@ export default function Preview() {
   // ---- compositor sync: drive every media element from a time value ----
   const syncMain = (time: number, playing: boolean) => {
     const cur = useEditor.getState().clips
+    const wrap = mainWrapRef.current
     const v = mainVideoRef.current
     const img = mainImgRef.current
     const colorEl = mainColorRef.current
@@ -331,6 +273,7 @@ export default function Preview() {
     const mainTotal = totalDuration(cur)
     const res = cur.length && time < mainTotal - 1e-4 ? resolveTimelineTime(cur, time) : null
     if (!res) {
+      if (wrap) wrap.style.visibility = 'hidden'
       v.style.display = 'none'
       img.style.display = 'none'
       if (!v.paused) v.pause()
@@ -340,14 +283,8 @@ export default function Preview() {
     const clip = res.clip
     const localTimeline = Math.max(0, time - clipStartOffsets(cur)[res.index])
     const clipOpacity = fadeLevel(localTimeline, clipTimelineDuration(clip), clip.fadeIn, clip.fadeOut)
-    // While crop-editing this clip we show the FULL frame (so the crop rect can be
-    // dragged); otherwise the kept region is scaled up to fill with no margins.
-    const editingCrop = cropMode && selection?.type === 'clip' && selection.id === clip.id
-    const tf = editingCrop
-      ? cssTransform(clip.rotate, clip.flipH, clip.flipV)
-      : `${cssCropFill(clip.crop)} ${cssTransform(clip.rotate, clip.flipH, clip.flipV)}`.trim()
-    const cp = 'none'
     if (clip.kind === 'color') {
+      if (wrap) wrap.style.visibility = 'hidden'
       if (colorEl) {
         colorEl.style.display = ''
         colorEl.style.background = clip.bgColor || '#000000'
@@ -359,21 +296,20 @@ export default function Preview() {
       loadedMainId.current = null
       return
     }
+    if (wrap) {
+      wrap.style.visibility = 'visible'
+      wrap.style.opacity = String(clipOpacity)
+    }
     if (clip.kind === 'image') {
-      if (img.getAttribute('src') !== clip.src) img.src = clip.src
+      loadedMainId.current = clip.id
       img.style.display = ''
-      img.style.transform = tf
-      img.style.clipPath = cp
-      img.style.opacity = String(clipOpacity)
+      img.style.opacity = '1'
       v.style.display = 'none'
       if (!v.paused) v.pause()
-      loadedMainId.current = null
       return
     }
     v.style.display = ''
-    v.style.transform = tf
-    v.style.clipPath = cp
-    v.style.opacity = String(clipOpacity)
+    v.style.opacity = '1'
     img.style.display = 'none'
     v.playbackRate = clip.speed
     setGain(v, clip.volume * clipOpacity, clip.muted)
@@ -415,11 +351,10 @@ export default function Preview() {
         wrap.style.top = `${position.y * 100}%`
       }
       const media = overlayEls.current.get(o.id)
+      const clip = wrap?.querySelector<HTMLElement>('.preview__overlay-clip')
+      if (clip && wrap) clip.style.clipPath = o.shape ? 'none' : maskClipPath(resolveOverlayStyle(o).maskShape, wrap.offsetWidth, wrap.offsetHeight)
       if (media) {
-        const editingCrop = cropMode && selection?.type === 'overlay' && selection.id === o.id
-        media.style.transform = editingCrop
-          ? cssTransform(o.rotate, o.flipH, o.flipV)
-          : `${cssCropFill(o.crop)} ${cssTransform(o.rotate, o.flipH, o.flipV)}`.trim()
+        media.style.transform = `${cssCropFill(o.crop)} ${cssTransform(o.rotate, o.flipH, o.flipV)}`.trim()
         media.style.clipPath = 'none'
       }
       if (o.kind === 'image') continue
@@ -526,7 +461,7 @@ export default function Preview() {
     if (isPlaying) return
     syncAll(playhead, false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playhead, isPlaying, clips, overlays, audios, backgrounds, aspectRatio, cropMode, selection])
+  }, [playhead, isPlaying, clips, overlays, audios, backgrounds, aspectRatio, selection])
 
   // ---- playing: a master clock advances the playhead in real time ----
   useEffect(() => {
@@ -570,6 +505,102 @@ export default function Preview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying])
 
+  type ResizeHandle = 'tl' | 't' | 'tr' | 'r' | 'br' | 'b' | 'bl' | 'l'
+
+  const mainGeometry = (id: string) => {
+    const frame = frameRef.current
+    const clip = useEditor.getState().clips.find((item) => item.id === id)
+    if (!frame || !clip || clip.kind === 'color') return null
+    const rect = frame.getBoundingClientRect()
+    const video = mainVideoRef.current
+    const image = mainImgRef.current
+    const measured = mainNaturalSize?.id === id ? mainNaturalSize : null
+    const sourceWidth = measured?.width || (clip.kind === 'video' ? video?.videoWidth : image?.naturalWidth) || rect.width
+    const sourceHeight = measured?.height || (clip.kind === 'video' ? video?.videoHeight : image?.naturalHeight) || rect.height
+    return { frame, clip, rect, placement: resolveMainPlacement(clip, sourceWidth, sourceHeight, rect.width, rect.height) }
+  }
+
+  // ---- move a selected main clip while keeping its point under the cursor ----
+  const onMainDown = (e: React.PointerEvent, id: string) => {
+    e.stopPropagation()
+    if (e.button !== 0) return
+    select({ type: 'clip', id })
+    setPlaying(false)
+    const geometry = mainGeometry(id)
+    if (!geometry) return
+    const { rect, placement } = geometry
+    const grabDx = e.clientX - (rect.left + placement.x)
+    const grabDy = e.clientY - (rect.top + placement.y)
+    const width = placement.width / rect.width
+    const height = placement.height / rect.height
+    startPointerDrag((ev) => {
+      const rawX = (ev.clientX - grabDx - rect.left) / rect.width
+      const rawY = (ev.clientY - grabDy - rect.top) / rect.height
+      const snapX = snapLayerAxis(rawX, width, rect.width)
+      const snapY = snapLayerAxis(rawY, height, rect.height)
+      setGuides({ x: snapX.guide, y: snapY.guide })
+      updateClip(id, { canvasX: snapX.center, canvasY: snapY.center })
+    }, () => setGuides({ x: null, y: null }))
+  }
+
+  // ---- resize a main clip from every edge/corner, using its contained size as 100% ----
+  const onMainResizeDown = (e: React.PointerEvent, id: string, handle: ResizeHandle) => {
+    e.stopPropagation()
+    if (e.button !== 0) return
+    select({ type: 'clip', id })
+    setPlaying(false)
+    const geometry = mainGeometry(id)
+    if (!geometry) return
+    const { clip, rect, placement } = geometry
+    const centerX = rect.left + placement.x
+    const centerY = rect.top + placement.y
+    const width = placement.width
+    const height = placement.height
+    const aspect = width / Math.max(1, height)
+    const movesX = handle.includes('l') || handle.includes('r')
+    const movesY = handle.includes('t') || handle.includes('b')
+    const signX = handle.includes('r') ? 1 : -1
+    const signY = handle.includes('b') ? 1 : -1
+    const radians = ((clip.canvasAngle || 0) * Math.PI) / 180
+    const ux = Math.cos(radians), uy = Math.sin(radians)
+    const vx = -Math.sin(radians), vy = Math.cos(radians)
+    const anchorX = centerX - (movesX ? signX * ux * width / 2 : 0) - (movesY ? signY * vx * height / 2 : 0)
+    const anchorY = centerY - (movesX ? signX * uy * width / 2 : 0) - (movesY ? signY * vy * height / 2 : 0)
+    const minWidth = placement.baseWidth * 0.05
+    const maxWidth = placement.baseWidth * 3
+    const minHeight = placement.baseHeight * 0.05
+    const maxHeight = placement.baseHeight * 3
+    const aspectLocked = clip.canvasAspectLocked ?? true
+
+    startPointerDrag((ev) => {
+      const dx = ev.clientX - anchorX
+      const dy = ev.clientY - anchorY
+      const localWidth = movesX ? signX * (dx * ux + dy * uy) : width
+      const localHeight = movesY ? signY * (dx * vx + dy * vy) : height
+      let nextWidth = width
+      let nextHeight = height
+      if (movesX && movesY) {
+        const projectedWidth = (localWidth + localHeight / aspect) / (1 + 1 / (aspect * aspect))
+        nextWidth = Math.max(minWidth, Math.min(aspectLocked ? projectedWidth : localWidth, maxWidth))
+        nextHeight = aspectLocked ? nextWidth / aspect : Math.max(minHeight, Math.min(localHeight, maxHeight))
+      } else if (movesX) {
+        nextWidth = Math.max(minWidth, Math.min(localWidth, maxWidth))
+        if (aspectLocked) nextHeight = nextWidth / aspect
+      } else {
+        nextHeight = Math.max(minHeight, Math.min(localHeight, maxHeight))
+        if (aspectLocked) nextWidth = nextHeight * aspect
+      }
+      const nextCenterX = anchorX + (movesX ? signX * ux * nextWidth / 2 : 0) + (movesY ? signY * vx * nextHeight / 2 : 0)
+      const nextCenterY = anchorY + (movesX ? signX * uy * nextWidth / 2 : 0) + (movesY ? signY * vy * nextHeight / 2 : 0)
+      updateClip(id, {
+        canvasX: (nextCenterX - rect.left) / rect.width,
+        canvasY: (nextCenterY - rect.top) / rect.height,
+        canvasScale: nextWidth / placement.baseWidth,
+        canvasScaleY: aspectLocked ? undefined : nextHeight / placement.baseHeight,
+      })
+    })
+  }
+
   // ---- drag a PiP overlay around the frame (keeps the grab point fixed) ----
   const onOverlayDown = (e: React.PointerEvent, id: string) => {
     e.stopPropagation()
@@ -600,7 +631,6 @@ export default function Preview() {
   }
 
   // ---- resize a PiP overlay while its opposite edge/corner stays anchored ----
-  type ResizeHandle = 'tl' | 't' | 'tr' | 'r' | 'br' | 'b' | 'bl' | 'l'
   const onResizeDown = (e: React.PointerEvent, id: string, handle: ResizeHandle) => {
     e.stopPropagation()
     if (e.button !== 0) return
@@ -662,30 +692,45 @@ export default function Preview() {
     })
   }
 
-  // ---- drag the rotation handle to spin a layer freely (overlay or text) ----
-  const onRotateDown = (kind: 'overlay' | 'text', id: string) => (e: React.PointerEvent) => {
+  // ---- drag the rotation handle to spin a main clip, overlay, or text freely ----
+  const onRotateDown = (kind: 'clip' | 'overlay' | 'text', id: string) => (e: React.PointerEvent) => {
     e.stopPropagation()
     if (e.button !== 0) return
     select({ type: kind, id })
     setPlaying(false)
     const frame = frameRef.current
-    const item = kind === 'overlay'
-      ? useEditor.getState().overlays.find((o) => o.id === id)
-      : useEditor.getState().texts.find((t) => t.id === id)
-    if (!frame || !item) return
+    if (!frame) return
     const rect = frame.getBoundingClientRect()
-    const position = positionAt(item, useEditor.getState().playhead - item.start)
+    let position: { x: number; y: number }
+    let currentAngle: number
+    if (kind === 'clip') {
+      const item = useEditor.getState().clips.find((clip) => clip.id === id)
+      if (!item) return
+      position = { x: item.canvasX ?? 0.5, y: item.canvasY ?? 0.5 }
+      currentAngle = item.canvasAngle || 0
+    } else if (kind === 'overlay') {
+      const item = useEditor.getState().overlays.find((overlay) => overlay.id === id)
+      if (!item) return
+      position = positionAt(item, useEditor.getState().playhead - item.start)
+      currentAngle = item.angle || 0
+    } else {
+      const item = useEditor.getState().texts.find((text) => text.id === id)
+      if (!item) return
+      position = positionAt(item, useEditor.getState().playhead - item.start)
+      currentAngle = item.angle || 0
+    }
     const cx = rect.left + position.x * rect.width
     const cy = rect.top + position.y * rect.height
-    const base = (item.angle || 0) - (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI
-    setRotationReadout({ type: kind, id, angle: item.angle || 0 })
+    const base = currentAngle - (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI
+    setRotationReadout({ type: kind, id, angle: currentAngle })
     startPointerDrag((ev) => {
       let deg = base + (Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180) / Math.PI
       deg = Math.round(((deg + 540) % 360) - 180) // normalize to -180..180
       const snapped = Math.round(deg / 45) * 45
       if (!ev.shiftKey && Math.abs(deg - snapped) <= 3) deg = snapped
       setRotationReadout({ type: kind, id, angle: deg })
-      if (kind === 'overlay') updateOverlay(id, { angle: deg })
+      if (kind === 'clip') updateClip(id, { canvasAngle: deg })
+      else if (kind === 'overlay') updateOverlay(id, { angle: deg })
       else updateText(id, { angle: deg })
     }, () => setRotationReadout(null))
   }
@@ -736,15 +781,19 @@ export default function Preview() {
   }
 
   const visibleTexts = texts.filter((t) => !t.hidden && playhead >= t.start && playhead <= t.end)
+  const visibleCaptions = captionTracks.flatMap((track) => track.hidden ? [] : track.cues
+    .filter((cue) => playhead >= cue.start && playhead <= cue.end)
+    .map((cue) => ({ track, cue, style: captionStyleForCue(track, cue) })))
   const hasContent = clips.length > 0 || overlays.length > 0 || audios.length > 0 || backgrounds.length > 0
 
   return (
-    <div className="preview" ref={areaRef}>
+    <div className={`preview${presentation ? ' preview--presentation' : ''}`} ref={areaRef}
+      aria-label={presentation ? tr('완제품 미리보기 화면', 'Final preview canvas') : undefined}>
       <div
         className="preview__frame"
         ref={frameRef}
         style={{ width: box.w, height: box.h }}
-        onDoubleClick={() => { if (selClip) { if (cropMode) finishCrop(); else beginCrop('clip', selClip.id) } }}
+        onDoubleClick={() => { if (selClip && selClip.kind !== 'color') onOpenCrop() }}
       >
         {backgrounds.map((b) => (
           <div
@@ -758,28 +807,71 @@ export default function Preview() {
                 className="preview__bg-media" src={b.src} playsInline />
             )}
             {b.kind === 'image' && (
-              <img ref={(el) => { if (el) bgMediaEls.current.set(b.id, el); else bgMediaEls.current.delete(b.id) }}
-                className="preview__bg-media" src={b.src} alt="" />
+              <BackgroundRemovedImage source={b} ref={(el) => { if (el) bgMediaEls.current.set(b.id, el); else bgMediaEls.current.delete(b.id) }}
+                className="preview__bg-media" alt="" />
             )}
           </div>
         ))}
-        <video
-          ref={mainVideoRef}
-          className="preview__video"
-          playsInline
-          onClick={() => hasContent && setPlaying(!isPlaying)}
-        />
-        <img ref={mainImgRef} className="preview__video" alt="" style={{ display: 'none' }} />
-        <div ref={mainColorRef} className="preview__video" style={{ display: 'none' }} />
+        <div
+          ref={mainWrapRef}
+          className="preview__main"
+          data-main-clip={activeMain?.id}
+          style={mainPlacement ? {
+            left: mainPlacement.x,
+            top: mainPlacement.y,
+            width: mainPlacement.width,
+            height: mainPlacement.height,
+            transform: `translate(-50%, -50%) rotate(${mainPlacement.angle}deg)`,
+          } : undefined}
+          onPointerDown={(event) => { if (activeMain && activeMain.kind !== 'color') onMainDown(event, activeMain.id) }}
+          onDoubleClick={(event) => { event.stopPropagation(); if (activeMain && activeMain.kind !== 'color') onOpenCrop() }}
+        >
+          <div className="preview__main-clip">
+            <div className="preview__main-orient" style={mainPlacement && activeMain ? {
+              width: mainQuarterTurn ? mainPlacement.height : mainPlacement.width,
+              height: mainQuarterTurn ? mainPlacement.width : mainPlacement.height,
+              transform: `translate(-50%, -50%) ${cssTransform(activeMain.rotate, activeMain.flipH, activeMain.flipV)}`,
+            } : undefined}>
+              <video
+                ref={mainVideoRef}
+                className="preview__main-media"
+                style={{
+                  left: `${-((mainCrop?.left ?? 0) / mainKeptWidth) * 100}%`,
+                  top: `${-((mainCrop?.top ?? 0) / mainKeptHeight) * 100}%`,
+                  width: `${100 / mainKeptWidth}%`,
+                  height: `${100 / mainKeptHeight}%`,
+                }}
+                playsInline
+                onLoadedMetadata={(event) => {
+                  if (activeMain?.kind === 'video') setMainNaturalSize({ id: activeMain.id, width: event.currentTarget.videoWidth, height: event.currentTarget.videoHeight })
+                }}
+              />
+              <BackgroundRemovedImage source={activeMain?.kind === 'image' ? activeMain : null} ref={mainImgRef} className="preview__main-media" alt="" style={{
+                display: 'none',
+                left: `${-((mainCrop?.left ?? 0) / mainKeptWidth) * 100}%`,
+                top: `${-((mainCrop?.top ?? 0) / mainKeptHeight) * 100}%`,
+                width: `${100 / mainKeptWidth}%`,
+                height: `${100 / mainKeptHeight}%`,
+              }} onLoad={(event) => {
+                if (activeMain?.kind === 'image') setMainNaturalSize({ id: activeMain.id, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
+              }} />
+            </div>
+          </div>
+        </div>
+        <div ref={mainColorRef} className="preview__main-color" style={{ display: 'none' }} />
 
         {overlays.map((o) => {
           const sel = selection?.type === 'overlay' && selection.id === o.id
           const position = positionAt(o, playhead - o.start)
+          const visualStyle = resolveOverlayStyle(o)
+          const shadow = visualStyle.shadowEnabled
+            ? `drop-shadow(${visualStyle.shadowX * box.h}px ${visualStyle.shadowY * box.h}px ${visualStyle.shadowBlur * box.h}px ${hexToRgba(visualStyle.shadowColor, visualStyle.shadowOpacity)})`
+            : 'none'
           return (
             <div
               key={o.id}
               data-layer-name={o.name}
-              aria-label={`오버레이 ${o.name}`}
+              aria-label={tr(`오버레이 ${o.name}`, `Overlay ${o.name}`)}
               ref={(el) => { if (el) wrapEls.current.set(o.id, el); else wrapEls.current.delete(o.id) }}
               className="preview__overlay"
               style={{
@@ -791,10 +883,12 @@ export default function Preview() {
                 zIndex: visualPreviewZ(visualOrder, { type: 'overlay', id: o.id }),
               }}
               onPointerDown={(e) => onOverlayDown(e, o.id)}
-              onDoubleClick={(e) => { e.stopPropagation(); if (sel) { if (cropMode) finishCrop(); else beginCrop('overlay', o.id) } }}
+              onDoubleClick={(e) => { e.stopPropagation(); if (sel && !o.shape) onOpenCrop() }}
             >
-              <div className="preview__overlay-clip">
-                {o.kind === 'video' ? (
+              <div className="preview__overlay-clip" style={{ clipPath: o.shape ? 'none' : maskClipPath(visualStyle.maskShape), filter: shadow }}>
+                {o.shape ? (
+                  <ShapeOverlayGraphic overlay={o} frameHeight={box.h} />
+                ) : o.kind === 'video' ? (
                   <video
                     ref={(el) => { if (el) overlayEls.current.set(o.id, el); else overlayEls.current.delete(o.id) }}
                     className={`preview__overlay-media${o.scaleY != null && !(o.aspectLocked ?? true) ? ' preview__overlay-media--free' : ''}`}
@@ -802,14 +896,15 @@ export default function Preview() {
                     playsInline
                   />
                 ) : (
-                  <img
+                  <BackgroundRemovedImage
+                    source={o}
                     ref={(el) => { if (el) overlayEls.current.set(o.id, el); else overlayEls.current.delete(o.id) }}
                     className={`preview__overlay-media${o.scaleY != null && !(o.aspectLocked ?? true) ? ' preview__overlay-media--free' : ''}`}
-                    src={o.src}
                     alt=""
                   />
                 )}
               </div>
+              {!o.shape && <OverlayDecoration overlay={o} frameHeight={box.h} />}
             </div>
           )
         })}
@@ -826,22 +921,42 @@ export default function Preview() {
               zIndex: PREVIEW_Z.editor,
             }}
             onPointerDown={(event) => onOverlayDown(event, selOverlay.id)}
-            onDoubleClick={(event) => { event.stopPropagation(); if (cropMode) finishCrop(); else beginCrop('overlay', selOverlay.id) }}
+            onDoubleClick={(event) => { event.stopPropagation(); if (!selOverlay.shape) onOpenCrop() }}
           >
-            {!cropMode && !selOverlay.locked && (['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'] as const).map((handle) => (
+            {!selOverlay.locked && (['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'] as const).map((handle) => (
               <span key={handle} className={`preview__resize preview__resize--${handle}`} onPointerDown={(event) => onResizeDown(event, selOverlay.id, handle)} />
             ))}
-            {!cropMode && !selOverlay.locked && (
-              <span className="preview__rotate" title="끌어서 회전" onPointerDown={onRotateDown('overlay', selOverlay.id)}><Icon name="rotate" /></span>
+            {!selOverlay.locked && (
+              <span className="preview__rotate" title={tr('끌어서 회전', 'Drag to rotate')} onPointerDown={onRotateDown('overlay', selOverlay.id)}><Icon name="rotate" /></span>
             )}
-            {cropMode && !selOverlay.locked && cropEditor('overlay', selOverlay.id, selOverlay.crop)}
+          </div>
+        )}
+
+        {selClip && activeMain?.id === selClip.id && mainPlacement && (
+          <div
+            className="preview__overlay-controls preview__main-controls"
+            style={{
+              left: mainPlacement.x,
+              top: mainPlacement.y,
+              width: mainPlacement.width,
+              height: mainPlacement.height,
+              transform: `translate(-50%, -50%) rotate(${mainPlacement.angle}deg)`,
+              zIndex: PREVIEW_Z.editor,
+            }}
+            onPointerDown={(event) => onMainDown(event, selClip.id)}
+            onDoubleClick={(event) => { event.stopPropagation(); onOpenCrop() }}
+          >
+            {(['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'] as const).map((handle) => (
+              <span key={handle} className={`preview__resize preview__resize--${handle}`} onPointerDown={(event) => onMainResizeDown(event, selClip.id, handle)} />
+            ))}
+            <span className="preview__rotate" title={tr('끌어서 회전', 'Drag to rotate')} onPointerDown={onRotateDown('clip', selClip.id)}><Icon name="rotate" /></span>
           </div>
         )}
 
         {!hasContent && (
           <div className="preview__empty">
             <span><Icon name="video" /></span>
-            <p>동영상·사진을 추가해 편집을 시작하세요</p>
+            <p>{tr('동영상·사진을 추가해 편집을 시작하세요', 'Add a video or photo to start editing')}</p>
           </div>
         )}
 
@@ -874,28 +989,52 @@ export default function Preview() {
             >
               {t.text}
               {sel && !t.locked && <span className="preview__resize preview__resize--text" onPointerDown={(e) => onTextResize(e, t.id)} />}
-              {sel && !t.locked && <span className="preview__rotate preview__rotate--text" title="끌어서 회전" onPointerDown={onRotateDown('text', t.id)}><Icon name="rotate" /></span>}
+              {sel && !t.locked && <span className="preview__rotate preview__rotate--text" title={tr('끌어서 회전', 'Drag to rotate')} onPointerDown={onRotateDown('text', t.id)}><Icon name="rotate" /></span>}
             </div>
           )
         })}
+
+        {visibleCaptions.map(({ track, cue, style }, index) => {
+          const fontPx = style.size * box.h
+          const selected = selection?.type === 'caption' && selection.id === cue.id
+          return (
+            <div key={`${track.id}:${cue.id}`} className={`preview__caption preview__caption--${style.align}${selected ? ' preview__caption--selected' : ''}`}
+              style={{
+                left: `${style.x * 100}%`,
+                top: `${style.y * 100}%`,
+                width: `${style.maxWidth * 100}%`,
+                fontFamily: style.font,
+                fontSize: `${fontPx}px`,
+                lineHeight: style.lineHeight,
+                color: hexToRgba(style.color, style.colorAlpha),
+                textAlign: style.align,
+                transform: 'translate(-50%, -50%)',
+                zIndex: PREVIEW_Z.caption + index,
+              }}
+              onPointerDown={(event) => { event.stopPropagation(); if (!presentation) select({ type: 'caption', id: cue.id }) }}>
+              <span style={{
+                background: style.box ? hexToRgba(style.boxColor, style.boxAlpha) : 'transparent',
+                padding: style.box ? `${style.boxPadding}em ${style.boxPadding * 1.7}em` : 0,
+                borderRadius: style.box ? `${style.boxRadius}em` : 0,
+                WebkitTextStrokeWidth: style.strokeWidth > 0 ? `${style.strokeWidth * fontPx}px` : undefined,
+                WebkitTextStrokeColor: style.strokeWidth > 0 ? style.strokeColor : undefined,
+                paintOrder: 'stroke fill',
+                textShadow: style.shadow ? `0 ${style.shadowDist * fontPx}px ${style.shadowBlur * fontPx}px ${style.shadowColor}` : 'none',
+                WebkitLineClamp: style.lineLimit,
+              }}>{cue.text}</span>
+            </div>
+          )
+        })}
+
+        {selection?.type === 'caption' && <div className="preview__caption-safe-area" aria-hidden="true" />}
 
         {guides.x != null && <div className="preview-guide preview-guide--x" style={{ left: `${guides.x * 100}%` }} />}
         {guides.y != null && <div className="preview-guide preview-guide--y" style={{ top: `${guides.y * 100}%` }} />}
         {rotationReadout && <div className="preview__rotation-readout">{rotationReadout.angle}°</div>}
 
-        {cropMode && selClip && (
-          <>
-            {cropEditor('clip', selClip.id, selClip.crop)}
-            <div className="cropedit__hint">테두리로 영역 조절 · 안쪽 드래그로 이동 · 스크롤로 확대</div>
-          </>
-        )}
-        {cropMode && selOverlayId && (
-          <div className="cropedit__hint">테두리로 영역 조절 · 안쪽 드래그로 이동 · 스크롤로 확대</div>
-        )}
-
-        {!cropMode && (selClip || selOverlay) && !(selOverlay?.locked) && (
+        {((selClip && selClip.kind !== 'color') || (selOverlay && !selOverlay.shape)) && !(selOverlay?.locked) && (
           <div className="preview__selection-tools" onPointerDown={(event) => event.stopPropagation()}>
-            <button type="button" onClick={() => selClip ? beginCrop('clip', selClip.id) : selOverlay && beginCrop('overlay', selOverlay.id)}><Icon name="crop" />자르기</button>
+            <button type="button" onClick={onOpenCrop}><Icon name="crop" />{tr('자르기', 'Crop')}</button>
           </div>
         )}
       </div>

@@ -7,6 +7,20 @@ export type VisualKind = 'video' | 'image' | 'color'
 
 export type Rotation = 0 | 90 | 180 | 270
 
+export type OverlayBorderStyle = 'solid' | 'dashed' | 'dotted' | 'double'
+
+export type OverlayMaskShape = 'none' | 'rounded' | 'circle' | 'ellipse' | 'heart' | 'star' | 'hexagon'
+
+export type ShapeKind = 'rectangle' | 'circle' | 'triangle' | 'diamond' | 'star' | 'heart' | 'hexagon' | 'arrow' | 'line'
+
+export interface ShapeStyle {
+  kind: ShapeKind
+  fillColor: string
+  fillOpacity: number
+  /** Corner radius as a fraction of the shorter side; only used by rectangles. */
+  cornerRadius: number
+}
+
 /** Crop insets as a fraction (0..0.45) of each side. */
 export interface Crop {
   top: number
@@ -43,6 +57,10 @@ export interface Transform {
   flipH: boolean
   flipV: boolean
   crop: Crop
+  /** Non-destructive automatic transparency for still images. */
+  backgroundRemovalEnabled?: boolean
+  /** Similar-colour range removed from edge-connected background pixels (0..100). */
+  backgroundRemovalSensitivity?: number
 }
 
 /** A reusable source kept in the project media bin independently of timeline usage. */
@@ -58,7 +76,7 @@ export interface MediaAsset {
   hasAudio: boolean
 }
 
-/** A clip on the MAIN track: video or image, packed sequentially, full-frame. */
+/** A clip on the MAIN track: video or image, packed sequentially on the canvas. */
 export interface Clip {
   id: string
   /** Source in the project media bin, when available. */
@@ -88,6 +106,17 @@ export interface Clip {
   flipH: boolean
   flipV: boolean
   crop: Crop
+  backgroundRemovalEnabled?: boolean
+  backgroundRemovalSensitivity?: number
+  /** Canvas position; omitted values keep older projects centered and automatically contained. */
+  canvasX?: number
+  canvasY?: number
+  /** Scale relative to the source's automatic contained size. */
+  canvasScale?: number
+  canvasScaleY?: number
+  canvasAspectLocked?: boolean
+  /** Free rotation in degrees, applied to the placed main clip. */
+  canvasAngle?: number
   /** Number of times the trimmed segment repeats back-to-back (>=1). */
   repeat: number
   /** Exact occupied timeline length. When set, the final repeat is cut short. */
@@ -134,6 +163,8 @@ export interface Overlay {
   flipH: boolean
   flipV: boolean
   crop: Crop
+  backgroundRemovalEnabled?: boolean
+  backgroundRemovalSensitivity?: number
   repeat: number
   /** Exact occupied timeline length. When set, the final repeat is cut short. */
   timelineDuration?: number
@@ -143,6 +174,20 @@ export interface Overlay {
   locked?: boolean
   /** Hidden layers stay in the project/timeline but are skipped in preview/export. */
   hidden?: boolean
+  /** Border width as a fraction of the output frame height. */
+  borderWidth?: number
+  borderColor?: string
+  borderStyle?: OverlayBorderStyle
+  shadowEnabled?: boolean
+  shadowColor?: string
+  shadowOpacity?: number
+  /** Shadow blur and offsets as fractions of the output frame height. */
+  shadowBlur?: number
+  shadowX?: number
+  shadowY?: number
+  maskShape?: OverlayMaskShape
+  /** Built-in vector shape. Its placeholder File only keeps project media validation portable. */
+  shape?: ShapeStyle
   fadeIn?: number
   fadeOut?: number
   positionKeyframes?: PositionKeyframe[]
@@ -225,13 +270,90 @@ export interface TextOverlay {
 
 export type TextAlign = TextOverlay['align']
 
-export const FONT_OPTIONS: { label: string; value: string }[] = [
-  { label: '기본', value: "'Noto Sans KR', system-ui, sans-serif" },
-  { label: '명조', value: "'Noto Serif KR', Georgia, serif" },
-  { label: '굵게', value: "'Black Han Sans', sans-serif" },
-  { label: '둥근', value: "'Jua', sans-serif" },
-  { label: '손글씨', value: "'Nanum Pen Script', cursive" },
-  { label: '고정폭', value: "'Courier New', monospace" },
+/** Shared visual style for a dedicated subtitle/caption track. */
+export interface CaptionStyle {
+  /** CSS font-family stack. */
+  font: string
+  /** Font size as a fraction of the output frame height. */
+  size: number
+  color: string
+  colorAlpha: number
+  box: boolean
+  boxColor: string
+  boxAlpha: number
+  /** Padding and corner radius as fractions of the font size. */
+  boxPadding: number
+  boxRadius: number
+  /** Outline width as a fraction of the font size. */
+  strokeWidth: number
+  strokeColor: string
+  shadow: boolean
+  shadowColor: string
+  shadowBlur: number
+  shadowDist: number
+  align: 'left' | 'center' | 'right'
+  /** Caption block centre position and maximum width, relative to the frame. */
+  x: number
+  y: number
+  maxWidth: number
+  /** Multiples of the font size. */
+  lineHeight: number
+  lineLimit: 1 | 2 | 3
+}
+
+export interface CaptionSourceBinding {
+  type: 'clip' | 'audio'
+  id: string
+  /** Time inside the source timeline item represented by this cue. */
+  offsetStart: number
+  offsetEnd: number
+}
+
+/** One timed cue. Per-cue style values override the owning track style. */
+export interface CaptionCue {
+  id: string
+  text: string
+  start: number
+  end: number
+  origin: 'manual' | 'imported' | 'generated'
+  style?: Partial<CaptionStyle>
+  source?: CaptionSourceBinding
+}
+
+/** Dedicated captions stay separate from freely positioned title/text layers. */
+export interface CaptionTrack {
+  id: string
+  name: string
+  /** BCP-47 language tag, or `und` when it is not specified. */
+  language: string
+  hidden: boolean
+  locked: boolean
+  style: CaptionStyle
+  cues: CaptionCue[]
+}
+
+export interface FontOption { label: string; labelEn: string; family: string; value: string; note: string; noteEn: string }
+
+export const FONT_OPTIONS: FontOption[] = [
+  { label: '기본 고딕', labelEn: 'Default Sans', family: 'Noto Sans KR', value: "'Noto Sans KR', system-ui, sans-serif", note: '단정한 본문·자막', noteEn: 'Clean body text and captions' },
+  { label: '기본 명조', labelEn: 'Default Serif', family: 'Noto Serif KR', value: "'Noto Serif KR', Georgia, serif", note: '차분한 본문·제목', noteEn: 'Calm body text and titles' },
+  { label: '검은고딕', labelEn: 'Black Han Sans', family: 'Black Han Sans', value: "'Black Han Sans', sans-serif", note: '굵고 강한 제목', noteEn: 'Bold, strong titles' },
+  { label: '주아', labelEn: 'Jua', family: 'Jua', value: "'Jua', sans-serif", note: '둥글고 친근한 제목', noteEn: 'Rounded, friendly titles' },
+  { label: '도현', labelEn: 'Do Hyeon', family: 'Do Hyeon', value: "'Do Hyeon', sans-serif", note: '또렷한 영상 자막', noteEn: 'Clear video captions' },
+  { label: '고운돋움', labelEn: 'Gowun Dodum', family: 'Gowun Dodum', value: "'Gowun Dodum', sans-serif", note: '부드러운 고딕', noteEn: 'Soft sans-serif' },
+  { label: '고운바탕', labelEn: 'Gowun Batang', family: 'Gowun Batang', value: "'Gowun Batang', serif", note: '부드러운 바탕체', noteEn: 'Soft serif' },
+  { label: '송명', labelEn: 'Song Myung', family: 'Song Myung', value: "'Song Myung', serif", note: '힘 있는 명조 제목', noteEn: 'Strong serif titles' },
+  { label: '해바라기', labelEn: 'Sunflower', family: 'Sunflower', value: "'Sunflower', sans-serif", note: '단정한 둥근 고딕', noteEn: 'Neat rounded sans-serif' },
+  { label: '스타일리시', labelEn: 'Stylish', family: 'Stylish', value: "'Stylish', sans-serif", note: '개성 있는 제목', noteEn: 'Distinctive titles' },
+  { label: '구기', labelEn: 'Gugi', family: 'Gugi', value: "'Gugi', sans-serif", note: '기하학적인 장식체', noteEn: 'Geometric display type' },
+  { label: '귀여운 글씨', labelEn: 'Cute Font', family: 'Cute Font', value: "'Cute Font', cursive", note: '가볍고 귀여운 손글씨', noteEn: 'Light, cute handwriting' },
+  { label: '나눔펜', labelEn: 'Nanum Pen', family: 'Nanum Pen Script', value: "'Nanum Pen Script', cursive", note: '자연스러운 펜글씨', noteEn: 'Natural pen handwriting' },
+  { label: '개구', labelEn: 'Gaegu', family: 'Gaegu', value: "'Gaegu', cursive", note: '장난스러운 손글씨', noteEn: 'Playful handwriting' },
+  { label: '감자꽃', labelEn: 'Gamja Flower', family: 'Gamja Flower', value: "'Gamja Flower', cursive", note: '또박또박한 손글씨', noteEn: 'Careful handwriting' },
+  { label: '하이멜로디', labelEn: 'Hi Melody', family: 'Hi Melody', value: "'Hi Melody', cursive", note: '가느다란 손글씨', noteEn: 'Light handwriting' },
+  { label: '푸어스토리', labelEn: 'Poor Story', family: 'Poor Story', value: "'Poor Story', cursive", note: '편안한 이야기체', noteEn: 'Relaxed storybook style' },
+  { label: '싱글데이', labelEn: 'Single Day', family: 'Single Day', value: "'Single Day', cursive", note: '가볍고 경쾌한 손글씨', noteEn: 'Light, lively handwriting' },
+  { label: '독도', labelEn: 'Dokdo', family: 'Dokdo', value: "'Dokdo', cursive", note: '거친 붓글씨 제목', noteEn: 'Rough brush titles' },
 ]
 
 export type Selection =
@@ -239,6 +361,7 @@ export type Selection =
   | { type: 'overlay'; id: string }
   | { type: 'audio'; id: string }
   | { type: 'text'; id: string }
+  | { type: 'caption'; id: string }
   | { type: 'background'; id: string }
   | null
 

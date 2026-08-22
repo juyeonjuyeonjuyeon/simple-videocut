@@ -17,7 +17,7 @@ const clip = (repeat = 1): Clip => ({
 describe('timeline splitting', () => {
   beforeEach(() => {
     useEditor.setState({
-      mediaLibrary: [], clips: [clip(3)], overlays: [], audios: [], backgrounds: [], texts: [], markers: [], groups: [], selectedItems: [],
+      mediaLibrary: [], clips: [clip(3)], overlays: [], audios: [], backgrounds: [], texts: [], captionTracks: [], markers: [], groups: [], selectedItems: [],
       playhead: 2.5, selection: { type: 'clip', id: 'clip-1' },
       isPlaying: false,
     })
@@ -145,6 +145,143 @@ describe('timeline splitting', () => {
     ])
   })
 
+  it('preserves a styled text layer when a saved project is restored', () => {
+    const text: TextOverlay = {
+      id: 'text-restored', text: '기존 일반 텍스트', start: 0.25, end: 1.75,
+      x: 0.35, y: 0.72, size: 0.09, color: '#fefefe', colorAlpha: 0.85,
+      box: true, boxColor: '#123456', boxAlpha: 0.4, font: 'sans-serif',
+      strokeWidth: 0.08, strokeColor: '#010101', shadow: true,
+      shadowColor: '#222222', shadowBlur: 0.15, shadowDist: 0.05,
+      align: 'right', angle: 12, opacity: 0.9, locked: true, hidden: false,
+      fadeIn: 0.2, fadeOut: 0.3, positionKeyframes: [],
+    }
+    const project: ProjectState = {
+      clips: [clip(1)], overlays: [], audios: [], backgrounds: [], texts: [text],
+      visualOrder: [{ type: 'text', id: text.id }],
+      aspectRatio: '16:9', exportSettings: { height: 720, format: 'mp4', filename: 'text-restore' },
+    }
+
+    useEditor.getState().replaceProject(project)
+
+    expect(useEditor.getState().texts).toEqual([text])
+    expect(useEditor.getState().visualOrder).toEqual([{ type: 'text', id: text.id }])
+    expect(useEditor.getState().selection).toBeNull()
+  })
+
+  it('edits dedicated caption cues without turning them into regular text layers', () => {
+    const trackId = useEditor.getState().addCaptionTrack('한국어 자막')
+    const cueId = useEditor.getState().addCaptionCue(trackId, 0.5)
+    expect(cueId).not.toBeNull()
+
+    useEditor.getState().updateCaptionCue(trackId, cueId!, {
+      text: '첫 번째 자막', start: 0.75, end: 2.25, style: { color: '#ffccdd' },
+    })
+
+    const state = useEditor.getState()
+    expect(state.texts).toHaveLength(0)
+    expect(state.captionTracks[0]).toMatchObject({ name: '한국어 자막', language: 'und', hidden: false, locked: false })
+    expect(state.captionTracks[0].cues[0]).toMatchObject({
+      id: cueId, text: '첫 번째 자막', start: 0.75, end: 2.25, origin: 'manual', style: { color: '#ffccdd' },
+    })
+  })
+
+  it('moves, duplicates, and deletes caption cues through shared timeline actions', () => {
+    const trackId = useEditor.getState().addCaptionTrack('편집 자막')
+    const cueId = useEditor.getState().addCaptionCue(trackId, 0.5)!
+    useEditor.getState().select({ type: 'caption', id: cueId })
+
+    useEditor.getState().moveTimelineItems([{ type: 'caption', id: cueId }], 0.75)
+    expect(useEditor.getState().captionTracks[0].cues[0].start).toBeCloseTo(1.25)
+
+    useEditor.getState().duplicateSelected()
+    const duplicated = useEditor.getState().selection
+    expect(duplicated?.type).toBe('caption')
+    expect(useEditor.getState().captionTracks[0].cues).toHaveLength(2)
+
+    useEditor.getState().deleteSelected()
+    expect(useEditor.getState().captionTracks[0].cues).toHaveLength(1)
+    expect(useEditor.getState().captionTracks[0].cues[0].id).toBe(cueId)
+  })
+
+  it('imports SRT cues in append or replace mode as one track edit', () => {
+    const trackId = useEditor.getState().addCaptionTrack('SRT')
+    const manualId = useEditor.getState().addCaptionCue(trackId, 0)!
+    useEditor.getState().select({ type: 'caption', id: manualId })
+
+    expect(useEditor.getState().importCaptionCues(trackId, [{ text: '추가', start: 1, end: 2 }])).toBe(1)
+    expect(useEditor.getState().captionTracks[0].cues.map((cue) => cue.origin)).toEqual(['manual', 'imported'])
+
+    expect(useEditor.getState().importCaptionCues(trackId, [{ text: '교체', start: 3, end: 4 }], true)).toBe(1)
+    expect(useEditor.getState().captionTracks[0].cues).toMatchObject([{ text: '교체', start: 3, end: 4, origin: 'imported' }])
+    expect(useEditor.getState().selection).toBeNull()
+  })
+
+  it('keeps automatically bound captions aligned through main-track edits', () => {
+    const first = clip(1)
+    const second = { ...clip(1), id: 'clip-2', name: 'second.mp4' }
+    useEditor.setState({ clips: [first, second], audios: [], captionTracks: [] })
+    const trackId = useEditor.getState().addCaptionTrack('연결 자막')
+    const cueId = useEditor.getState().addCaptionCue(trackId, 2.25)!
+    useEditor.getState().updateCaptionCue(trackId, cueId, { end: 3 })
+
+    expect(useEditor.getState().captionTracks[0].cues[0]).toMatchObject({
+      start: 2.25, end: 3, source: { type: 'clip', id: 'clip-2', offsetStart: 0.25, offsetEnd: 1 },
+    })
+
+    useEditor.getState().updateClip('clip-1', { trimEnd: 1 })
+    expect(useEditor.getState().captionTracks[0].cues[0]).toMatchObject({ start: 1.25, end: 2 })
+
+    useEditor.getState().reorderClip('clip-2', 0)
+    expect(useEditor.getState().captionTracks[0].cues[0]).toMatchObject({ start: 0.25, end: 1 })
+
+    useEditor.getState().removeClip('clip-2')
+    expect(useEditor.getState().captionTracks[0].cues[0]).toMatchObject({ start: 0.25, end: 1 })
+    expect(useEditor.getState().captionTracks[0].cues[0].source).toBeUndefined()
+  })
+
+  it('can bind a caption to an audio source and follows its timeline move', () => {
+    const audio = {
+      id: 'audio-1', name: 'voice.m4a', src: '', file: new File([], 'voice.m4a'), sourceSize: 0,
+      duration: 4, trimStart: 0, trimEnd: 4, volume: 1, muted: false, color: '#000', start: 0, repeat: 1,
+    }
+    useEditor.setState({ clips: [clip(1)], audios: [audio], captionTracks: [] })
+    const trackId = useEditor.getState().addCaptionTrack('음성 자막')
+    const cueId = useEditor.getState().addCaptionCue(trackId, 0.5)!
+
+    expect(useEditor.getState().setCaptionCueSource(trackId, cueId, { type: 'audio', id: audio.id })).toBe(true)
+    useEditor.getState().updateAudio(audio.id, { start: 2 })
+
+    expect(useEditor.getState().captionTracks[0].cues[0]).toMatchObject({
+      start: 2.5, end: 4, source: { type: 'audio', id: audio.id, offsetStart: 0.5, offsetEnd: 2 },
+    })
+  })
+
+  it('rebinds a contained caption to the correct main-track piece after a split', () => {
+    useEditor.setState({ clips: [clip(1)], audios: [], captionTracks: [], playhead: 1 })
+    const trackId = useEditor.getState().addCaptionTrack('분할 자막')
+    const cueId = useEditor.getState().addCaptionCue(trackId, 0.2)!
+    useEditor.getState().updateCaptionCue(trackId, cueId, { end: 0.8 })
+
+    useEditor.getState().splitAtPlayhead()
+
+    const state = useEditor.getState()
+    expect(state.clips).toHaveLength(2)
+    expect(state.captionTracks[0].cues[0]).toMatchObject({
+      start: 0.2, end: 0.8, source: { type: 'clip', id: state.clips[0].id, offsetStart: 0.2, offsetEnd: 0.8 },
+    })
+  })
+
+  it('migrates older projects to an empty dedicated caption collection', () => {
+    const legacyProject: ProjectState = {
+      clips: [clip(1)], overlays: [], audios: [], backgrounds: [], texts: [],
+      aspectRatio: '16:9', exportSettings: { height: 720, format: 'mp4', filename: 'legacy' },
+    }
+
+    useEditor.getState().replaceProject(legacyProject)
+
+    expect(useEditor.getState().captionTracks).toEqual([])
+  })
+
   it('reuses one media-bin source on multiple tracks without deleting timeline instances', () => {
     const file = new File(['image'], 'still.png', { type: 'image/png' })
     const asset: MediaAsset = {
@@ -162,5 +299,28 @@ describe('timeline splitting', () => {
     expect(useEditor.getState().mediaLibrary).toHaveLength(0)
     expect(useEditor.getState().clips).toHaveLength(1)
     expect(useEditor.getState().overlays).toHaveLength(1)
+  })
+
+  it('adds an editable shape at the playhead without polluting the media bin', () => {
+    useEditor.setState({
+      mediaLibrary: [], clips: [clip(1)], overlays: [], visualOrder: [],
+      playhead: 1.25, selection: null, selectedItems: [],
+    })
+
+    useEditor.getState().addShape('star')
+
+    const state = useEditor.getState()
+    expect(state.overlays).toHaveLength(1)
+    expect(state.overlays[0]).toMatchObject({
+      kind: 'image', start: 1.25, trimStart: 0, trimEnd: 5,
+      shape: { kind: 'star', fillColor: '#e27f92', fillOpacity: 1 },
+    })
+    expect(state.mediaLibrary).toHaveLength(0)
+    expect(state.selection).toEqual({ type: 'overlay', id: state.overlays[0].id })
+    expect(state.visualOrder).toContainEqual({ type: 'overlay', id: state.overlays[0].id })
+
+    useEditor.getState().moveOverlayToMain(state.overlays[0].id)
+    expect(useEditor.getState().overlays).toHaveLength(1)
+    expect(useEditor.getState().clips).toHaveLength(1)
   })
 })

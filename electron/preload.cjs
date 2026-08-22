@@ -1,8 +1,10 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 contextBridge.exposeInMainWorld('simplecutDesktop', {
+  setLanguage: (language) => ipcRenderer.send('app:language', language),
   available: () => ipcRenderer.invoke('native-ffmpeg:available'),
   videoEncoder: () => ipcRenderer.invoke('native-ffmpeg:video-encoder'),
+  listFonts: () => ipcRenderer.invoke('native-fonts:list'),
   registerMedia: (file) => {
     const sourcePath = webUtils.getPathForFile(file)
     if (!sourcePath) throw new Error('선택한 파일의 로컬 경로를 확인할 수 없습니다.')

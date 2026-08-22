@@ -1,11 +1,16 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
-import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, Crop, Rotation, VisualLayerRef } from '../types'
+import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, Crop, Rotation, VisualLayerRef, CaptionCue, CaptionTrack } from '../types'
 import { aspectToWH, projectDuration, overlayLength, audioLength, clipTimelineDuration, clipBaseLength, repeatCountFor } from '../utils/time'
 import { hexToRgba } from '../utils/color'
 import { hasNativeFFmpeg, NativeFFmpeg } from './native'
 import { positionExpression } from '../utils/motion'
 import { normalizeVisualOrder } from '../utils/layers'
+import { overlayOutputSize, renderOverlayEffectAssets } from '../utils/overlay-style'
+import { renderShapePng } from '../utils/shape'
+import { resolveMainPlacement } from '../utils/main-placement'
+import { cachedBackgroundRemovedImage, DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-removal'
+import { captionStyleForCue, wrapCaptionLines } from '../utils/captions'
 
 // Keep the encoding engine on the same origin. Exports must not depend on a
 // third-party CDN being reachable after the editor itself has loaded.
@@ -258,9 +263,68 @@ async function renderTextPng(t: TextOverlay, W: number, H: number): Promise<Uint
   return new Uint8Array(await blob.arrayBuffer())
 }
 
+/** Render a caption cue using the same sizing, wrapping, alignment and decoration as the preview. */
+async function renderCaptionPng(track: CaptionTrack, cue: CaptionCue, W: number, H: number): Promise<Uint8Array> {
+  const style = captionStyleForCue(track, cue)
+  const canvas = document.createElement('canvas')
+  canvas.width = W
+  canvas.height = H
+  const ctx = canvas.getContext('2d')!
+  const fontPx = Math.max(8, Math.round(style.size * H))
+  await document.fonts.load(`700 ${fontPx}px ${style.font}`, cue.text || '가').catch(() => {})
+  ctx.font = `700 ${fontPx}px ${style.font}`
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+
+  const outerWidth = style.maxWidth * W
+  const padX = style.box ? style.boxPadding * 1.7 * fontPx : 0
+  const padY = style.box ? style.boxPadding * fontPx : 0
+  const textLimit = Math.max(fontPx, outerWidth - padX * 2)
+  const lines = wrapCaptionLines(cue.text, textLimit, style.lineLimit, (line) => ctx.measureText(line).width)
+  const lineHeight = style.lineHeight * fontPx
+  const textWidth = Math.max(1, ...lines.map((line) => ctx.measureText(line).width))
+  const blockWidth = Math.min(outerWidth, textWidth + padX * 2)
+  const blockHeight = lineHeight * lines.length + padY * 2
+  const cx = style.x * W
+  const cy = style.y * H
+  const parentLeft = cx - outerWidth / 2
+  const blockLeft = style.align === 'left' ? parentLeft : style.align === 'right' ? parentLeft + outerWidth - blockWidth : cx - blockWidth / 2
+  const blockTop = cy - blockHeight / 2
+
+  if (style.box) {
+    ctx.fillStyle = hexToRgba(style.boxColor, style.boxAlpha)
+    roundRect(ctx, blockLeft, blockTop, blockWidth, blockHeight, Math.min(blockHeight / 2, style.boxRadius * fontPx))
+    ctx.fill()
+  }
+
+  ctx.textAlign = style.align
+  const lineX = style.align === 'left' ? blockLeft + padX : style.align === 'right' ? blockLeft + blockWidth - padX : blockLeft + blockWidth / 2
+  const strokePx = style.strokeWidth * fontPx
+  lines.forEach((line, index) => {
+    const y = blockTop + padY + lineHeight * (index + 0.5)
+    if (style.shadow) {
+      ctx.shadowColor = style.shadowColor
+      ctx.shadowBlur = style.shadowBlur * fontPx
+      ctx.shadowOffsetY = style.shadowDist * fontPx
+    } else ctx.shadowColor = 'transparent'
+    if (strokePx > 0) {
+      ctx.lineWidth = strokePx * 2
+      ctx.strokeStyle = style.strokeColor
+      ctx.strokeText(line, lineX, y)
+    }
+    ctx.fillStyle = hexToRgba(style.color, style.colorAlpha)
+    ctx.fillText(line, lineX, y)
+    ctx.shadowColor = 'transparent'
+  })
+
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('자막 이미지를 만들 수 없습니다.')), 'image/png'))
+  return new Uint8Array(await blob.arrayBuffer())
+}
+
 export interface ExportOptions {
   clips: Clip[]
   texts: TextOverlay[]
+  captionTracks?: CaptionTrack[]
   overlays?: Overlay[]
   audios?: AudioClip[]
   backgrounds?: Background[]
@@ -310,6 +374,7 @@ const audioLoopCount = (item: AudioClip) => repeatCountFor(item.trimEnd - item.t
 export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
   const { clips, aspect, height, onProgress, onLog } = opts
   const texts = opts.texts.filter((text) => !text.hidden)
+  const captions = (opts.captionTracks ?? []).flatMap((track) => track.hidden ? [] : track.cues.map((cue) => ({ track, cue })))
   const overlays = (opts.overlays ?? []).filter((o) => !o.hidden && (o.kind === 'video' || o.kind === 'image'))
   const audios = opts.audios ?? []
   const backgrounds = (opts.backgrounds ?? []).filter((background) => !background.hidden)
@@ -345,12 +410,27 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       }
       await fp.writeFile(name, await fetchFile(item.file))
     }
+    const stageVisualMedia = async (name: string, item: Clip | Overlay | Background) => {
+      if (item.kind !== 'image' || !item.backgroundRemovalEnabled) {
+        await stageMedia(name, item)
+        return
+      }
+      externalLog?.(`이미지 배경을 제거하는 중입니다: ${item.name}`)
+      const scale = 'canvasScale' in item ? item.canvasScale ?? 1 : 1
+      const maxDimension = Math.min(4096, Math.round(Math.max(W, H) * Math.max(1, scale)))
+      const processed = await cachedBackgroundRemovedImage(
+        item,
+        item.backgroundRemovalSensitivity ?? DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY,
+        maxDimension,
+      )
+      await fp.writeFile(name, new Uint8Array(await processed.blob.arrayBuffer()))
+    }
     const prepareVisual = async (
       sourceName: string,
       normalizedBase: string,
       item: Clip | Overlay | Background,
       cover: boolean,
-    ): Promise<{ fileName: string; trimStart: number; hasAudio: boolean }> => {
+    ): Promise<{ fileName: string; trimStart: number; hasAudio: boolean; width: number; height: number }> => {
       progressReporter.setStage(0, 0)
       const info = await probeInput(fp, sourceName)
       const oversizedImage = item.kind === 'image' && (info.width > W || info.height > H)
@@ -366,7 +446,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       if (!needsNormalization) {
         progressReporter.setStage(0.05 + (0.2 * visualIndex) / Math.max(1, visualCount), 0)
         progressReporter.report(0)
-        return { fileName: sourceName, trimStart: item.trimStart, hasAudio: item.kind === 'video' && info.hasAudio }
+        return { fileName: sourceName, trimStart: item.trimStart, hasAudio: item.kind === 'video' && info.hasAudio, width: info.width, height: info.height }
       }
 
       const normalizedName = `${normalizedBase}.${item.kind === 'image' ? 'png' : 'mp4'}`
@@ -407,7 +487,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       await fp.deleteFile(sourceName).catch(() => {})
       progressReporter.setStage(0.05 + (0.2 * visualIndex) / Math.max(1, visualCount), 0)
       progressReporter.report(0)
-      return { fileName: normalizedName, trimStart: 0, hasAudio: item.kind === 'video' && info.hasAudio }
+      return { fileName: normalizedName, trimStart: 0, hasAudio: item.kind === 'video' && info.hasAudio, width: info.width, height: info.height }
     }
 
     // 1. Stage each clip without copying it through renderer memory, then
@@ -416,22 +496,25 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     const audioFlags: boolean[] = []
     const inputFiles: string[] = []
     const inputTrimStarts: number[] = []
+    const inputSizes: Array<{ width: number; height: number }> = []
     for (let i = 0; i < clips.length; i++) {
       const clip = clips[i]
       if (clip.kind === 'color') {
         audioFlags.push(false)
         inputFiles.push('')
         inputTrimStarts.push(0)
+        inputSizes.push({ width: W, height: H })
         continue
       }
       if (!clip.sourceSize) throw new Error(`원본 영상 파일이 비어 있습니다: ${clip.name}`)
       const sourceName = `in${i}`
-      await stageMedia(sourceName, clip)
+      await stageVisualMedia(sourceName, clip)
       const cropped = Boolean(clip.crop.top || clip.crop.right || clip.crop.bottom || clip.crop.left)
       const prepared = await prepareVisual(sourceName, `norm${i}`, clip, cropped)
       audioFlags.push(prepared.hasAudio)
       inputFiles.push(prepared.fileName)
       inputTrimStarts.push(prepared.trimStart)
+      inputSizes.push({ width: prepared.width, height: prepared.height })
     }
 
     // 2. Render each text overlay to a PNG at output resolution.
@@ -440,18 +523,43 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       const renderText = text.positionKeyframes?.length ? { ...text, x: 0.5, y: 0.5 } : text
       await fp.writeFile(`text${k}.png`, await renderTextPng(renderText, W, H))
     }
+    for (let k = 0; k < captions.length; k++) {
+      await fp.writeFile(`caption${k}.png`, await renderCaptionPng(captions[k].track, captions[k].cue, W, H))
+    }
 
     // 2b. Write free-track media once and remember which video layers carry audio.
     const overlayAudioFlags: boolean[] = []
     const overlayFiles: string[] = []
     const overlayTrimStarts: number[] = []
+    const overlayEffects: Array<{ width: number; height: number; padding: number; maskName: string | null; decorationName: string | null }> = []
     for (let k = 0; k < overlays.length; k++) {
-      if (!overlays[k].sourceSize) throw new Error(`원본 오버레이 파일이 비어 있습니다: ${overlays[k].name}`)
-      await stageMedia(`ov${k}`, overlays[k])
-      const prepared = await prepareVisual(`ov${k}`, `normov${k}`, overlays[k], false)
+      const overlay = overlays[k]
+      if (overlay.shape) {
+        const body = overlayOutputSize(overlay, 1, 1, W, H)
+        const rendered = await renderShapePng(overlay, body.width, body.height, H)
+        const fileName = `shape${k}.png`
+        await fp.writeFile(fileName, rendered.data)
+        overlayFiles.push(fileName)
+        overlayTrimStarts.push(0)
+        overlayAudioFlags.push(false)
+        overlayEffects.push({ width: rendered.width, height: rendered.height, padding: 0, maskName: null, decorationName: null })
+        visualIndex++
+        progressReporter.report(0.05 + (0.2 * visualIndex) / Math.max(1, visualCount))
+        continue
+      }
+      if (!overlay.sourceSize) throw new Error(`원본 오버레이 파일이 비어 있습니다: ${overlay.name}`)
+      await stageVisualMedia(`ov${k}`, overlay)
+      const prepared = await prepareVisual(`ov${k}`, `normov${k}`, overlay, false)
       overlayFiles.push(prepared.fileName)
       overlayTrimStarts.push(prepared.trimStart)
       overlayAudioFlags.push(prepared.hasAudio)
+      const size = overlayOutputSize(overlay, prepared.width || W, prepared.height || H, W, H)
+      const assets = await renderOverlayEffectAssets(overlay, size.width, size.height, H)
+      const maskName = assets.mask ? `ovmask${k}.png` : null
+      const decorationName = assets.decoration ? `ovdecor${k}.png` : null
+      if (assets.mask && maskName) await fp.writeFile(maskName, assets.mask)
+      if (assets.decoration && decorationName) await fp.writeFile(decorationName, assets.decoration)
+      overlayEffects.push({ ...size, padding: assets.padding, maskName, decorationName })
     }
     const backgroundAudioFlags: boolean[] = []
     const backgroundFiles: string[] = []
@@ -465,7 +573,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         continue
       }
       if (!b.sourceSize) throw new Error(`원본 배경 파일이 비어 있습니다: ${b.name}`)
-      await stageMedia(`bg${k}`, b)
+      await stageVisualMedia(`bg${k}`, b)
       const prepared = await prepareVisual(`bg${k}`, `normbg${k}`, b, true)
       backgroundFiles.push(prepared.fileName)
       backgroundTrimStarts.push(prepared.trimStart)
@@ -518,7 +626,10 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     texts.forEach((_, k) => {
       args.push('-loop', '1', '-i', `text${k}.png`)
     })
-    const ovBase = inputCount + texts.length
+    captions.forEach((_, k) => {
+      args.push('-loop', '1', '-i', `caption${k}.png`)
+    })
+    const ovBase = inputCount + texts.length + captions.length
     overlays.forEach((o, k) => {
       if (o.kind === 'image') args.push('-loop', '1', '-t', String(ovLen(o)), '-i', overlayFiles[k])
       else {
@@ -527,9 +638,19 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         args.push('-ss', String(overlayTrimStarts[k]), '-t', String((o.trimEnd - o.trimStart) * repeat), '-i', overlayFiles[k])
       }
     })
-    const bgBase = ovBase + overlays.length
+    const overlayEffectIndexes = overlayEffects.map(() => ({ mask: -1, decoration: -1 }))
+    let freeInputCount = ovBase + overlays.length
+    overlayEffects.forEach((effect, k) => {
+      if (effect.maskName) {
+        overlayEffectIndexes[k].mask = freeInputCount++
+        args.push('-loop', '1', '-i', effect.maskName)
+      }
+      if (effect.decorationName) {
+        overlayEffectIndexes[k].decoration = freeInputCount++
+        args.push('-loop', '1', '-i', effect.decorationName)
+      }
+    })
     const bgInputIdx: number[] = []
-    let freeInputCount = bgBase
     backgrounds.forEach((b, k) => {
       if (b.kind === 'color') { bgInputIdx.push(-1); return }
       const repeat = repeatCountFor(clipBaseLength(b), clipTimelineDuration(b))
@@ -556,16 +677,22 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         const hex = (c.bgColor || '#000000').replace('#', '0x')
         filters.push(`color=c=${hex}:s=${W}x${H}:r=30:d=${segDur.toFixed(3)},setsar=1,format=rgba,${videoEnvelope(segDur, c.fadeIn, c.fadeOut)}null[v${p}]`)
       } else {
-        // Cropped clips fill the frame (cover) like the preview; uncropped clips
-        // keep their aspect with letterbox padding so no content is lost.
-        const cr = c.crop
-        const cropped = cr.top || cr.right || cr.bottom || cr.left
-        const fit = cropped
-          ? `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}`
-          : `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
+        const placement = resolveMainPlacement(c, inputSizes[p].width, inputSizes[p].height, W, H)
+        const targetWidth = Math.max(2, Math.round(placement.width / 2) * 2)
+        const targetHeight = Math.max(2, Math.round(placement.height / 2) * 2)
+        const rad = ((c.canvasAngle || 0) * Math.PI) / 180
+        const freeRotation = c.canvasAngle
+          ? `rotate=a=${rad.toFixed(5)}:ow=rotw(${rad.toFixed(5)}):oh=roth(${rad.toFixed(5)}):c=0x00000000,`
+          : ''
         filters.push(
-          `[${inputIdxOf[p]}:v]setpts=PTS/${sp},trim=duration=${segDur.toFixed(3)},setpts=PTS-STARTPTS,${spatialFilters(c)}${fit},setsar=1,fps=30,format=rgba,` +
-            `${videoEnvelope(segDur, c.fadeIn, c.fadeOut)}null[v${p}]`,
+          `[${inputIdxOf[p]}:v]setpts=PTS/${sp},trim=duration=${segDur.toFixed(3)},setpts=PTS-STARTPTS,` +
+            `${spatialFilters(c)}scale=${targetWidth}:${targetHeight},setsar=1,fps=30,format=rgba,${freeRotation}` +
+            `${videoEnvelope(segDur, c.fadeIn, c.fadeOut)}null[mainclip${p}]`,
+        )
+        filters.push(`color=c=0x00000000:s=${W}x${H}:r=30:d=${segDur.toFixed(3)},format=rgba[maincanvas${p}]`)
+        filters.push(
+          `[maincanvas${p}][mainclip${p}]overlay=x='${(c.canvasX ?? 0.5).toFixed(6)}*W-w/2':` +
+            `y='${(c.canvasY ?? 0.5).toFixed(6)}*H-h/2':eof_action=pass[v${p}]`,
         )
       }
 
@@ -621,10 +748,9 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       const ovIdx = ovBase + k
       const len = ovLen(o)
       const shift = o.start
-      const ovW = Math.max(2, Math.round((o.scale * W) / 2) * 2)
-      const ovH = o.scaleY != null && !(o.aspectLocked ?? true)
-        ? Math.max(2, Math.round((o.scaleY * H) / 2) * 2)
-        : null
+      const effect = overlayEffects[k]
+      const ovW = effect.width
+      const ovH = effect.height
       // Pad the overlay's START with `shift` seconds (instead of shifting PTS) so
       // its timestamps begin at 0 like the base — avoids an overlay-sync deadlock.
       const speedF = o.kind === 'video' ? `setpts=PTS/${o.speed},` : ''
@@ -634,10 +760,29 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
       const rotF = o.angle
         ? `rotate=a=${rad.toFixed(5)}:ow=rotw(${rad.toFixed(5)}):oh=roth(${rad.toFixed(5)}):c=0x00000000,`
         : ''
+      filters.push(`[${ovIdx}:v]${speedF}${spatialFilters(o)}scale=${ovW}:${ovH},format=rgba[ovbase${k}]`)
+      let styled = `[ovbase${k}]`
+      const indexes = overlayEffectIndexes[k]
+      if (indexes.mask >= 0) {
+        filters.push(`[${indexes.mask}:v]format=rgba,alphaextract[ovmask${k}]`)
+        filters.push(`${styled}[ovmask${k}]alphamerge[ovmasked${k}]`)
+        styled = `[ovmasked${k}]`
+      }
+      if (effect.padding > 0) {
+        const paddedW = ovW + effect.padding * 2
+        const paddedH = ovH + effect.padding * 2
+        filters.push(`${styled}pad=${paddedW}:${paddedH}:${effect.padding}:${effect.padding}:color=0x00000000[ovpad${k}]`)
+        styled = `[ovpad${k}]`
+      }
+      if (indexes.decoration >= 0) {
+        filters.push(`[${indexes.decoration}:v]format=rgba[ovdecor${k}]`)
+        filters.push(`${styled}[ovdecor${k}]overlay=0:0:eof_action=pass[ovstyled${k}]`)
+        styled = `[ovstyled${k}]`
+      }
       filters.push(
-        `[${ovIdx}:v]${speedF}${spatialFilters(o)}scale=${ovW}:${ovH ?? -2},format=rgba,${rotF}` +
-          `${videoEnvelope(len, o.fadeIn, o.fadeOut, o.opacity ?? 1)}` +
-          `tpad=start_duration=${shift.toFixed(3)}:start_mode=add:color=0x00000000[ovv${k}]`,
+        `${styled}${rotF}${videoEnvelope(len, o.fadeIn, o.fadeOut, o.opacity ?? 1)}` +
+        `trim=duration=${len.toFixed(3)},setpts=PTS-STARTPTS,` +
+        `tpad=start_duration=${shift.toFixed(3)}:start_mode=add:color=0x00000000[ovv${k}]`,
       )
     })
 
@@ -684,6 +829,20 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
             `eof_action=pass:enable='between(t,${t.start.toFixed(3)},${t.end.toFixed(3)})'${out}`,
         )
       }
+      lastV = out
+    })
+
+    // Captions are semantic presentation text and always sit above the free
+    // visual-layer stack, matching the preview's dedicated caption z-plane.
+    captions.forEach(({ cue }, k) => {
+      const inputIdx = inputCount + texts.length + k
+      const label = `[captionv${k}]`
+      const out = `[captionlayer${k}]`
+      filters.push(`[${inputIdx}:v]format=rgba,setpts=PTS+${cue.start.toFixed(3)}/TB${label}`)
+      filters.push(
+        `${lastV}${label}overlay=x=0:y=0:eof_action=pass:` +
+        `enable='between(t,${cue.start.toFixed(3)},${cue.end.toFixed(3)})'${out}`,
+      )
       lastV = out
     })
 
@@ -769,7 +928,7 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
         const detail = logBuffer.slice(-8).join('\n')
         throw new Error(`완성된 영상의 재생 검증에 실패했습니다.${detail ? `\n${detail}` : ''}`)
       }
-      await cleanup(fp, outName, clips.length, texts.length, overlays.length, backgrounds.length, audios.length, true)
+      await cleanup(fp, outName, clips.length, texts.length, captions.length, overlays.length, backgrounds.length, audios.length, true)
       return { kind: 'native-file', name: outName, size, format }
     }
 
@@ -781,11 +940,11 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
     }
 
     // 5. Clean up the virtual filesystem for the next run.
-    await cleanup(fp, outName, clips.length, texts.length, overlays.length, backgrounds.length, audios.length)
+    await cleanup(fp, outName, clips.length, texts.length, captions.length, overlays.length, backgrounds.length, audios.length)
 
     return new Blob([bytes], { type: format === 'webm' ? 'video/webm' : 'video/mp4' })
   } catch (error) {
-    await cleanup(fp, outName, clips.length, texts.length, overlays.length, backgrounds.length, audios.length)
+    await cleanup(fp, outName, clips.length, texts.length, captions.length, overlays.length, backgrounds.length, audios.length)
     if (resetEngine) {
       fp.terminate()
       ffmpeg = null
@@ -796,12 +955,14 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
   }
 }
 
-async function cleanup(fp: FFmpegEngine, outName: string, nClips: number, nTexts: number, nOv: number, nBg: number, nAudio: number, keepOutput = false) {
+async function cleanup(fp: FFmpegEngine, outName: string, nClips: number, nTexts: number, nCaptions: number, nOv: number, nBg: number, nAudio: number, keepOutput = false) {
   const names = keepOutput ? [] : [outName]
   for (let i = 0; i < nClips; i++) names.push(`in${i}`, `norm${i}.mp4`)
   for (let i = 0; i < nClips; i++) names.push(`norm${i}.png`)
   for (let k = 0; k < nTexts; k++) names.push(`text${k}.png`)
+  for (let k = 0; k < nCaptions; k++) names.push(`caption${k}.png`)
   for (let k = 0; k < nOv; k++) names.push(`ov${k}`, `normov${k}.mp4`, `normov${k}.png`)
+  for (let k = 0; k < nOv; k++) names.push(`ovmask${k}.png`, `ovdecor${k}.png`)
   for (let k = 0; k < nBg; k++) names.push(`bg${k}`, `normbg${k}.mp4`, `normbg${k}.png`)
   for (let k = 0; k < nAudio; k++) names.push(`audio${k}`, `normaudio${k}.m4a`)
   for (const n of names) await fp.deleteFile(n).catch(() => {})

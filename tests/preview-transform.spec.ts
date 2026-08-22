@@ -4,7 +4,7 @@ const squareSvg = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><rect width="240" height="240" fill="#cf7a7d"/></svg>',
 )
 
-test('crop editor exposes direct handles and preserves a selected aspect ratio', async ({ page }, testInfo) => {
+test('crop dialog exposes precise controls, preserves ratios, and only commits on apply', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Precise crop geometry is covered once on desktop')
 
   await page.goto('/')
@@ -15,6 +15,9 @@ test('crop editor exposes direct handles and preserves a selected aspect ratio',
   })
 
   await page.getByRole('button', { name: '자르기' }).click()
+  const dialog = page.getByRole('dialog', { name: '자르기' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('테두리로 영역 조절, 안쪽 드래그로 위치 이동')
   await expect(page.locator('.crophandle')).toHaveCount(8)
   await expect(page.locator('.cropedit__grid i')).toHaveCount(4)
 
@@ -36,6 +39,24 @@ test('crop editor exposes direct handles and preserves a selected aspect ratio',
   expect(after!.width).toBeLessThan(before!.width - 15)
   expect(after!.width / after!.height).toBeCloseTo(16 / 9, 1)
 
-  await page.getByRole('button', { name: '초기화', exact: true }).first().click()
-  await expect(page.locator('.cropedit__rect')).toHaveAttribute('style', /inset: 0%/)
+  await dialog.getByRole('button', { name: '취소', exact: true }).click()
+  await expect(dialog).toBeHidden()
+
+  await page.getByRole('button', { name: '자르기' }).click()
+  await expect(page.locator('.cropedit__rect')).toHaveAttribute('style', /inset: 0%|left: 0%; top: 0%; right: 0%; bottom: 0%/)
+  await page.getByRole('button', { name: '1:1', exact: true }).click()
+  await dialog.getByRole('button', { name: '적용', exact: true }).click()
+  await expect(dialog).toBeHidden()
+
+  await page.getByRole('button', { name: '자르기' }).click()
+  const applied = await page.locator('.cropedit__rect').boundingBox()
+  expect(applied).not.toBeNull()
+  expect(applied!.width / applied!.height).toBeCloseTo(1, 1)
+  await page.getByRole('button', { name: '초기화', exact: true }).click()
+  await expect(page.locator('.cropedit__rect')).toHaveAttribute('style', /inset: 0%|left: 0%; top: 0%; right: 0%; bottom: 0%/)
+  await dialog.getByRole('button', { name: '취소', exact: true }).click()
+
+  await page.getByRole('tab', { name: '변형', exact: true }).click()
+  await page.getByRole('button', { name: '자르기 편집창 열기', exact: true }).click()
+  await expect(dialog).toBeVisible()
 })

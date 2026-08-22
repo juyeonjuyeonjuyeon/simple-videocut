@@ -42,6 +42,11 @@ try {
   await page.locator('header input[type=file]').nth(1).setInputFiles([overlay, background])
   await page.getByRole('button', { name: '메인 트랙으로 이동', exact: true }).click()
   await page.getByRole('button', { name: '배경 레이어로 이동', exact: true }).click()
+  await page.locator('.tlclip', { hasText: 'overlay-4k-hevc.mov' }).click()
+  await page.getByRole('tab', { name: '스타일', exact: true }).click()
+  await page.getByRole('radio', { name: '별', exact: true }).click()
+  await page.locator('.ctl').filter({ hasText: '굵기' }).locator('input[type=range]').fill('10')
+  await page.getByRole('checkbox', { name: '그림자 사용', exact: true }).check()
   await page.locator('header input[type=file]').nth(2).setInputFiles(audio)
   await page.getByRole('tab', { name: '시간', exact: true }).click()
   await page.locator('.ctl').filter({ hasText: '시작 트림' }).first().locator('input[type=range]').fill('1')
@@ -67,6 +72,11 @@ try {
   for (const name of ['source.mp4', 'overlay-4k-hevc.mov', 'background-4k-hevc.mov', 'voice.m4a']) {
     await page.getByText(name, { exact: false }).first().waitFor({ timeout: 20_000 })
   }
+  await page.locator('.tlclip', { hasText: 'overlay-4k-hevc.mov' }).click()
+  await page.getByRole('tab', { name: '스타일', exact: true }).click()
+  const starMask = page.getByRole('radio', { name: '별', exact: true })
+  if (await starMask.getAttribute('aria-checked') !== 'true') throw new Error('오버레이 마스크 설정이 복원되지 않았습니다.')
+  if (!await page.getByRole('checkbox', { name: '그림자 사용', exact: true }).isChecked()) throw new Error('오버레이 그림자 설정이 복원되지 않았습니다.')
   const exportButton = page.getByRole('button', { name: '내보내기', exact: true })
   await exportButton.waitFor({ state: 'visible' })
   await exportButton.click()

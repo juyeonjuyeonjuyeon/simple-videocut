@@ -31,11 +31,30 @@ test('exported MP4 keeps the same overlay order as the preview', async ({ page }
     await page.locator('header input[type=file]').nth(1).setInputFiles([lower, upper])
     await expect(page.locator('.preview__overlay')).toHaveCount(2)
 
+    await page.locator('.tlclip', { hasText: 'upper-blue.png' }).click()
+    await page.getByRole('tab', { name: '스타일', exact: true }).click()
+    await page.getByRole('radio', { name: '별', exact: true }).click()
+    await page.locator('.ctl').filter({ hasText: '굵기' }).locator('input[type=range]').fill('8')
+    await page.getByRole('checkbox', { name: '그림자 사용', exact: true }).check()
+
     // Selecting the lower layer used to pull it above the real front layer only in the preview.
     await page.locator('.tlclip', { hasText: 'lower-red.png' }).click()
     const lowerZ = Number.parseInt(await page.locator('[data-layer-name="lower-red.png"]').evaluate((element) => getComputedStyle(element).zIndex), 10)
     const upperZ = Number.parseInt(await page.locator('[data-layer-name="upper-blue.png"]').evaluate((element) => getComputedStyle(element).zIndex), 10)
     expect(lowerZ).toBeLessThan(upperZ)
+
+    // A vivid caption background makes its preview/export z-plane and timing
+    // verifiable at one stable pixel without relying on OCR.
+    await page.getByRole('button', { name: '자막', exact: true }).click()
+    await page.getByRole('button', { name: '자막 트랙 만들기' }).click()
+    await page.getByRole('button', { name: '현재 위치에 자막', exact: true }).click()
+    await page.getByRole('textbox', { name: '1번 자막' }).fill(' ')
+    await page.locator('.caption-dialog__panel').getByRole('button', { name: '닫기' }).click()
+    await page.locator('.timeline__lane--caption .tlclip').click()
+    await page.getByRole('tab', { name: '스타일', exact: true }).click()
+    await page.getByLabel('배경색').fill('#00ff00')
+    await page.locator('.ctl').filter({ hasText: '배경 불투명도' }).locator('input[type=range]').fill('100')
+    await page.locator('.ctl').filter({ hasText: '배경 여백' }).locator('input[type=range]').fill('150')
 
     await page.getByRole('button', { name: '내보내기', exact: true }).click()
     await page.getByRole('button', { name: '480p', exact: true }).click()
@@ -49,7 +68,7 @@ test('exported MP4 keeps the same overlay order as the preview', async ({ page }
 
     const preview = page.locator('video.modal__preview')
     await preview.waitFor({ state: 'visible' })
-    const center = await preview.evaluate(async (video: HTMLVideoElement) => {
+    const pixels = await preview.evaluate(async (video: HTMLVideoElement) => {
       if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
         await new Promise<void>((resolve) => video.addEventListener('loadeddata', () => resolve(), { once: true }))
       }
@@ -60,11 +79,17 @@ test('exported MP4 keeps the same overlay order as the preview', async ({ page }
       canvas.height = video.videoHeight
       const context = canvas.getContext('2d')!
       context.drawImage(video, 0, 0)
-      return [...context.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data]
+      const sample = (x: number, y: number) => [...context.getImageData(Math.floor(canvas.width * x), Math.floor(canvas.height * y), 1, 1).data]
+      return { center: sample(0.5, 0.5), maskedCorner: sample(0.34, 0.34), captionCenter: sample(0.5, 0.86) }
     })
 
-    expect(center[2]).toBeGreaterThan(180)
-    expect(center[2]).toBeGreaterThan(center[0] + 100)
+    expect(pixels.center[2]).toBeGreaterThan(180)
+    expect(pixels.center[2]).toBeGreaterThan(pixels.center[0] + 100)
+    expect(pixels.maskedCorner[0]).toBeGreaterThan(180)
+    expect(pixels.maskedCorner[0]).toBeGreaterThan(pixels.maskedCorner[2] + 100)
+    expect(pixels.captionCenter[1], `caption pixel: ${JSON.stringify(pixels.captionCenter)}`).toBeGreaterThan(100)
+    expect(pixels.captionCenter[1]).toBeGreaterThan(pixels.captionCenter[0] + 80)
+    expect(pixels.captionCenter[1]).toBeGreaterThan(pixels.captionCenter[2] + 80)
   } finally {
     rmSync(temp, { recursive: true, force: true })
   }

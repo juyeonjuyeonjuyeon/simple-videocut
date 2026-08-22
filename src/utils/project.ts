@@ -1,4 +1,4 @@
-import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, ExportSettings, TimelineMarker, TimelineGroup, VisualLayerRef, MediaAsset } from '../types'
+import type { Clip, Overlay, AudioClip, Background, TextOverlay, AspectRatio, ExportSettings, TimelineMarker, TimelineGroup, VisualLayerRef, MediaAsset, CaptionTrack } from '../types'
 
 const DB_NAME = 'simplecut-db'
 const STORE = 'projects'
@@ -21,6 +21,8 @@ export interface ProjectState {
   audios: AudioClip[]
   backgrounds: Background[]
   texts: TextOverlay[]
+  /** Optional only so projects saved before dedicated captions remain loadable. */
+  captionTracks?: CaptionTrack[]
   markers?: TimelineMarker[]
   groups?: TimelineGroup[]
   visualOrder?: VisualLayerRef[]
@@ -39,6 +41,7 @@ interface SerializedProject {
   audios: object[]
   backgrounds: object[]
   texts: TextOverlay[]
+  captionTracks?: CaptionTrack[]
   mediaLibrary?: object[]
   markers?: TimelineMarker[]
   groups?: TimelineGroup[]
@@ -52,6 +55,9 @@ export const PROJECT_LIMITS = {
   maxItemsPerTrack: 200,
   maxNameLength: 255,
   maxTextLength: 10_000,
+  maxCaptionTracks: 8,
+  maxCaptionCuesPerTrack: 10_000,
+  maxCaptionTextLength: 2_000,
   maxDurationSeconds: 6 * 60 * 60,
 } as const
 
@@ -92,6 +98,7 @@ function serialize(name: string, s: ProjectState): SerializedProject {
     audios: s.audios.map((a) => strip(a as unknown as WithMedia)),
     backgrounds: s.backgrounds.map((b) => strip(b as unknown as WithMedia)),
     texts: s.texts,
+    captionTracks: s.captionTracks ?? [],
     mediaLibrary: (s.mediaLibrary ?? []).map((asset) => strip(asset as unknown as WithMedia)),
     markers: s.markers ?? [],
     groups: s.groups ?? [],
@@ -143,6 +150,7 @@ function deserialize(p: SerializedProject): ProjectState {
     audios: p.audios.map((a) => restore<AudioClip>(a)),
     backgrounds: p.backgrounds.map((b) => restore<Background>(b)),
     texts: p.texts,
+    captionTracks: p.captionTracks ?? [],
     mediaLibrary: (p.mediaLibrary ?? []).map((asset) => restore<MediaAsset>(asset)),
     markers: p.markers ?? [],
     groups: p.groups ?? [],
@@ -378,13 +386,13 @@ export async function autosaveMeta(): Promise<ProjectMeta | null> {
     for (const candidate of await bridge.projectLoad(AUTOSAVE_KEY)) {
       try {
         assertStoredProject(candidate)
-        if (!candidate.clips.length && !candidate.overlays.length && !candidate.audios.length && !candidate.backgrounds.length && !candidate.texts.length && !(candidate.mediaLibrary?.length)) continue
+        if (!candidate.clips.length && !candidate.overlays.length && !candidate.audios.length && !candidate.backgrounds.length && !candidate.texts.length && !(candidate.captionTracks?.length) && !(candidate.mediaLibrary?.length)) continue
         return { name: candidate.name, savedAt: candidate.savedAt, size: candidate.media.reduce((a, m) => a + mediaSize(m), 0) }
       } catch { /* try an older atomic autosave generation */ }
     }
   }
   const p = await getWebProject(AUTOSAVE_KEY)
-  if (!p || (!p.clips.length && !p.overlays.length && !p.audios.length && !p.backgrounds.length && !p.texts.length && !(p.mediaLibrary?.length))) return null
+  if (!p || (!p.clips.length && !p.overlays.length && !p.audios.length && !p.backgrounds.length && !p.texts.length && !(p.captionTracks?.length) && !(p.mediaLibrary?.length))) return null
   assertStoredProject(p)
   return { name: p.name, savedAt: p.savedAt, size: p.media.reduce((a, m) => a + mediaSize(m), 0) }
 }
@@ -541,6 +549,13 @@ const validateItem = (value: unknown, track: string) => {
     bool(item.flipV, `${track} 상하 반전`)
     const crop = record(item.crop, `${track} 크롭`)
     for (const side of ['top', 'right', 'bottom', 'left']) finite(crop[side], 0, 0.45, `${track} 크롭`)
+    const hasBackgroundRemoval = ('backgroundRemovalEnabled' in item && item.backgroundRemovalEnabled !== undefined)
+      || ('backgroundRemovalSensitivity' in item && item.backgroundRemovalSensitivity !== undefined)
+    if (hasBackgroundRemoval && item.kind !== 'image') throw new Error(`${track} 배경 제거는 이미지에만 사용할 수 있습니다.`)
+    if ('backgroundRemovalEnabled' in item && item.backgroundRemovalEnabled !== undefined) {
+      bool(item.backgroundRemovalEnabled, `${track} 배경 제거`)
+    }
+    if ('backgroundRemovalSensitivity' in item && item.backgroundRemovalSensitivity !== undefined) finite(item.backgroundRemovalSensitivity, 0, 100, `${track} 배경 제거 민감도`)
     if (item.kind === 'color') {
       if (item.mediaId !== null) throw new Error(`${track} 미디어 연결 값이 잘못되었습니다.`)
       text(item.bgColor, 64, `${track} 배경 색상`)
@@ -562,7 +577,24 @@ const validateItem = (value: unknown, track: string) => {
     if ('opacity' in item) finite(item.opacity, 0, 1, `${track} 투명도`)
     if ('locked' in item) bool(item.locked, `${track} 잠금`)
     if ('hidden' in item) bool(item.hidden, `${track} 표시`)
+    if ('borderWidth' in item) finite(item.borderWidth, 0, 40 / 720, `${track} 테두리 굵기`)
+    if ('borderColor' in item) text(item.borderColor, 64, `${track} 테두리 색상`)
+    if ('borderStyle' in item && !['solid', 'dashed', 'dotted', 'double'].includes(String(item.borderStyle))) throw new Error(`${track} 테두리 스타일이 잘못되었습니다.`)
+    if ('shadowEnabled' in item) bool(item.shadowEnabled, `${track} 그림자`)
+    if ('shadowColor' in item) text(item.shadowColor, 64, `${track} 그림자 색상`)
+    if ('shadowOpacity' in item) finite(item.shadowOpacity, 0, 1, `${track} 그림자 투명도`)
+    if ('shadowBlur' in item) finite(item.shadowBlur, 0, 40 / 720, `${track} 그림자 흐림`)
+    if ('shadowX' in item) finite(item.shadowX, -40 / 720, 40 / 720, `${track} 그림자 가로 위치`)
+    if ('shadowY' in item) finite(item.shadowY, -40 / 720, 40 / 720, `${track} 그림자 세로 위치`)
+    if ('maskShape' in item && !['none', 'rounded', 'circle', 'ellipse', 'heart', 'star', 'hexagon'].includes(String(item.maskShape))) throw new Error(`${track} 마스크 모양이 잘못되었습니다.`)
     if ('positionKeyframes' in item) validatePositionKeyframes(item.positionKeyframes, ((item.trimEnd as number) - (item.trimStart as number)) / (item.speed as number) * (item.repeat as number), track)
+  } else if (track === '클립') {
+    if ('canvasX' in item && item.canvasX !== undefined) finite(item.canvasX, 0, 1, `${track} 캔버스 가로 위치`)
+    if ('canvasY' in item && item.canvasY !== undefined) finite(item.canvasY, 0, 1, `${track} 캔버스 세로 위치`)
+    if ('canvasScale' in item && item.canvasScale !== undefined) finite(item.canvasScale, 0.05, 3, `${track} 캔버스 크기`)
+    if ('canvasScaleY' in item && item.canvasScaleY !== undefined) finite(item.canvasScaleY, 0.05, 3, `${track} 캔버스 세로 크기`)
+    if ('canvasAspectLocked' in item && item.canvasAspectLocked !== undefined) bool(item.canvasAspectLocked, `${track} 캔버스 비율 고정`)
+    if ('canvasAngle' in item && item.canvasAngle !== undefined) finite(item.canvasAngle, -180, 180, `${track} 캔버스 회전`)
   } else if (track === '오디오' || track === '배경') {
     finite(item.start, 0, PROJECT_LIMITS.maxDurationSeconds, `${track} 시작 위치`)
     if (track === '배경') {
@@ -579,6 +611,64 @@ const validateMarker = (value: unknown) => {
   finite(marker.time, 0, PROJECT_LIMITS.maxDurationSeconds, '마커 위치')
   text(marker.label, 120, '마커 이름')
   text(marker.color, 64, '마커 색상')
+}
+
+const validateCaptionStyle = (value: unknown, partial: boolean, label: string) => {
+  const style = record(value, label)
+  const required = (key: string) => !partial || Object.prototype.hasOwnProperty.call(style, key)
+  if (required('font')) text(style.font, 500, `${label} 글꼴`)
+  if (required('size')) finite(style.size, 0.02, 0.16, `${label} 크기`)
+  if (required('color')) text(style.color, 64, `${label} 색상`)
+  if (required('colorAlpha')) finite(style.colorAlpha, 0, 1, `${label} 글자 투명도`)
+  if (required('box')) bool(style.box, `${label} 배경`)
+  if (required('boxColor')) text(style.boxColor, 64, `${label} 배경 색상`)
+  if (required('boxAlpha')) finite(style.boxAlpha, 0, 1, `${label} 배경 투명도`)
+  if (required('boxPadding')) finite(style.boxPadding, 0, 1.5, `${label} 배경 여백`)
+  if (required('boxRadius')) finite(style.boxRadius, 0, 1.5, `${label} 배경 모서리`)
+  if (required('strokeWidth')) finite(style.strokeWidth, 0, 0.3, `${label} 외곽선`)
+  if (required('strokeColor')) text(style.strokeColor, 64, `${label} 외곽선 색상`)
+  if (required('shadow')) bool(style.shadow, `${label} 그림자`)
+  if (required('shadowColor')) text(style.shadowColor, 64, `${label} 그림자 색상`)
+  if (required('shadowBlur')) finite(style.shadowBlur, 0, 1, `${label} 그림자 흐림`)
+  if (required('shadowDist')) finite(style.shadowDist, 0, 1, `${label} 그림자 거리`)
+  if (required('align') && !['left', 'center', 'right'].includes(String(style.align))) throw new Error(`${label} 정렬 값이 잘못되었습니다.`)
+  if (required('x')) finite(style.x, 0.05, 0.95, `${label} 가로 위치`)
+  if (required('y')) finite(style.y, 0.05, 0.95, `${label} 세로 위치`)
+  if (required('maxWidth')) finite(style.maxWidth, 0.2, 0.94, `${label} 최대 너비`)
+  if (required('lineHeight')) finite(style.lineHeight, 0.8, 2, `${label} 줄 간격`)
+  if (required('lineLimit') && ![1, 2, 3].includes(Number(style.lineLimit))) throw new Error(`${label} 최대 줄 수가 잘못되었습니다.`)
+}
+
+const validateCaptionTrack = (value: unknown) => {
+  const track = record(value, '자막 트랙')
+  text(track.id, 100, '자막 트랙 ID')
+  text(track.name, 120, '자막 트랙 이름')
+  text(track.language, 35, '자막 언어')
+  bool(track.hidden, '자막 트랙 표시')
+  bool(track.locked, '자막 트랙 잠금')
+  validateCaptionStyle(track.style, false, '자막 스타일')
+  if (!Array.isArray(track.cues) || track.cues.length > PROJECT_LIMITS.maxCaptionCuesPerTrack) throw new Error('자막 항목 수가 너무 많습니다.')
+  const ids = new Set<string>()
+  for (const candidate of track.cues) {
+    const cue = record(candidate, '자막')
+    text(cue.id, 100, '자막 ID')
+    if (ids.has(cue.id as string)) throw new Error('자막 ID가 중복되었습니다.')
+    ids.add(cue.id as string)
+    text(cue.text, PROJECT_LIMITS.maxCaptionTextLength, '자막 내용')
+    finite(cue.start, 0, PROJECT_LIMITS.maxDurationSeconds, '자막 시작')
+    finite(cue.end, 0, PROJECT_LIMITS.maxDurationSeconds, '자막 종료')
+    if ((cue.end as number) <= (cue.start as number)) throw new Error('자막 시간 범위가 잘못되었습니다.')
+    if (!['manual', 'imported', 'generated'].includes(String(cue.origin))) throw new Error('자막 생성 방식이 잘못되었습니다.')
+    if (cue.style !== undefined) validateCaptionStyle(cue.style, true, '개별 자막 스타일')
+    if (cue.source !== undefined) {
+      const source = record(cue.source, '자막 원본 연결')
+      if (!['clip', 'audio'].includes(String(source.type))) throw new Error('자막 원본 종류가 잘못되었습니다.')
+      text(source.id, 100, '자막 원본 ID')
+      finite(source.offsetStart, 0, PROJECT_LIMITS.maxDurationSeconds, '자막 원본 시작')
+      finite(source.offsetEnd, 0, PROJECT_LIMITS.maxDurationSeconds, '자막 원본 종료')
+      if ((source.offsetEnd as number) < (source.offsetStart as number)) throw new Error('자막 원본 시간 범위가 잘못되었습니다.')
+    }
+  }
 }
 
 function assertBaseProject(value: unknown): Record<string, unknown> {
@@ -604,6 +694,16 @@ function assertBaseProject(value: unknown): Record<string, unknown> {
     if (!Array.isArray(p.markers) || p.markers.length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error('프로젝트의 markers 항목이 잘못되었습니다.')
     for (const marker of p.markers) validateMarker(marker)
   }
+  if (p.captionTracks !== undefined) {
+    if (!Array.isArray(p.captionTracks) || p.captionTracks.length > PROJECT_LIMITS.maxCaptionTracks) throw new Error('프로젝트의 자막 트랙 정보가 잘못되었습니다.')
+    const ids = new Set<string>()
+    for (const candidate of p.captionTracks) {
+      validateCaptionTrack(candidate)
+      const id = (candidate as Record<string, unknown>).id as string
+      if (ids.has(id)) throw new Error('자막 트랙 ID가 중복되었습니다.')
+      ids.add(id)
+    }
+  }
   if (p.groups !== undefined) {
     if (!Array.isArray(p.groups) || p.groups.length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error('프로젝트의 그룹 정보가 잘못되었습니다.')
     for (const candidate of p.groups) {
@@ -613,7 +713,7 @@ function assertBaseProject(value: unknown): Record<string, unknown> {
       if (!Array.isArray(group.members) || group.members.length < 2 || group.members.length > PROJECT_LIMITS.maxItemsPerTrack) throw new Error('그룹 구성 정보가 잘못되었습니다.')
       for (const memberCandidate of group.members) {
         const member = record(memberCandidate, '그룹 구성')
-        if (!['clip', 'overlay', 'audio', 'text', 'background'].includes(String(member.type))) throw new Error('그룹 항목 종류가 잘못되었습니다.')
+        if (!['clip', 'overlay', 'audio', 'text', 'caption', 'background'].includes(String(member.type))) throw new Error('그룹 항목 종류가 잘못되었습니다.')
         text(member.id, 100, '그룹 항목 ID')
       }
     }
