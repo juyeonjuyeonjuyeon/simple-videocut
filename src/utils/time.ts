@@ -1,4 +1,5 @@
-import type { Clip, Overlay, AudioClip, TextOverlay, Background, AspectRatio } from '../types'
+import type { Clip, Overlay, AudioClip, TextOverlay, Background, AspectRatio, CanvasDimensions } from '../types'
+import { canvasDimensionsForPreset, scaledCanvasDimensions } from './canvas'
 
 /** One playthrough of a clip's trimmed segment (trim + speed), ignoring repeat. */
 export function clipBaseLength(clip: Clip): number {
@@ -170,8 +171,9 @@ export function formatTimeFine(seconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
 }
 
-export function aspectToWH(ratio: AspectRatio, height: number): { w: number; h: number } {
-  const map: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
-  const w = Math.round((height * map[ratio]) / 2) * 2 // keep even for codecs
-  return { w, h: height }
+export function aspectToWH(ratio: AspectRatio, height: number, canvas?: CanvasDimensions): { w: number; h: number } {
+  const dimensions = ratio === 'custom'
+    ? scaledCanvasDimensions(canvas ?? { width: 1280, height: 720 }, height)
+    : canvasDimensionsForPreset(ratio, height)
+  return { w: dimensions.width, h: dimensions.height }
 }

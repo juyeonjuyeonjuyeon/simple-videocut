@@ -4,6 +4,7 @@ import { assertPortableMediaBudget, assertPortableProject, PROJECT_LIMITS } from
 
 const validProject = (): {
   version: number; name: string; savedAt: number; aspectRatio: string
+  canvasWidth?: number; canvasHeight?: number
   exportSettings: { height: number; format: string; filename: string }
   clips: unknown[]; overlays: unknown[]; audios: unknown[]; backgrounds: unknown[]; texts: unknown[]; media: unknown[]
 } => ({
@@ -47,6 +48,18 @@ describe('portable project schema', () => {
     const project = validProject()
     project.exportSettings.height = 999999
     expect(() => assertPortableProject(project)).toThrow(/해상도/)
+  })
+
+  it('accepts bounded custom canvas dimensions and rejects incomplete custom projects', () => {
+    const project = validProject()
+    project.aspectRatio = 'custom'
+    project.canvasWidth = 1200
+    project.canvasHeight = 628
+    project.exportSettings.height = 628
+    expect(() => assertPortableProject(project)).not.toThrow()
+
+    delete project.canvasWidth
+    expect(() => assertPortableProject(project)).toThrow(/사용자 캔버스 크기/)
   })
 
   it('rejects excessive item counts and decoded media budgets', () => {

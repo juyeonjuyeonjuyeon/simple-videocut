@@ -1,7 +1,12 @@
 // ---- Core editing data model ----
 
-/** Supported output aspect ratios. */
-export type AspectRatio = '16:9' | '9:16' | '1:1'
+/** Preset ratios plus an exact user-defined canvas. */
+export type AspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '4:5' | '5:4' | '21:9' | '2:1' | 'custom'
+
+export interface CanvasDimensions {
+  width: number
+  height: number
+}
 
 export type VisualKind = 'video' | 'image' | 'color'
 
@@ -336,7 +341,7 @@ export interface TimelineGroup {
   members: TimelineItemRef[]
 }
 
-export type ExportHeight = 480 | 720 | 1080 | 1440 | 2160
+export type ExportHeight = number
 
 export interface ExportSettings {
   height: ExportHeight

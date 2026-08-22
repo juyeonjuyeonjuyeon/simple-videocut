@@ -62,6 +62,16 @@ describe('timeline splitting', () => {
     expect(useEditor.getState().canRedo).toBe(false)
   })
 
+  it('keeps exact custom canvas dimensions when replacing a project', () => {
+    const project: ProjectState = {
+      clips: [clip(1)], overlays: [], audios: [], backgrounds: [], texts: [],
+      aspectRatio: 'custom', canvasWidth: 1200, canvasHeight: 628,
+      exportSettings: { height: 628, format: 'mp4', filename: 'custom-canvas' },
+    }
+    useEditor.getState().replaceProject(project)
+    expect(useEditor.getState()).toMatchObject({ aspectRatio: 'custom', canvasWidth: 1200, canvasHeight: 628 })
+  })
+
   it('keeps fades inside half of the edited clip and stores timeline markers', () => {
     useEditor.getState().updateClip('clip-1', { fadeIn: 20, fadeOut: 20 })
     expect(useEditor.getState().clips[0].fadeIn).toBeCloseTo(3)

@@ -28,6 +28,8 @@ export interface ProjectState {
   groups?: TimelineGroup[]
   visualOrder?: VisualLayerRef[]
   aspectRatio: AspectRatio
+  canvasWidth?: number
+  canvasHeight?: number
   exportSettings: ExportSettings
 }
 
@@ -36,6 +38,8 @@ interface SerializedProject {
   name: string
   savedAt: number
   aspectRatio: AspectRatio
+  canvasWidth?: number
+  canvasHeight?: number
   exportSettings: ExportSettings
   clips: object[]
   overlays: object[]
@@ -89,7 +93,7 @@ function serialize(name: string, s: ProjectState): SerializedProject {
   }
   return {
     version: 1, name, savedAt: Date.now(),
-    aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
+    aspectRatio: s.aspectRatio, canvasWidth: s.canvasWidth, canvasHeight: s.canvasHeight, exportSettings: s.exportSettings,
     clips: s.clips.map((c) => strip(c as unknown as WithMedia)),
     overlays: s.overlays.map((o) => strip(o as unknown as WithMedia)),
     audios: s.audios.map((a) => strip(a as unknown as WithMedia)),
@@ -140,7 +144,7 @@ function deserialize(p: SerializedProject): ProjectState {
     throw new Error(`원본 파일 연결 정보가 없습니다: ${String(rest.name || '이름 없는 미디어')}`)
   }
   return {
-    aspectRatio: p.aspectRatio, exportSettings: p.exportSettings,
+    aspectRatio: p.aspectRatio, canvasWidth: p.canvasWidth, canvasHeight: p.canvasHeight, exportSettings: p.exportSettings,
     clips: p.clips.map((c) => restore<Clip>(c)),
     overlays: p.overlays.map((o) => restore<Overlay>(o)),
     audios: p.audios.map((a) => restore<AudioClip>(a)),
@@ -622,9 +626,12 @@ function assertBaseProject(value: unknown): Record<string, unknown> {
   if (p.version !== 1) throw new Error('지원하지 않는 프로젝트 버전입니다.')
   text(p.name, PROJECT_LIMITS.maxNameLength, '프로젝트 이름')
   finite(p.savedAt, 0, Number.MAX_SAFE_INTEGER, '저장 시간')
-  if (!['16:9', '9:16', '1:1'].includes(String(p.aspectRatio))) throw new Error('화면 비율 정보가 잘못되었습니다.')
+  if (!['16:9', '9:16', '1:1', '4:3', '3:4', '4:5', '5:4', '21:9', '2:1', 'custom'].includes(String(p.aspectRatio))) throw new Error('화면 비율 정보가 잘못되었습니다.')
+  if ('canvasWidth' in p && p.canvasWidth !== undefined) finite(p.canvasWidth, 64, 7680, '캔버스 너비')
+  if ('canvasHeight' in p && p.canvasHeight !== undefined) finite(p.canvasHeight, 64, 4320, '캔버스 높이')
+  if (p.aspectRatio === 'custom' && (p.canvasWidth === undefined || p.canvasHeight === undefined)) throw new Error('사용자 캔버스 크기가 없습니다.')
   const settings = record(p.exportSettings, '내보내기 설정')
-  if (![480, 720, 1080, 1440, 2160].includes(Number(settings.height))) throw new Error('내보내기 해상도가 잘못되었습니다.')
+  finite(settings.height, 64, 4320, '내보내기 해상도')
   if (!['mp4', 'webm'].includes(String(settings.format))) throw new Error('내보내기 형식이 잘못되었습니다.')
   text(settings.filename, 120, '내보내기 파일 이름')
   for (const key of ['clips', 'overlays', 'audios', 'backgrounds', 'texts', 'media']) {

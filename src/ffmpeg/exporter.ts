@@ -272,6 +272,8 @@ export interface ExportOptions {
   backgrounds?: Background[]
   visualOrder?: VisualLayerRef[]
   aspect: AspectRatio
+  canvasWidth?: number
+  canvasHeight?: number
   height: number
   format?: 'mp4' | 'webm'
   onProgress?: (ratio: number) => void
@@ -324,7 +326,9 @@ export async function exportVideo(opts: ExportOptions): Promise<ExportedVideo> {
 
   const fp = await getFFmpeg(onLog)
   const nativeVideoEncoder = fp.videoEncoder ? await fp.videoEncoder().catch(() => null) : null
-  const { w: W, h: H } = aspectToWH(aspect, height)
+  const { w: W, h: H } = aspectToWH(aspect, height, opts.canvasWidth && opts.canvasHeight
+    ? { width: opts.canvasWidth, height: opts.canvasHeight }
+    : undefined)
   const duration = projectDuration(clips, overlays, audios, texts, backgrounds)
 
   const progressReporter = createProgressReporter(onProgress)

@@ -4,6 +4,7 @@ import { formatTimeFine, projectDuration } from '../utils/time'
 import { useLanguage } from '../i18n'
 import Icon from './Icon'
 import Preview from './Preview'
+import { canvasLabel, canvasRatio } from '../utils/canvas'
 
 type PreviewMode = 'clean' | 'youtube' | 'shorts' | 'tiktok' | 'reels'
 
@@ -14,8 +15,6 @@ const MODE_RATIO: Record<PreviewMode, number | null> = {
   tiktok: 9 / 16,
   reels: 9 / 16,
 }
-
-const PROJECT_RATIO = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 } as const
 
 function fitBox(width: number, height: number, ratio: number) {
   if (width <= 0 || height <= 0) return { width: 0, height: 0 }
@@ -78,6 +77,8 @@ function PlatformUi({ mode, title, playhead, duration, isPlaying }: { mode: Prev
 export default function ShowcasePreviewDialog({ projectName, onClose }: { projectName?: string | null; onClose: () => void }) {
   const { t } = useLanguage()
   const aspectRatio = useEditor((state) => state.aspectRatio)
+  const canvasWidth = useEditor((state) => state.canvasWidth)
+  const canvasHeight = useEditor((state) => state.canvasHeight)
   const clips = useEditor((state) => state.clips)
   const overlays = useEditor((state) => state.overlays)
   const audios = useEditor((state) => state.audios)
@@ -93,11 +94,14 @@ export default function ShowcasePreviewDialog({ projectName, onClose }: { projec
   const [showUi, setShowUi] = useState(true)
   const [showSafeZone, setShowSafeZone] = useState(false)
   const stageRef = useRef<HTMLDivElement>(null)
-  const ratio = MODE_RATIO[mode] ?? PROJECT_RATIO[aspectRatio]
+  const projectRatio = canvasRatio(aspectRatio, { width: canvasWidth, height: canvasHeight })
+  const ratio = MODE_RATIO[mode] ?? projectRatio
   const [deviceBox, setDeviceBox] = useState({ width: 0, height: 0 })
   const duration = projectDuration(clips, overlays, audios, texts, backgrounds)
   const expectedRatio = mode === 'youtube' ? '16:9' : mode === 'clean' ? null : '9:16'
-  const ratioMismatch = expectedRatio != null && aspectRatio !== expectedRatio
+  const expectedRatioValue = expectedRatio === '16:9' ? 16 / 9 : expectedRatio === '9:16' ? 9 / 16 : null
+  const ratioMismatch = expectedRatioValue != null && Math.abs(projectRatio - expectedRatioValue) > 0.001
+  const projectRatioLabel = canvasLabel(aspectRatio, { width: canvasWidth, height: canvasHeight })
   const title = projectName || t('내 영상', 'My video')
 
   const close = () => {
@@ -196,7 +200,7 @@ export default function ShowcasePreviewDialog({ projectName, onClose }: { projec
           <aside className="showcase-preview__status" aria-live="polite">
             <span>{mode === 'clean' ? t('내보낼 화면만 표시 중', 'Showing export canvas only') : t('플랫폼 UI 모의 보기', 'Simulated platform UI')}</span>
             {ratioMismatch
-              ? <b>{t(`${mode === 'youtube' ? 'YouTube 영상' : mode === 'shorts' ? 'YouTube Shorts' : mode === 'tiktok' ? 'TikTok' : 'Instagram Reels'}은 ${expectedRatio} 화면을 권장합니다. 현재 프로젝트는 ${aspectRatio}입니다.`, `${mode === 'youtube' ? 'YouTube video' : mode === 'shorts' ? 'YouTube Shorts' : mode === 'tiktok' ? 'TikTok' : 'Instagram Reels'} works best at ${expectedRatio}; this project is ${aspectRatio}.`)}</b>
+              ? <b>{t(`${mode === 'youtube' ? 'YouTube 영상' : mode === 'shorts' ? 'YouTube Shorts' : mode === 'tiktok' ? 'TikTok' : 'Instagram Reels'}은 ${expectedRatio} 화면을 권장합니다. 현재 프로젝트는 ${projectRatioLabel}입니다.`, `${mode === 'youtube' ? 'YouTube video' : mode === 'shorts' ? 'YouTube Shorts' : mode === 'tiktok' ? 'TikTok' : 'Instagram Reels'} works best at ${expectedRatio}; this project is ${projectRatioLabel}.`)}</b>
               : mode !== 'clean' && <b>{t(`${expectedRatio} 화면 비율이 맞습니다.`, `The ${expectedRatio} aspect ratio matches.`)}</b>}
             <small>{t('실제 버튼 위치는 앱 버전·기기·계정 상태에 따라 조금 달라질 수 있습니다.', 'Actual controls may vary slightly by app version, device, and account state.')}</small>
           </aside>

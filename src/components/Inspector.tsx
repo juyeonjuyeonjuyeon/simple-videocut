@@ -18,6 +18,7 @@ import { DEFAULT_BACKGROUND_REMOVAL_SENSITIVITY } from '../utils/background-remo
 import { BASIC_MOTION_OPTIONS } from '../utils/basic-motion'
 import { resolveVisualFilter, VISUAL_FILTER_OPTIONS } from '../utils/color-filter'
 import { inferTextStylePreset, TEXT_STYLE_OPTIONS, textStylePatch, type TextStylePreset } from '../utils/text-style'
+import { CANVAS_PRESETS, CANVAS_MAX_HEIGHT, CANVAS_MAX_WIDTH, CANVAS_MIN_SIDE } from '../utils/canvas'
 
 type Patch = Partial<Pick<Clip & Overlay,
   'rotate' | 'flipH' | 'flipV' | 'crop' | 'speed' | 'volume' | 'muted' | 'repeat' |
@@ -896,12 +897,22 @@ export default function Inspector({ onOpenCrop, onClose, expanded, onToggleExpan
   const texts = useEditor((s) => s.texts)
   const backgrounds = useEditor((s) => s.backgrounds)
   const aspectRatio = useEditor((s) => s.aspectRatio)
+  const canvasWidth = useEditor((s) => s.canvasWidth)
+  const canvasHeight = useEditor((s) => s.canvasHeight)
   const setAspectRatio = useEditor((s) => s.setAspectRatio)
+  const setCanvasDimensions = useEditor((s) => s.setCanvasDimensions)
   const groupSelected = useEditor((s) => s.groupSelected)
   const ungroupSelected = useEditor((s) => s.ungroupSelected)
   const deleteSelected = useEditor((s) => s.deleteSelected)
   const groups = useEditor((s) => s.groups)
   const [activeTab, setActiveTab] = useState<InspectorTab>('basic')
+  const [customWidth, setCustomWidth] = useState(canvasWidth)
+  const [customHeight, setCustomHeight] = useState(canvasHeight)
+
+  useEffect(() => {
+    setCustomWidth(canvasWidth)
+    setCustomHeight(canvasHeight)
+  }, [canvasHeight, canvasWidth])
 
   const selClip = selection?.type === 'clip' ? clips.find((c) => c.id === selection.id) : null
   const selOverlay = selection?.type === 'overlay' ? overlays.find((o) => o.id === selection.id) : null
@@ -948,11 +959,21 @@ export default function Inspector({ onOpenCrop, onClose, expanded, onToggleExpan
         <summary>{translate('캔버스', 'Canvas')}</summary>
         <div className="inspector__group">
           <div className="field__label"><span>{translate('화면 비율', 'Aspect ratio')}</span></div>
-          <div className="chips">
-            {(['16:9', '9:16', '1:1'] as const).map((r) => (
-              <button key={r} className={`chip${aspectRatio === r ? ' chip--on' : ''}`} onClick={() => setAspectRatio(r)}>{r}</button>
+          <div className="chips canvas-presets">
+            {CANVAS_PRESETS.map((preset) => (
+              <button key={preset.id} className={`chip${aspectRatio === preset.id ? ' chip--on' : ''}`} onClick={() => setAspectRatio(preset.id)}>{preset.label}</button>
             ))}
           </div>
+          <div className="canvas-size-readout" aria-live="polite">{canvasWidth} × {canvasHeight} px</div>
+          <div className="canvas-size-fields">
+            <label><span>{translate('너비', 'Width')}</span><input className="num" type="number" min={CANVAS_MIN_SIDE} max={CANVAS_MAX_WIDTH} step={2}
+              value={customWidth} onChange={(event) => setCustomWidth(Number(event.target.value))} aria-label={translate('캔버스 너비', 'Canvas width')} /></label>
+            <span aria-hidden="true">×</span>
+            <label><span>{translate('높이', 'Height')}</span><input className="num" type="number" min={CANVAS_MIN_SIDE} max={CANVAS_MAX_HEIGHT} step={2}
+              value={customHeight} onChange={(event) => setCustomHeight(Number(event.target.value))} aria-label={translate('캔버스 높이', 'Canvas height')} /></label>
+          </div>
+          <button type="button" className="btn btn--sm" onClick={() => setCanvasDimensions(customWidth, customHeight)}>{translate('사용자 크기 적용', 'Apply custom size')}</button>
+          <div className="inspector__hint">{translate('프로젝트에 요소가 있어도 언제든 바꿀 수 있습니다. 모든 위치와 크기는 새 캔버스 비율에 맞춰 유지됩니다.', 'You can change this at any time. Positions and sizes remain relative to the new canvas.')}</div>
         </div>
       </details>}
       {selection && selectedItems.length <= 1 && <InspectorTabs tabs={inspectorTabs} active={activeTab} onChange={setActiveTab} />}

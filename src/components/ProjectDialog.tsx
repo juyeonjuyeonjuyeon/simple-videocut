@@ -17,7 +17,7 @@ function snapshot(): ProjectState {
     markers: s.markers,
     groups: s.groups,
     visualOrder: s.visualOrder,
-    aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
+    aspectRatio: s.aspectRatio, canvasWidth: s.canvasWidth, canvasHeight: s.canvasHeight, exportSettings: s.exportSettings,
   }
 }
 

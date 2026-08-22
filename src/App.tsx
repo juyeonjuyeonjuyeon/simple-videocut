@@ -34,7 +34,7 @@ function snapshotProject() {
   return {
     mediaLibrary: s.mediaLibrary,
     clips: s.clips, overlays: s.overlays, audios: s.audios, backgrounds: s.backgrounds, texts: s.texts,
-    markers: s.markers, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
+    markers: s.markers, aspectRatio: s.aspectRatio, canvasWidth: s.canvasWidth, canvasHeight: s.canvasHeight, exportSettings: s.exportSettings,
     groups: s.groups,
     visualOrder: s.visualOrder,
   }
@@ -211,7 +211,8 @@ export default function App() {
       return JSON.stringify({
         ml: strip(s.mediaLibrary),
         c: strip(s.clips), o: strip(s.overlays), a: strip(s.audios), b: strip(s.backgrounds),
-        t: s.texts, m: s.markers, g: s.groups, vo: s.visualOrder, ar: s.aspectRatio, es: s.exportSettings,
+        t: s.texts, m: s.markers, g: s.groups, vo: s.visualOrder,
+        ar: s.aspectRatio, cw: s.canvasWidth, ch: s.canvasHeight, es: s.exportSettings,
       })
     }
     const saveNow = async () => {
@@ -234,7 +235,7 @@ export default function App() {
           markers: s.markers,
           groups: s.groups,
           visualOrder: s.visualOrder,
-          aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
+          aspectRatio: s.aspectRatio, canvasWidth: s.canvasWidth, canvasHeight: s.canvasHeight, exportSettings: s.exportSettings,
         })
         lastSig.current = sig
         setLastSavedAt(Date.now())

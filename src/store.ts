@@ -12,6 +12,7 @@ import { createStickerPlaceholderFile, stickerLabel } from './utils/sticker'
 import { basicMotionFadeIn, basicMotionFrames } from './utils/basic-motion'
 import { resolveVisualFilter } from './utils/color-filter'
 import { translate } from './i18n'
+import { canvasDimensionsForPreset, normalizeCanvasDimensions, scaledCanvasDimensions } from './utils/canvas'
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)
 const registerNativeMedia = async (file: File) => {
@@ -36,6 +37,8 @@ interface EditorState {
   selection: Selection
   selectedItems: TimelineItemRef[]
   aspectRatio: AspectRatio
+  canvasWidth: number
+  canvasHeight: number
   playhead: number
   isPlaying: boolean
   loop: boolean
@@ -104,6 +107,7 @@ interface EditorState {
   renameGroup: (id: string, name: string) => void
   moveTimelineItems: (items: TimelineItemRef[], delta: number) => void
   setAspectRatio: (r: AspectRatio) => void
+  setCanvasDimensions: (width: number, height: number) => void
   setPlayhead: (t: number) => void
   setPlaying: (p: boolean) => void
   setLoop: (l: boolean) => void
@@ -202,6 +206,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   selection: null,
   selectedItems: [],
   aspectRatio: '16:9',
+  canvasWidth: 1280,
+  canvasHeight: 720,
   playhead: 0,
   isPlaying: false,
   loop: false,
@@ -985,11 +991,34 @@ export const useEditor = create<EditorState>((set, get) => ({
       texts: s.texts.map((item) => has('text', item.id) ? { ...item, start: item.start + applied, end: item.end + applied } : item),
     }
   }),
-  setAspectRatio: (r) => set({ aspectRatio: r }),
+  setAspectRatio: (r) => set((s) => {
+    if (r === 'custom') return { aspectRatio: r }
+    const dimensions = canvasDimensionsForPreset(r, s.exportSettings.height)
+    return { aspectRatio: r, canvasWidth: dimensions.width, canvasHeight: dimensions.height }
+  }),
+  setCanvasDimensions: (width, height) => set((s) => {
+    const dimensions = normalizeCanvasDimensions(width, height)
+    return {
+      aspectRatio: 'custom',
+      canvasWidth: dimensions.width,
+      canvasHeight: dimensions.height,
+      exportSettings: { ...s.exportSettings, height: dimensions.height },
+    }
+  }),
   setPlayhead: (t) => set({ playhead: Math.max(0, t) }),
   setPlaying: (p) => set({ isPlaying: p }),
   setLoop: (l) => set({ loop: l }),
-  setExportSettings: (patch) => set((s) => ({ exportSettings: { ...s.exportSettings, ...patch } })),
+  setExportSettings: (patch) => set((s) => {
+    if (patch.height == null || patch.height === s.exportSettings.height) return { exportSettings: { ...s.exportSettings, ...patch } }
+    const dimensions = s.aspectRatio === 'custom'
+      ? scaledCanvasDimensions({ width: s.canvasWidth, height: s.canvasHeight }, patch.height)
+      : canvasDimensionsForPreset(s.aspectRatio, patch.height)
+    return {
+      exportSettings: { ...s.exportSettings, ...patch, height: dimensions.height },
+      canvasWidth: dimensions.width,
+      canvasHeight: dimensions.height,
+    }
+  }),
 
   deleteSelected: () => {
     const s = get()
@@ -1053,17 +1082,19 @@ export const useEditor = create<EditorState>((set, get) => ({
   replaceProject: (p) => replaceEditorProject(p),
   resetProject: () => replaceEditorProject({
     mediaLibrary: [], clips: [], overlays: [], audios: [], backgrounds: [], texts: [], markers: [], groups: [], visualOrder: [],
-    aspectRatio: '16:9', exportSettings: { height: 720, format: 'mp4', filename: 'simplecut' },
+    aspectRatio: '16:9', canvasWidth: 1280, canvasHeight: 720,
+    exportSettings: { height: 720, format: 'mp4', filename: 'simplecut' },
   }),
 }))
 
 type EditorSnapshot = Pick<EditorState,
-  'mediaLibrary' | 'clips' | 'overlays' | 'audios' | 'texts' | 'backgrounds' | 'markers' | 'groups' | 'visualOrder' | 'aspectRatio' | 'exportSettings'>
+  'mediaLibrary' | 'clips' | 'overlays' | 'audios' | 'texts' | 'backgrounds' | 'markers' | 'groups' | 'visualOrder' | 'aspectRatio' | 'canvasWidth' | 'canvasHeight' | 'exportSettings'>
 
 const takeSnapshot = (s: EditorState): EditorSnapshot => ({
   mediaLibrary: s.mediaLibrary,
   clips: s.clips, overlays: s.overlays, audios: s.audios, texts: s.texts,
-  backgrounds: s.backgrounds, markers: s.markers, groups: s.groups, visualOrder: s.visualOrder, aspectRatio: s.aspectRatio, exportSettings: s.exportSettings,
+  backgrounds: s.backgrounds, markers: s.markers, groups: s.groups, visualOrder: s.visualOrder,
+  aspectRatio: s.aspectRatio, canvasWidth: s.canvasWidth, canvasHeight: s.canvasHeight, exportSettings: s.exportSettings,
 })
 
 const past: EditorSnapshot[] = []
@@ -1083,6 +1114,7 @@ const historyKey = (a: EditorState, b: EditorState) => {
   if (a.groups !== b.groups) return 'groups'
   if (a.visualOrder !== b.visualOrder) return 'visualOrder'
   if (a.aspectRatio !== b.aspectRatio) return 'aspectRatio'
+  if (a.canvasWidth !== b.canvasWidth || a.canvasHeight !== b.canvasHeight) return 'canvasDimensions'
   if (a.exportSettings !== b.exportSettings) return 'exportSettings'
   return ''
 }
@@ -1151,7 +1183,10 @@ function replaceEditorProject(p: ProjectState) {
     markers: p.markers ?? [],
     groups: p.groups ?? [],
     visualOrder: normalizeVisualOrder(p.overlays, p.texts, p.visualOrder),
-    aspectRatio: p.aspectRatio, exportSettings: p.exportSettings,
+    aspectRatio: p.aspectRatio,
+    canvasWidth: p.canvasWidth ?? canvasDimensionsForPreset(p.aspectRatio === 'custom' ? '16:9' : p.aspectRatio, p.exportSettings.height).width,
+    canvasHeight: p.canvasHeight ?? p.exportSettings.height,
+    exportSettings: p.exportSettings,
     selection: null, selectedItems: [], playhead: 0, isPlaying: false, canUndo: false, canRedo: false,
   })
   applyingHistory = false

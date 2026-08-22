@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useEditor } from '../store'
-import type { AspectRatio, Overlay, VisualFilterSettings } from '../types'
+import type { Overlay, VisualFilterSettings } from '../types'
 import {
   resolveTimelineTime,
   totalDuration,
@@ -25,8 +25,8 @@ import { resolveMainPlacement } from '../utils/main-placement'
 import BackgroundRemovedImage from './BackgroundRemovedImage'
 import { colorFilterCss, colorFilterDomId, resolveVisualFilter, svgColorMatrixValues } from '../utils/color-filter'
 import { resolveTwoPointerGesture, type GesturePoint } from '../utils/preview-gesture'
+import { canvasRatio } from '../utils/canvas'
 
-const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
 const DRIFT = 0.35 // seconds before we hard-seek a media element back in sync
 const SNAP_PX = 8
 
@@ -179,6 +179,8 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
   const playhead = useEditor((s) => s.playhead)
   const isPlaying = useEditor((s) => s.isPlaying)
   const aspectRatio = useEditor((s) => s.aspectRatio)
+  const canvasWidth = useEditor((s) => s.canvasWidth)
+  const canvasHeight = useEditor((s) => s.canvasHeight)
   const setPlayhead = useEditor((s) => s.setPlayhead)
   const setPlaying = useEditor((s) => s.setPlaying)
   const select = useEditor((s) => s.select)
@@ -437,12 +439,12 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
   useEffect(() => {
     const el = areaRef.current
     if (!el) return
-    const recompute = () => setBox(fitBox(el.clientWidth, el.clientHeight, RATIO[aspectRatio]))
+    const recompute = () => setBox(fitBox(el.clientWidth, el.clientHeight, canvasRatio(aspectRatio, { width: canvasWidth, height: canvasHeight })))
     const ro = new ResizeObserver(recompute)
     ro.observe(el)
     recompute()
     return () => ro.disconnect()
-  }, [aspectRatio])
+  }, [aspectRatio, canvasHeight, canvasWidth])
 
   // Close the WebAudio context when the preview unmounts.
   useEffect(() => () => { audioCtx.current?.close().catch(() => {}) }, [])

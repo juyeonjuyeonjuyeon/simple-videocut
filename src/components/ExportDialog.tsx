@@ -7,6 +7,7 @@ import { saveBlob, keepAwake } from '../utils/io'
 import type { ExportHeight } from '../types'
 import Icon from './Icon'
 import { localizedErrorMessage, translate, useLanguage } from '../i18n'
+import { canvasLabel } from '../utils/canvas'
 
 const RESOLUTIONS: { h: ExportHeight; label: string }[] = [
   { h: 480, label: '480p' },
@@ -66,6 +67,8 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
   const backgrounds = useEditor((s) => s.backgrounds)
   const visualOrder = useEditor((s) => s.visualOrder)
   const aspectRatio = useEditor((s) => s.aspectRatio)
+  const canvasWidth = useEditor((s) => s.canvasWidth)
+  const canvasHeight = useEditor((s) => s.canvasHeight)
   const exportSettings = useEditor((s) => s.exportSettings)
   const setExportSettings = useEditor((s) => s.setExportSettings)
 
@@ -105,6 +108,8 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
         backgrounds,
         visualOrder,
         aspect: aspectRatio,
+        canvasWidth,
+        canvasHeight,
         height: exportSettings.height,
         format: exportSettings.format,
         onProgress: (r) => {
@@ -170,7 +175,8 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
           {phase !== 'running' && <button className="iconbtn" onClick={onClose} aria-label={t('닫기', 'Close')}><Icon name="close" /></button>}
         </div>
 
-        <div className="modal__row"><span>{t('화면 비율', 'Aspect ratio')}</span><b>{aspectRatio}</b></div>
+        <div className="modal__row"><span>{t('화면 비율', 'Aspect ratio')}</span><b>{canvasLabel(aspectRatio, { width: canvasWidth, height: canvasHeight })}</b></div>
+        <div className="modal__row"><span>{t('출력 크기', 'Output size')}</span><b>{canvasWidth} × {canvasHeight} px</b></div>
         <div className="modal__row"><span>{t('전체 길이', 'Total duration')}</span><b>{formatTime(duration)}</b></div>
 
         <div className="modal__field">
