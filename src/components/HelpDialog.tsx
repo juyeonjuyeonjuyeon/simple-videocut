@@ -13,6 +13,7 @@ const shortcuts = [
   ['← / →', '0.1초 이동', 'Move 0.1 seconds'],
   ['⌥ + ← / →', '한 프레임 이동', 'Move one frame'],
   ['⇧ + ← / →', '1초 이동', 'Move one second'],
+  ['↑ / ↓', '이전·다음 편집 지점으로 이동', 'Previous / next edit point'],
   ['Home / End', '처음·끝으로 이동', 'Go to start / end'],
   ['⌘/Ctrl + D', '선택 항목 복제', 'Duplicate selection'],
   ['⌘/Ctrl + G', '여러 선택 항목 그룹 만들기', 'Group selected items'],
@@ -64,10 +65,12 @@ export default function HelpDialog({ onClose }: Props) {
             <ul>
               <li>{t('타임라인의 ‘여러 항목’ 버튼을 켜고 항목을 차례로 눌러 함께 선택합니다.', 'Turn on Multi-select in the timeline, then tap items to select them together.')}</li>
               <li>{t('클립을 길게 누르면 우클릭과 같은 편집 메뉴가 열립니다.', 'Touch and hold a clip to open the same menu as right-click.')}</li>
-              <li>{t('선택한 영상·이미지는 미리보기의 손잡이로 크기와 회전을 조절합니다.', 'Use preview handles to resize and rotate selected video or images.')}</li>
+              <li>{t('선택한 영상·이미지는 한 손가락으로 옮기고 두 손가락으로 이동·확대·회전을 함께 조절합니다.', 'Move selected video or images with one finger, or use two fingers to move, scale, and rotate together.')}</li>
+              <li>{t('이전·다음 편집 지점 버튼은 컷, 레이어 시작·끝, 마커와 키프레임 사이를 한 번에 이동합니다.', 'Previous and next edit-point buttons jump across cuts, layer edges, markers, and keyframes.')}</li>
               <li>{t('도형도 영상·이미지처럼 한 손가락으로 이동하고 손잡이로 크기를 바꿀 수 있습니다.', 'Move shapes with one finger and resize them with the handles.')}</li>
               <li>{t('사진 앱·음성 메모·파일 앱에서 항목을 길게 잡은 채 앱을 전환해 편집기 화면에 놓을 수 있습니다.', 'Hold an item in Photos, Voice Memos, or Files, switch apps, and drop it in the editor.')}</li>
               <li>{t('가져오기 버튼으로 넣은 파일은 왼쪽 보관함에서 메인 또는 레이어에 추가합니다.', 'Files imported with the button appear in the left media bin for adding to the main track or a layer.')}</li>
+              <li>{t('iPad 키보드에서는 Tab으로 타임라인 항목을 찾고 Enter로 선택하며, Shift+F10으로 편집 메뉴를 엽니다.', 'On an iPad keyboard, use Tab to reach timeline items, Enter to select, and Shift+F10 to open the edit menu.')}</li>
             </ul>
           </section>
         </div>

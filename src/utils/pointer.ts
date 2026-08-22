@@ -4,6 +4,7 @@ type PointerDragEnd = (event: PointerEvent, cancelled: boolean) => void
 export function startPointerDrag(
   onMove: (event: PointerEvent) => void,
   onEnd?: PointerDragEnd,
+  pointerId?: number,
 ): () => void {
   const previousUserSelect = document.body.style.userSelect
   document.body.style.userSelect = 'none'
@@ -17,11 +18,13 @@ export function startPointerDrag(
     window.removeEventListener('pointercancel', cancel)
     document.body.style.userSelect = previousUserSelect
   }
+  const matches = (event: PointerEvent) => pointerId == null || event.pointerId === pointerId
   const finish = (event: PointerEvent, cancelled: boolean) => {
+    if (!matches(event)) return
     cleanup()
     onEnd?.(event, cancelled)
   }
-  const move = (event: PointerEvent) => onMove(event)
+  const move = (event: PointerEvent) => { if (matches(event)) onMove(event) }
   const up = (event: PointerEvent) => finish(event, false)
   const cancel = (event: PointerEvent) => finish(event, true)
 

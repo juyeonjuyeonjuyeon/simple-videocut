@@ -26,6 +26,7 @@ import BackgroundRemovedImage from './BackgroundRemovedImage'
 import { colorFilterCss, colorFilterDomId, resolveVisualFilter, svgColorMatrixValues } from '../utils/color-filter'
 import { resolveTwoPointerGesture, type GesturePoint } from '../utils/preview-gesture'
 import { canvasRatio } from '../utils/canvas'
+import { hapticTick } from '../utils/haptics'
 
 const DRIFT = 0.35 // seconds before we hard-seek a media element back in sync
 const SNAP_PX = 8
@@ -211,6 +212,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null })
   const [rotationReadout, setRotationReadout] = useState<{ type: 'clip' | 'overlay' | 'text'; id: string; angle: number } | null>(null)
   const touchSessionRef = useRef<PreviewTouchSession | null>(null)
+  const touchSnapRef = useRef('')
   const selClip = selection?.type === 'clip' ? clips.find((c) => c.id === selection.id) : null
   const selOverlayId = selection?.type === 'overlay' ? selection.id : null
   const selOverlay = selOverlayId ? overlays.find((o) => o.id === selOverlayId) : null
@@ -341,6 +343,10 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
       const y = snapY ? 0.5 : rawY
       setGuides({ x: snapX ? 0.5 : null, y: snapY ? 0.5 : null })
       const nextAngle = normalizeAngle(session.base.angle + rotation)
+      const angleSnapped = current.length === 2 && Math.abs(nextAngle / 45 - Math.round(nextAngle / 45)) < 0.0001
+      const snapSignature = `${snapX ? 'x' : ''}${snapY ? 'y' : ''}${angleSnapped ? 'r' : ''}`
+      if (snapSignature && snapSignature !== touchSnapRef.current) hapticTick()
+      touchSnapRef.current = snapSignature
       const state = useEditor.getState()
 
       if (session.target.type === 'clip') {
@@ -370,6 +376,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
       session.pointers.delete(event.pointerId)
       if (!session.pointers.size) {
         touchSessionRef.current = null
+        touchSnapRef.current = ''
         setGuides({ x: null, y: null })
         setRotationReadout(null)
         return
@@ -728,7 +735,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
       const snapY = snapLayerAxis(rawY, height, rect.height)
       setGuides({ x: snapX.guide, y: snapY.guide })
       updateClip(id, { canvasX: snapX.center, canvasY: snapY.center })
-    }, () => setGuides({ x: null, y: null }))
+    }, () => setGuides({ x: null, y: null }), e.pointerId)
   }
 
   // ---- resize a main clip from every edge/corner, using its contained size as 100% ----
@@ -786,7 +793,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
         canvasScale: nextWidth / placement.baseWidth,
         canvasScaleY: aspectLocked ? undefined : nextHeight / placement.baseHeight,
       })
-    })
+    }, undefined, e.pointerId)
   }
 
   // ---- drag a PiP overlay around the frame (keeps the grab point fixed) ----
@@ -815,7 +822,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
       const snapY = snapLayerAxis(rawY, height, rect.height)
       setGuides({ x: snapX.guide, y: snapY.guide })
       updateLayerPosition('overlay', id, { x: snapX.center, y: snapY.center })
-    }, () => setGuides({ x: null, y: null }))
+    }, () => setGuides({ x: null, y: null }), e.pointerId)
   }
 
   // ---- resize a PiP overlay while its opposite edge/corner stays anchored ----
@@ -877,7 +884,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
         scale: nextWidth / rect.width,
         scaleY: aspectLocked ? undefined : nextHeight / rect.height,
       })
-    })
+    }, undefined, e.pointerId)
   }
 
   // ---- drag the rotation handle to spin a main clip, overlay, or text freely ----
@@ -920,7 +927,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
       if (kind === 'clip') updateClip(id, { canvasAngle: deg })
       else if (kind === 'overlay') updateOverlay(id, { angle: deg })
       else updateText(id, { angle: deg })
-    }, () => setRotationReadout(null))
+    }, () => setRotationReadout(null), e.pointerId)
   }
 
   // ---- drag a text overlay around the frame (mouse + touch via pointer events) ----
@@ -944,7 +951,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
       const snapY = Math.abs(rawY - 0.5) * rect.height <= SNAP_PX
       setGuides({ x: snapX ? 0.5 : null, y: snapY ? 0.5 : null })
       updateLayerPosition('text', id, { x: snapX ? 0.5 : rawX, y: snapY ? 0.5 : rawY })
-    }, () => setGuides({ x: null, y: null }))
+    }, () => setGuides({ x: null, y: null }), e.pointerId)
   }
 
   // ---- drag the corner handle to resize text (distance-from-center based) ----
@@ -965,7 +972,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
     startPointerDrag((ev) => {
       const d = Math.hypot(ev.clientX - cx, ev.clientY - cy)
       updateText(id, { size: (startSize * d) / startDist })
-    })
+    }, undefined, e.pointerId)
   }
 
   const visibleTexts = texts.filter((t) => !t.hidden && playhead >= t.start && playhead <= t.end)

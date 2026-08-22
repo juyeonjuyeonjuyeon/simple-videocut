@@ -117,3 +117,27 @@ test('two fingers move, scale, and rotate the selected preview item together', a
   await expect.poll(async () => (await controls.boundingBox())?.width ?? 0).toBeGreaterThan(before.width * 1.2)
   await expect.poll(() => controls.evaluate((element) => element.getAttribute('style') ?? '')).not.toContain('rotate(0deg)')
 })
+
+test('an unrelated second pointer cannot cancel an active playhead drag', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === 'desktop', 'Pointer identity matters on touch projects')
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '텍스트', exact: true }).click()
+  const playhead = page.getByRole('slider', { name: '타임라인 재생 헤드' })
+  const box = await playhead.boundingBox()
+  if (!box) throw new Error('재생 헤드 위치를 읽을 수 없습니다.')
+  const start = { x: box.x + box.width / 2, y: box.y + 18 }
+
+  await playhead.dispatchEvent('pointerdown', { pointerType: 'touch', pointerId: 31, isPrimary: true, button: 0, clientX: start.x, clientY: start.y })
+  await page.evaluate(({ start }) => {
+    window.dispatchEvent(new PointerEvent('pointermove', { pointerType: 'touch', pointerId: 31, isPrimary: true, clientX: start.x + 24, clientY: start.y }))
+  }, { start })
+  const afterFirstMove = Number(await playhead.getAttribute('aria-valuenow'))
+  await page.evaluate(({ start }) => {
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch', pointerId: 32, isPrimary: false, clientX: start.x, clientY: start.y }))
+    window.dispatchEvent(new PointerEvent('pointermove', { pointerType: 'touch', pointerId: 31, isPrimary: true, clientX: start.x + 48, clientY: start.y }))
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch', pointerId: 31, isPrimary: true, clientX: start.x + 48, clientY: start.y }))
+  }, { start })
+
+  await expect.poll(async () => Number(await playhead.getAttribute('aria-valuenow'))).toBeGreaterThan(afterFirstMove * 1.8)
+})

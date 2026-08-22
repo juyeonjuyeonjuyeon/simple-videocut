@@ -117,9 +117,9 @@ export default function ProjectDialog({ onClose, activeName, initialMode = 'mana
 
   return (
     <div className="modal" onClick={busy ? undefined : onClose}>
-      <div className="modal__panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal__panel" role="dialog" aria-modal="true" aria-labelledby="project-dialog-title" aria-busy={Boolean(busy) || undefined} onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
-          <h2>{t('프로젝트', 'Project')}</h2>
+          <h2 id="project-dialog-title">{t('프로젝트', 'Project')}</h2>
           {!busy && <button className="iconbtn" onClick={onClose} aria-label={t('닫기', 'Close')}><Icon name="close" /></button>}
         </div>
 

@@ -22,6 +22,8 @@ import type { Clip, Selection, PositionKeyframe, TimelineItemRef } from '../type
 import { AudioWaveform, ClipThumbnailStrip } from './TimelineMedia'
 import Icon from './Icon'
 import { translate, useLanguage } from '../i18n'
+import { collectTimelineEditPoints, nextTimelineEditPoint } from '../utils/timeline-navigation'
+import { hapticTick } from '../utils/haptics'
 
 const clipBg = (c: Clip) => (c.kind === 'color' ? c.bgColor ?? '#000000' : c.color)
 
@@ -210,6 +212,7 @@ export default function Timeline() {
   }, [])
 
   const total = projectDuration(clips, overlays, audios, texts, backgrounds)
+  const editPoints = collectTimelineEditPoints(clips, overlays, audios, texts, backgrounds, markers)
   const offsets = clipStartOffsets(clips)
   const usableTrackW = Math.max(1, trackW - TRACK_HEADER_W)
   // Scale that would fit all current content to the viewport (for the 전체보기 button & zoom %).
@@ -350,7 +353,7 @@ export default function Timeline() {
     setPlaying(false)
     setScrubbing(true)
     scrub(e.clientX)
-    startDrag((ev) => scrub(ev.clientX), () => setScrubbing(false))
+    startDrag((ev) => scrub(ev.clientX), () => setScrubbing(false), e.pointerId)
   }
 
   const onPlayheadDown = (e: React.PointerEvent) => {
@@ -368,7 +371,7 @@ export default function Timeline() {
     }, () => {
       document.body.style.cursor = ''
       setScrubbing(false)
-    })
+    }, e.pointerId)
   }
 
   const onTimelineBackgroundDown = (e: React.PointerEvent) => {
@@ -380,6 +383,11 @@ export default function Timeline() {
   const stepPlayhead = (delta: number) => {
     setPlaying(false)
     setPlayhead(Math.max(0, Math.min(total, playhead + delta)))
+  }
+
+  const jumpEditPoint = (direction: -1 | 1) => {
+    setPlaying(false)
+    setPlayhead(nextTimelineEditPoint(editPoints, playhead, direction))
   }
 
   const commitTimeDraft = () => {
@@ -411,7 +419,7 @@ export default function Timeline() {
         const current = useEditor.getState().markers.find((item) => item.id === id)
         if (current) setPlayhead(current.time)
       }
-    })
+    }, e.pointerId)
   }
 
   // ---- main clip: drag to reorder, right edge to trim ----
@@ -427,7 +435,7 @@ export default function Timeline() {
     let moved = false
     let menuOpened = false
     const longPress = e.pointerType === 'touch'
-      ? window.setTimeout(() => { menuOpened = true; openMenu({ type: 'clip', id }, startX, startY); navigator.vibrate?.(10) }, LONG_PRESS_MS)
+      ? window.setTimeout(() => { menuOpened = true; openMenu({ type: 'clip', id }, startX, startY); hapticTick(10) }, LONG_PRESS_MS)
       : 0
     setPlaying(false)
     startDrag(
@@ -470,6 +478,7 @@ export default function Timeline() {
         if (track === 'overlay') moveClipToOverlay(id)
         else if (track === 'bg') moveClipToBackground(id)
       },
+      e.pointerId,
     )
   }
 
@@ -492,7 +501,7 @@ export default function Timeline() {
       const baseLen = newDur / Math.max(1, clip.repeat)
       const trimEnd = Math.min(clip.duration, clip.trimStart + baseLen * clip.speed)
       updateClip(id, { trimEnd })
-    })
+    }, undefined, e.pointerId)
   }
 
   const onClipTrimStart = (e: React.PointerEvent, id: string) => {
@@ -504,7 +513,7 @@ export default function Timeline() {
     if (!clip) return
     const startX = e.clientX
     const startTrim = clip.trimStart
-    startDrag((ev) => updateClip(id, { trimStart: startTrim + ((ev.clientX - startX) / pxPerSec) * clip.speed }))
+    startDrag((ev) => updateClip(id, { trimStart: startTrim + ((ev.clientX - startX) / pxPerSec) * clip.speed }), undefined, e.pointerId)
   }
 
   // ---- generic free item (overlay/audio/text): drag body to move ----
@@ -532,7 +541,7 @@ export default function Timeline() {
     let moved = false
     let menuOpened = false
     const longPress = e.pointerType === 'touch'
-      ? window.setTimeout(() => { menuOpened = true; openMenu({ type: kind, id }, startX, startY); navigator.vibrate?.(10) }, LONG_PRESS_MS)
+      ? window.setTimeout(() => { menuOpened = true; openMenu({ type: kind, id }, startX, startY); hapticTick(10) }, LONG_PRESS_MS)
       : 0
     startDrag(
       (ev) => {
@@ -564,6 +573,7 @@ export default function Timeline() {
           else moveBackgroundToMain(id)
         }
       },
+      e.pointerId,
     )
   }
 
@@ -582,7 +592,7 @@ export default function Timeline() {
         const dt = (ev.clientX - startX) / pxPerSec
         if (edge === 'start') updateText(id, { start: Math.max(0, Math.min(snap(s0 + dt, id), e0 - 0.2)) })
         else updateText(id, { end: Math.max(s0 + 0.2, snap(e0 + dt, id)) })
-      })
+      }, undefined, e.pointerId)
     } else if (kind === 'overlay') {
       const o = st.overlays.find((x) => x.id === id)
       if (!o) return
@@ -598,7 +608,7 @@ export default function Timeline() {
           const baseLen = newLen / Math.max(1, o.repeat)
           updateOverlay(id, { trimEnd: Math.min(o.duration, ts0 + baseLen * o.speed) })
         }
-      })
+      }, undefined, e.pointerId)
     } else if (kind === 'background') {
       const b = st.backgrounds.find((x) => x.id === id)
       if (!b) return
@@ -614,7 +624,7 @@ export default function Timeline() {
           const baseLen = newLen / Math.max(1, b.repeat)
           updateBackground(id, { trimEnd: Math.min(b.duration, ts0 + baseLen * b.speed) })
         }
-      })
+      }, undefined, e.pointerId)
     } else {
       const a = st.audios.find((x) => x.id === id)
       if (!a) return
@@ -630,7 +640,7 @@ export default function Timeline() {
           const baseLen = newLen / Math.max(1, a.repeat)
           updateAudio(id, { trimEnd: Math.min(a.duration, ts0 + baseLen) })
         }
-      })
+      }, undefined, e.pointerId)
     }
   }
 
@@ -673,6 +683,24 @@ export default function Timeline() {
     <span key={frame.id} className="timeline-keyframe" style={{ left: `${Math.max(0, Math.min(100, (frame.time / Math.max(0.001, len)) * 100))}%` }} />
   ))
 
+  const onItemKeyDown = (event: React.KeyboardEvent<HTMLElement>, target: TimelineItemRef) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      select(target, event.metaKey || event.ctrlKey || event.shiftKey)
+    } else if (event.key === 'F2') {
+      event.preventDefault()
+      startEdit(target.type as 'clip' | FreeKind, target.id)
+    } else if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+      event.preventDefault()
+      const rect = event.currentTarget.getBoundingClientRect()
+      openMenu(target, rect.left + Math.min(rect.width / 2, 120), rect.top + Math.min(rect.height, 36))
+    } else if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault()
+      select(target)
+      queueMicrotask(() => useEditor.getState().deleteSelected())
+    }
+  }
+
   // Render one free item (overlay/audio/text) as a positioned chip.
   const freeChip = (
     kind: FreeKind, id: string, start: number, len: number, lane: number,
@@ -694,6 +722,11 @@ export default function Timeline() {
       onPointerDown={(e) => onFreeDown(e, kind, id)}
       onContextMenu={(e) => onItemContextMenu(e, { type: kind, id })}
       onDoubleClick={() => startEdit(kind, id)}
+      onKeyDown={(event) => onItemKeyDown(event, { type: kind, id })}
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      aria-label={label}
       title={translate(`${label} · 끌어서 이동${selected ? ', 끝을 끌어서 길이 조절' : ''} · 선택 후 이름 클릭으로 이름변경`, `${label} · Drag to move${selected ? ', drag an edge to resize' : ''} · Select, then click the name to rename`)}
     >
       {selected && !flags?.locked && <span className="tlclip__handle tlclip__handle--l" onPointerDown={(e) => onFreeTrim(e, kind, id, 'start')} />}
@@ -757,7 +790,9 @@ export default function Timeline() {
         </span>
         <div className="timeline__bar-spacer" />
         <div className="timeline__seek-control" aria-label={translate('재생 헤드 위치', 'Playhead position')}>
-          <button type="button" onClick={() => stepPlayhead(-1 / 30)} disabled={playhead <= 0} aria-label={translate('이전 프레임', 'Previous frame')} title={translate('이전 프레임', 'Previous frame')}>−1f</button>
+          <button type="button" className="timeline__edit-jump" onClick={() => jumpEditPoint(-1)} disabled={playhead <= 0}
+            aria-label={translate('이전 편집 지점', 'Previous edit point')} title={translate('이전 컷·레이어 끝·마커·키프레임 (↑)', 'Previous cut, layer edge, marker, or keyframe (↑)')}><Icon name="previousEdit" /></button>
+          <button type="button" className="timeline__frame-step" onClick={() => stepPlayhead(-1 / 30)} disabled={playhead <= 0} aria-label={translate('이전 프레임', 'Previous frame')} title={translate('이전 프레임', 'Previous frame')}>−1f</button>
           <input value={timeDraft ?? formatClock(playhead)} aria-label={translate('재생 헤드 시간', 'Playhead time')} spellCheck={false}
             onChange={(event) => setTimeDraft(event.target.value)} onFocus={(event) => event.currentTarget.select()}
             onBlur={commitTimeDraft} onKeyDown={(event) => {
@@ -765,7 +800,9 @@ export default function Timeline() {
               else if (event.key === 'Escape') setTimeDraft(null)
             }} />
           <span>/ {formatTime(total)}</span>
-          <button type="button" onClick={() => stepPlayhead(1 / 30)} disabled={playhead >= total} aria-label={translate('다음 프레임', 'Next frame')} title={translate('다음 프레임', 'Next frame')}>+1f</button>
+          <button type="button" className="timeline__frame-step" onClick={() => stepPlayhead(1 / 30)} disabled={playhead >= total} aria-label={translate('다음 프레임', 'Next frame')} title={translate('다음 프레임', 'Next frame')}>+1f</button>
+          <button type="button" className="timeline__edit-jump" onClick={() => jumpEditPoint(1)} disabled={playhead >= total}
+            aria-label={translate('다음 편집 지점', 'Next edit point')} title={translate('다음 컷·레이어 끝·마커·키프레임 (↓)', 'Next cut, layer edge, marker, or keyframe (↓)')}><Icon name="nextEdit" /></button>
         </div>
         <div className="timeline__zoom-control" aria-label={translate('타임라인 확대 및 축소', 'Timeline zoom')}>
           <button className="iconbtn iconbtn--xs" onClick={() => zoomBy(1 / 1.35)} disabled={atMin} aria-label={translate('타임라인 축소', 'Zoom out timeline')}><Icon name="zoomOut" /></button>
@@ -775,7 +812,7 @@ export default function Timeline() {
         </div>
       </div>
 
-      <div className={`timeline__scroll${fitMode ? ' timeline__scroll--fit' : ''}`} ref={scrollRef}>
+      <div className={`timeline__scroll${fitMode ? ' timeline__scroll--fit' : ''}`} ref={scrollRef} role="region" aria-label={translate('편집 타임라인', 'Editing timeline')}>
         <div className="timeline__content" style={{ width: contentW }}>
           <div className="timeline__ruler" onPointerDown={onRulerDown} onDoubleClick={(event) => addMarker(timeAt(event.clientX))}>
             {ticks.map((t) => (
@@ -859,6 +896,11 @@ export default function Timeline() {
                   onPointerDown={(e) => onClipDown(e, c.id)}
                   onContextMenu={(e) => onItemContextMenu(e, { type: 'clip', id: c.id })}
                   onDoubleClick={() => startEdit('clip', c.id)}
+                  onKeyDown={(event) => onItemKeyDown(event, { type: 'clip', id: c.id })}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={isSel}
+                  aria-label={c.name}
                   title={translate(`${c.name} · 끌어서 순서 변경, 오른쪽 끝을 끌어서 트림 · 선택 후 이름 클릭으로 이름변경`, `${c.name} · Drag to reorder, drag the right edge to trim · Select, then click the name to rename`)}
                 >
                   <ClipThumbnailStrip clip={c} width={clipWidth} />
@@ -940,6 +982,8 @@ export default function Timeline() {
             onPointerDown={onPlayheadDown} onKeyDown={(event) => {
               if (event.key === 'ArrowLeft') { event.preventDefault(); stepPlayhead(event.shiftKey ? -1 : -1 / 30) }
               else if (event.key === 'ArrowRight') { event.preventDefault(); stepPlayhead(event.shiftKey ? 1 : 1 / 30) }
+              else if (event.key === 'ArrowUp') { event.preventDefault(); jumpEditPoint(-1) }
+              else if (event.key === 'ArrowDown') { event.preventDefault(); jumpEditPoint(1) }
               else if (event.key === 'Home') { event.preventDefault(); setPlayhead(0) }
               else if (event.key === 'End') { event.preventDefault(); setPlayhead(total) }
             }}

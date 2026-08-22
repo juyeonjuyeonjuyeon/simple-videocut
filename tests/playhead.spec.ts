@@ -11,9 +11,19 @@ test('playhead supports time entry, frame steps, wide dragging, and empty-track 
   await time.fill('00:01.50')
   await time.press('Enter')
   await expect.poll(async () => Number(await playhead.getAttribute('aria-valuenow'))).toBeCloseTo(1.5, 2)
+  await page.getByRole('button', { name: '현재 위치에 마커 추가 (M)' }).click()
+  await page.getByRole('button', { name: '이전 편집 지점' }).click()
+  await expect.poll(async () => Number(await playhead.getAttribute('aria-valuenow'))).toBe(0)
+  await page.getByRole('button', { name: '다음 편집 지점' }).click()
+  await expect.poll(async () => Number(await playhead.getAttribute('aria-valuenow'))).toBeCloseTo(1.5, 2)
 
   await page.getByRole('button', { name: '다음 프레임' }).click()
   await expect.poll(async () => Number(await playhead.getAttribute('aria-valuenow'))).toBeCloseTo(1.5 + 1 / 30, 2)
+
+  const keyboardItem = page.locator('.tlclip[role=button]').first()
+  await keyboardItem.focus()
+  await keyboardItem.press('Enter')
+  await expect(keyboardItem).toHaveAttribute('aria-pressed', 'true')
 
   const before = await playhead.boundingBox()
   if (!before) throw new Error('재생 헤드 위치를 읽을 수 없습니다.')

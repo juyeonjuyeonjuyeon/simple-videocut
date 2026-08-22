@@ -1695,6 +1695,8 @@ input[type='range']:disabled { opacity: 0.4; }
 .timeline__seek-control button { min-width: 30px; min-height: 24px; padding: 2px 4px; color: var(--text-dim); border: 0; border-radius: 5px; background: transparent; font-size: 10px; font-weight: 700; cursor: pointer; }
 .timeline__seek-control button:hover:not(:disabled) { color: var(--text); background: var(--bg-3); }
 .timeline__seek-control button:disabled { opacity: .35; cursor: default; }
+.timeline__seek-control .timeline__edit-jump { min-width: 26px; display: grid; place-items: center; }
+.timeline__edit-jump .ui-icon { width: 14px; height: 14px; }
 .timeline__seek-control input { width: 70px; min-width: 0; padding: 2px 3px; color: var(--text); border: 0; border-radius: 4px; outline: 0; background: transparent; font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
 .timeline__seek-control input:focus { background: var(--bg-1); box-shadow: inset 0 0 0 1px var(--accent); }
 .timeline__seek-control span { color: var(--text-dim); font-size: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -2708,6 +2710,8 @@ html[data-language='en'] .timeline__ruler::before { content: 'Track'; }
 }
 
 @media (max-width: 520px) {
+  .timeline__seek-control { order: -2; }
+  .timeline__seek-control .timeline__frame-step { display: none; }
   .shape-picker { grid-template-columns: repeat(3, minmax(0, 1fr)); max-height: min(58vh, 440px); overflow-y: auto; }
 }
 

@@ -21,6 +21,7 @@ import ShapePicker from './components/ShapePicker'
 import StickerPicker from './components/StickerPicker'
 import ShowcasePreviewDialog from './components/ShowcasePreviewDialog'
 import { localizedErrorMessage, useLanguage } from './i18n'
+import { collectTimelineEditPoints, nextTimelineEditPoint } from './utils/timeline-navigation'
 
 const ACTIVE_PROJECT_KEY = 'simplecut-active-project-name'
 const COMPACT_PANEL_QUERY = '(max-width: 1100px), (max-height: 520px)'
@@ -47,6 +48,7 @@ export default function App() {
   const overlays = useEditor((s) => s.overlays)
   const audios = useEditor((s) => s.audios)
   const texts = useEditor((s) => s.texts)
+  const markers = useEditor((s) => s.markers)
   const selection = useEditor((s) => s.selection)
   const selectedItems = useEditor((s) => s.selectedItems)
   const playhead = useEditor((s) => s.playhead)
@@ -150,7 +152,7 @@ export default function App() {
       else setTimelineH(Math.max(140, Math.min(window.innerHeight - ev.clientY, window.innerHeight * 0.72)))
     }, () => {
       document.body.style.cursor = ''
-    })
+    }, e.pointerId)
   }
   const appStyle = {
     ['--inspector-w' as string]: inspectorOpen ? `${inspectorW}px` : '0px',
@@ -304,6 +306,7 @@ export default function App() {
 
   const backgrounds = useEditor((s) => s.backgrounds)
   const total = projectDuration(clips, overlays, audios, texts, backgrounds)
+  const timelineEditPoints = collectTimelineEditPoints(clips, overlays, audios, texts, backgrounds, markers)
   const hasClips = clips.length > 0
   const hasContent = mediaLibrary.length > 0 || hasClips || overlays.length > 0 || audios.length > 0 || backgrounds.length > 0 || texts.length > 0
 
@@ -333,6 +336,7 @@ export default function App() {
   // Keyboard shortcuts (ignored while typing in inputs).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return
       const tag = (e.target as HTMLElement)?.tagName
       const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable
       const modalOpen = showExport || showHelp || showCropEditor || showShapes || showShowcasePreview || showProjectHome || projectDialogMode !== null
@@ -387,6 +391,12 @@ export default function App() {
         e.preventDefault()
         const step = e.altKey ? 1 / 30 : e.shiftKey ? 1 : 0.1
         setPlayhead(Math.min(total, playhead + step))
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setPlayhead(nextTimelineEditPoint(timelineEditPoints, playhead, -1))
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setPlayhead(nextTimelineEditPoint(timelineEditPoints, playhead, 1))
       } else if (e.key === 'Home') {
         e.preventDefault()
         setPlayhead(0)

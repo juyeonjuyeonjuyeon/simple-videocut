@@ -4,7 +4,7 @@ export type IconName = 'brand' | 'plus' | 'folder' | 'play' | 'pause' | 'repeat'
   'music' | 'palette' | 'text' | 'undo' | 'redo' | 'copy' | 'trash' | 'download' | 'upload' | 'share' | 'close' |
   'warning' | 'screen' | 'video' | 'image' | 'mute' | 'rotate' | 'flipH' | 'flipV' | 'save' | 'panel' | 'crop' | 'lock' | 'unlock' | 'library' | 'search' |
   'eye' | 'eyeOff' | 'zoomIn' | 'zoomOut' | 'fit' | 'marker' | 'grid' | 'list' | 'project' | 'help' | 'shape' | 'settings' | 'removeBackground' |
-  'heart' | 'comment' | 'more' | 'user'
+  'heart' | 'comment' | 'more' | 'user' | 'previousEdit' | 'nextEdit'
 
 // Every icon uses the same 24px grid, optical centre, round joins and stroke
 // weight. Filled shapes are reserved for primary actions such as play.
@@ -59,6 +59,8 @@ const paths: Record<IconName, ReactNode> = {
   comment: <path d="M20 15.2a3 3 0 0 1-3 3H9l-5 3v-6a3 3 0 0 1-1-2.2V7a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3Z"/>,
   more: <><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></>,
   user: <><circle cx="12" cy="8" r="3.5"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></>,
+  previousEdit: <><path d="M6 5v14"/><path d="m17 6-7 6 7 6z" fill="currentColor" stroke="none"/></>,
+  nextEdit: <><path d="M18 5v14"/><path d="m7 6 7 6-7 6z" fill="currentColor" stroke="none"/></>,
   settings: <g transform="translate(.3 .55) translate(12 12) scale(.94) translate(-12 -12)"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.55v-.1A1.7 1.7 0 0 0 8.45 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.05 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.25V9.55h.1A1.7 1.7 0 0 0 4.05 8a1.7 1.7 0 0 0-.34-1.88l-.06-.06L6.51 3.2l.06.06A1.7 1.7 0 0 0 8.45 3.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V1.8h4.05v.1A1.7 1.7 0 0 0 15 3.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 8c.38.55.98.9 1.65.95h.1V13h-.1a1.7 1.7 0 0 0-1.65 2Z"/></g>,
 }
 

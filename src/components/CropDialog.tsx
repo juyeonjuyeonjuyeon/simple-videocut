@@ -98,7 +98,7 @@ export default function CropDialog({ onClose }: Props) {
       const x = Math.max(0, Math.min((pointer.clientX - bounds.left) / bounds.width, 1))
       const y = Math.max(0, Math.min((pointer.clientY - bounds.top) / bounds.height, 1))
       setDraft(resizeCrop(initial, handle, x, y, sourceAspect, cropAspect))
-    })
+    }, undefined, event.pointerId)
   }
 
   const panDown = (event: React.PointerEvent) => {
@@ -112,7 +112,7 @@ export default function CropDialog({ onClose }: Props) {
     const initial = draft
     startPointerDrag((pointer) => {
       setDraft(moveCrop(initial, (pointer.clientX - startX) / bounds.width, (pointer.clientY - startY) / bounds.height))
-    })
+    }, undefined, event.pointerId)
   }
 
   const selectRatio = (ratio: number | null) => {

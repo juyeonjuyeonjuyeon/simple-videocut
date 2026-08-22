@@ -169,9 +169,9 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="modal" onClick={phase === 'running' ? undefined : onClose}>
-      <div className="modal__panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal__panel" role="dialog" aria-modal="true" aria-labelledby="export-dialog-title" aria-busy={phase === 'running' || undefined} onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
-          <h2>{t('영상 내보내기', 'Export video')}</h2>
+          <h2 id="export-dialog-title">{t('영상 내보내기', 'Export video')}</h2>
           {phase !== 'running' && <button className="iconbtn" onClick={onClose} aria-label={t('닫기', 'Close')}><Icon name="close" /></button>}
         </div>
 
@@ -216,12 +216,12 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
         {phase === 'running' && (
           <div className="progress">
             <div className={`progress__bar${progress === 0 ? ' progress__bar--indeterminate' : ''}`}><div className="progress__fill" style={{ width: `${Math.round(progress * 100)}%` }} /></div>
-            <div className="progress__status">{status}</div>
+            <div className="progress__status" role="status" aria-live="polite">{status}</div>
             <div className="modal__hint"><Icon name="screen" />{desktop ? t('컴퓨터의 네이티브 FFmpeg로 렌더링하고 있습니다. 앱을 종료하지 마세요.', 'Rendering with native FFmpeg. Do not quit the app.') : t('변환 중 화면이 꺼지지 않도록 유지합니다(지원 기기). 탭을 닫지 마세요.', 'Keeping the screen awake when supported. Do not close this tab.')}</div>
           </div>
         )}
 
-        {phase === 'error' && <div className="modal__error"><Icon name="warning" />{error}</div>}
+        {phase === 'error' && <div className="modal__error" role="alert"><Icon name="warning" />{error}</div>}
 
         {phase === 'done' && (url || nativeFile) && (
           <div className="modal__done">
