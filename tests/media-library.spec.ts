@@ -31,3 +31,20 @@ test('media library keeps one reusable source and restores it with the project',
   await expect(page.locator('.timeline__track .clip')).toHaveCount(1)
   await expect(page.locator('.timeline__lane--overlay .tlclip')).toHaveCount(1)
 })
+
+test('pasted Apple-style media is collected in the reusable media bin', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile', 'Clipboard media import is covered once on mobile')
+
+  await page.goto('/')
+  await page.evaluate(() => {
+    const transfer = new DataTransfer()
+    transfer.items.add(new File([
+      '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#d77d86"/></svg>',
+    ], '붙여넣은 사진.svg', { type: 'image/svg+xml', lastModified: 7 }))
+    window.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer }))
+  })
+
+  await page.getByRole('button', { name: '왼쪽 미디어 패널 열기·닫기' }).click()
+  await expect(page.locator('.media-asset').filter({ hasText: '붙여넣은 사진.svg' })).toHaveCount(1)
+  await expect(page.locator('.timeline__track .clip')).toHaveCount(0)
+})

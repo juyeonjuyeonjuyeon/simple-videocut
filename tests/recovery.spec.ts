@@ -3,12 +3,14 @@ import { createRequire } from 'node:module'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 
 const require = createRequire(import.meta.url)
 const ffmpeg = require('ffmpeg-static') as string
+const photo = fileURLToPath(new URL('../public/app-icon.svg', import.meta.url))
 
-test('mobile Safari restores video and M4A, then exports playable video', async ({ page }, testInfo) => {
+test('mobile Safari restores photo, video and M4A, then exports playable video', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'mobile', 'WebKit mobile recovery regression')
   test.setTimeout(210_000)
 
@@ -29,8 +31,12 @@ test('mobile Safari restores video and M4A, then exports playable video', async 
     await page.goto('/')
     await page.locator('header input[type=file]').first().setInputFiles(video)
     await page.locator('header input[type=file]').nth(2).setInputFiles(audio)
+    await page.locator('header input[type=file]').nth(3).setInputFiles(photo)
     await expect(page.getByText('mobile-source.mp4', { exact: false }).first()).toBeVisible({ timeout: 20_000 })
     await expect(page.getByText('iphone-recording.m4a', { exact: false }).first()).toBeVisible({ timeout: 20_000 })
+    await page.getByRole('button', { name: '왼쪽 미디어 패널 열기·닫기' }).click()
+    await expect(page.getByText('app-icon.svg', { exact: false }).first()).toBeVisible({ timeout: 20_000 })
+    await page.getByRole('button', { name: '미디어 패널 닫기' }).click()
     await page.getByRole('status').filter({ hasText: '저장됨' }).waitFor({ timeout: 20_000 })
 
     await page.reload()
@@ -38,6 +44,9 @@ test('mobile Safari restores video and M4A, then exports playable video', async 
     await page.getByRole('button', { name: '복원', exact: true }).click()
     await expect(page.getByText('mobile-source.mp4', { exact: false }).first()).toBeVisible({ timeout: 20_000 })
     await expect(page.getByText('iphone-recording.m4a', { exact: false }).first()).toBeVisible({ timeout: 20_000 })
+    await page.getByRole('button', { name: '왼쪽 미디어 패널 열기·닫기' }).click()
+    await expect(page.getByText('app-icon.svg', { exact: false }).first()).toBeVisible({ timeout: 20_000 })
+    await page.getByRole('button', { name: '미디어 패널 닫기' }).click()
 
     await page.getByRole('button', { name: '내보내기', exact: true }).click()
     await page.getByRole('button', { name: '480p', exact: true }).click()

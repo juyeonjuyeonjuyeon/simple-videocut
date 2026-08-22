@@ -24,10 +24,36 @@ import { useLanguage } from '../i18n'
 import { resolveMainPlacement } from '../utils/main-placement'
 import BackgroundRemovedImage from './BackgroundRemovedImage'
 import { colorFilterCss, colorFilterDomId, resolveVisualFilter, svgColorMatrixValues } from '../utils/color-filter'
+import { resolveTwoPointerGesture, type GesturePoint } from '../utils/preview-gesture'
 
 const RATIO: Record<AspectRatio, number> = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1 }
 const DRIFT = 0.35 // seconds before we hard-seek a media element back in sync
 const SNAP_PX = 8
+
+type PreviewTouchTarget = { type: 'clip' | 'overlay' | 'text'; id: string }
+type PreviewTouchBase = {
+  x: number
+  y: number
+  scale: number
+  scaleY?: number
+  angle: number
+  aspectLocked: boolean
+}
+type PreviewTouchSession = {
+  target: PreviewTouchTarget
+  pointers: Map<number, GesturePoint>
+  startPoints: GesturePoint[]
+  base?: PreviewTouchBase
+}
+
+const sameTouchTarget = (a: PreviewTouchTarget, b: PreviewTouchTarget) => a.type === b.type && a.id === b.id
+const normalizeAngle = (value: number) => {
+  let angle = value
+  while (angle > 180) angle -= 360
+  while (angle < -180) angle += 360
+  const snapped = Math.round(angle / 45) * 45
+  return Math.abs(angle - snapped) <= 3 ? snapped : angle
+}
 
 function ColorFilterDefs({ items }: { items: Array<{ id: string } & VisualFilterSettings> }) {
   const filtered = items.filter((item) => {
@@ -182,6 +208,7 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
   const [overlayControlHeight, setOverlayControlHeight] = useState(0)
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null })
   const [rotationReadout, setRotationReadout] = useState<{ type: 'clip' | 'overlay' | 'text'; id: string; angle: number } | null>(null)
+  const touchSessionRef = useRef<PreviewTouchSession | null>(null)
   const selClip = selection?.type === 'clip' ? clips.find((c) => c.id === selection.id) : null
   const selOverlayId = selection?.type === 'overlay' ? selection.id : null
   const selOverlay = selOverlayId ? overlays.find((o) => o.id === selOverlayId) : null
@@ -216,6 +243,146 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
     measure()
     return () => observer.disconnect()
   }, [selOverlayId, box.w, box.h])
+
+  const rebaseTouchSession = () => {
+    const session = touchSessionRef.current
+    if (!session) return false
+    const st = useEditor.getState()
+    let base: PreviewTouchBase
+    if (session.target.type === 'clip') {
+      const item = st.clips.find((clip) => clip.id === session.target.id)
+      if (!item || item.kind === 'color') return false
+      const scale = item.canvasScale ?? 1
+      base = {
+        x: item.canvasX ?? 0.5,
+        y: item.canvasY ?? 0.5,
+        scale,
+        scaleY: item.canvasScaleY ?? scale,
+        angle: item.canvasAngle ?? 0,
+        aspectLocked: item.canvasAspectLocked ?? true,
+      }
+    } else if (session.target.type === 'overlay') {
+      const item = st.overlays.find((overlay) => overlay.id === session.target.id)
+      if (!item || item.locked) return false
+      const position = positionAt(item, st.playhead - item.start)
+      base = {
+        x: position.x,
+        y: position.y,
+        scale: item.scale,
+        scaleY: item.scaleY ?? item.scale,
+        angle: item.angle ?? 0,
+        aspectLocked: item.aspectLocked ?? true,
+      }
+    } else {
+      const item = st.texts.find((text) => text.id === session.target.id)
+      if (!item || item.locked) return false
+      const position = positionAt(item, st.playhead - item.start)
+      base = {
+        x: position.x,
+        y: position.y,
+        scale: item.size,
+        angle: item.angle ?? 0,
+        aspectLocked: true,
+      }
+    }
+    session.startPoints = Array.from(session.pointers.values()).slice(0, 2)
+    session.base = base
+    return true
+  }
+
+  const beginPreviewTouch = (event: React.PointerEvent, target: PreviewTouchTarget) => {
+    if (event.pointerType !== 'touch') return false
+    event.preventDefault()
+    event.stopPropagation()
+    setPlaying(false)
+    select(target)
+    let session = touchSessionRef.current
+    if (!session || !sameTouchTarget(session.target, target)) {
+      session = { target, pointers: new Map(), startPoints: [] }
+      touchSessionRef.current = session
+    }
+    if (!session.pointers.has(event.pointerId) && session.pointers.size >= 2) return true
+    session.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    if (!rebaseTouchSession()) touchSessionRef.current = null
+    return true
+  }
+
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      const session = touchSessionRef.current
+      const frame = frameRef.current
+      if (!session || !frame || event.pointerType !== 'touch' || !session.pointers.has(event.pointerId) || !session.base) return
+      event.preventDefault()
+      session.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+      const current = Array.from(session.pointers.values()).slice(0, 2)
+      const start = session.startPoints
+      if (!current.length || current.length !== start.length) return
+
+      let deltaX = current[0].x - start[0].x
+      let deltaY = current[0].y - start[0].y
+      let scaleFactor = 1
+      let rotation = 0
+      if (current.length === 2) {
+        const gesture = resolveTwoPointerGesture(start[0], start[1], current[0], current[1])
+        deltaX = gesture.deltaX
+        deltaY = gesture.deltaY
+        scaleFactor = gesture.scale
+        rotation = gesture.rotation
+      }
+
+      const rect = frame.getBoundingClientRect()
+      const rawX = session.base.x + deltaX / Math.max(1, rect.width)
+      const rawY = session.base.y + deltaY / Math.max(1, rect.height)
+      const snapX = Math.abs(rawX - 0.5) * rect.width <= SNAP_PX
+      const snapY = Math.abs(rawY - 0.5) * rect.height <= SNAP_PX
+      const x = snapX ? 0.5 : rawX
+      const y = snapY ? 0.5 : rawY
+      setGuides({ x: snapX ? 0.5 : null, y: snapY ? 0.5 : null })
+      const nextAngle = normalizeAngle(session.base.angle + rotation)
+      const state = useEditor.getState()
+
+      if (session.target.type === 'clip') {
+        state.updateClip(session.target.id, {
+          canvasX: x,
+          canvasY: y,
+          canvasScale: session.base.scale * scaleFactor,
+          canvasScaleY: session.base.aspectLocked ? undefined : (session.base.scaleY ?? session.base.scale) * scaleFactor,
+          canvasAngle: nextAngle,
+        })
+      } else if (session.target.type === 'overlay') {
+        state.updateLayerPosition('overlay', session.target.id, { x, y })
+        state.updateOverlay(session.target.id, {
+          scale: session.base.scale * scaleFactor,
+          scaleY: session.base.aspectLocked ? undefined : (session.base.scaleY ?? session.base.scale) * scaleFactor,
+          angle: nextAngle,
+        })
+      } else {
+        state.updateLayerPosition('text', session.target.id, { x, y })
+        state.updateText(session.target.id, { size: session.base.scale * scaleFactor, angle: nextAngle })
+      }
+      setRotationReadout(current.length === 2 ? { ...session.target, angle: Math.round(nextAngle) } : null)
+    }
+    const finish = (event: PointerEvent) => {
+      const session = touchSessionRef.current
+      if (!session || event.pointerType !== 'touch' || !session.pointers.has(event.pointerId)) return
+      session.pointers.delete(event.pointerId)
+      if (!session.pointers.size) {
+        touchSessionRef.current = null
+        setGuides({ x: null, y: null })
+        setRotationReadout(null)
+        return
+      }
+      rebaseTouchSession()
+    }
+    window.addEventListener('pointermove', move, { passive: false })
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+    }
+  }, [])
 
   const ensureAudioGraph = () => {
     if (!audioCtx.current) {
@@ -840,7 +1007,9 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
             height: mainPlacement.height,
             transform: `translate(-50%, -50%) rotate(${mainPlacement.angle}deg)`,
           } : undefined}
-          onPointerDown={(event) => { if (activeMain && activeMain.kind !== 'color') onMainDown(event, activeMain.id) }}
+          onPointerDown={(event) => {
+            if (activeMain && activeMain.kind !== 'color' && !beginPreviewTouch(event, { type: 'clip', id: activeMain.id })) onMainDown(event, activeMain.id)
+          }}
           onDoubleClick={(event) => { event.stopPropagation(); if (activeMain && activeMain.kind !== 'color') onOpenCrop() }}
         >
           <div className="preview__main-clip">
@@ -903,7 +1072,9 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
                 visibility: 'hidden',
                 zIndex: visualPreviewZ(visualOrder, { type: 'overlay', id: o.id }),
               }}
-              onPointerDown={(e) => onOverlayDown(e, o.id)}
+              onPointerDown={(event) => {
+                if (!beginPreviewTouch(event, { type: 'overlay', id: o.id })) onOverlayDown(event, o.id)
+              }}
               onDoubleClick={(e) => { e.stopPropagation(); if (sel && !o.shape && !o.sticker) onOpenCrop() }}
             >
               <div className="preview__overlay-clip" style={{ clipPath: o.shape || o.sticker ? 'none' : maskClipPath(visualStyle.maskShape), filter: combinedFilter }}>
@@ -943,7 +1114,9 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
               transform: `translate(-50%, -50%) rotate(${selOverlay.angle || 0}deg)`,
               zIndex: PREVIEW_Z.editor,
             }}
-            onPointerDown={(event) => onOverlayDown(event, selOverlay.id)}
+            onPointerDown={(event) => {
+              if (!beginPreviewTouch(event, { type: 'overlay', id: selOverlay.id })) onOverlayDown(event, selOverlay.id)
+            }}
             onDoubleClick={(event) => { event.stopPropagation(); if (!selOverlay.shape && !selOverlay.sticker) onOpenCrop() }}
           >
             {!selOverlay.locked && (['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'] as const).map((handle) => (
@@ -966,7 +1139,9 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
               transform: `translate(-50%, -50%) rotate(${mainPlacement.angle}deg)`,
               zIndex: PREVIEW_Z.editor,
             }}
-            onPointerDown={(event) => onMainDown(event, selClip.id)}
+            onPointerDown={(event) => {
+              if (!beginPreviewTouch(event, { type: 'clip', id: selClip.id })) onMainDown(event, selClip.id)
+            }}
             onDoubleClick={(event) => { event.stopPropagation(); onOpenCrop() }}
           >
             {(['tl', 't', 'tr', 'r', 'br', 'b', 'bl', 'l'] as const).map((handle) => (
@@ -1008,7 +1183,9 @@ export default function Preview({ onOpenCrop, presentation = false }: { onOpenCr
                 opacity: (t.opacity ?? 1) * fadeLevel(playhead - t.start, t.end - t.start, t.fadeIn, t.fadeOut),
                 zIndex: visualPreviewZ(visualOrder, { type: 'text', id: t.id }),
               }}
-              onPointerDown={(e) => onTextDown(e, t.id)}
+              onPointerDown={(event) => {
+                if (!beginPreviewTouch(event, { type: 'text', id: t.id })) onTextDown(event, t.id)
+              }}
             >
               {t.text}
               {sel && !t.locked && <span className="preview__resize preview__resize--text" onPointerDown={(e) => onTextResize(e, t.id)} />}

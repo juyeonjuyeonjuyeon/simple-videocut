@@ -80,6 +80,8 @@ export default function App() {
   const overlayRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLInputElement>(null)
   const libraryRef = useRef<HTMLInputElement>(null)
+  const visualLibraryRef = useRef<HTMLInputElement>(null)
+  const audioLibraryRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
   const [showExport, setShowExport] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
@@ -419,6 +421,27 @@ export default function App() {
     if (main.length) await addFiles(main)
     if (audio.length) await addAudioFiles(audio)
   }
+
+  useEffect(() => {
+    const onPaste = async (event: ClipboardEvent) => {
+      const target = event.target
+      if (target instanceof Element && target.closest('input, textarea, [contenteditable="true"]')) return
+      const transfer = event.clipboardData
+      if (!transfer || !hasFilePayload(transfer)) return
+      event.preventDefault()
+      setDropImporting(true)
+      try {
+        const files = await filesFromDrop(transfer)
+        const supported = files.filter((file) => isVideoFile(file) || isImageFile(file) || isAudioFile(file))
+        if (supported.length) await importMediaFiles(supported)
+        else alert(t('붙여넣은 내용에서 지원하는 사진·영상·오디오 파일을 찾지 못했습니다.', 'No supported photo, video, or audio file was found in the pasted content.'))
+      } finally {
+        setDropImporting(false)
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [importMediaFiles, t])
   const onDrop = async (e: React.DragEvent) => {
     if (!hasFiles(e)) return
     e.preventDefault()
@@ -481,12 +504,18 @@ export default function App() {
           onChange={(e) => { if (e.target.files) addAudioFiles(e.target.files); e.target.value = '' }} />
         <input ref={libraryRef} type="file" accept={MEDIA_ACCEPT} multiple hidden
           onChange={(e) => { if (e.target.files) void importMediaFiles(e.target.files); e.target.value = '' }} />
+        <input ref={visualLibraryRef} type="file" accept={VISUAL_ACCEPT} multiple hidden
+          onChange={(e) => { if (e.target.files) void importMediaFiles(e.target.files); e.target.value = '' }} />
+        <input ref={audioLibraryRef} type="file" accept={AUDIO_ACCEPT} multiple hidden
+          onChange={(e) => { if (e.target.files) void importMediaFiles(e.target.files); e.target.value = '' }} />
       </header>
 
       <main className={`stage${inspectorOpen ? '' : ' stage--inspector-hidden'}${mediaPanelOpen ? '' : ' stage--media-hidden'}`}>
         {mediaPanelOpen && <MediaPanel
           onClose={() => setMediaPanelOpen(false)}
           onImport={() => libraryRef.current?.click()}
+          onImportVisual={() => visualLibraryRef.current?.click()}
+          onImportAudio={() => audioLibraryRef.current?.click()}
         />}
         {compactPanels && mediaPanelOpen && <button
           type="button"

@@ -85,3 +85,35 @@ test('touch preview handles and playhead have comfortable hit targets', async ({
   await page.getByRole('button', { name: '자르기', exact: true }).tap()
   await expect(page.getByRole('dialog', { name: '자르기', exact: true })).toBeVisible()
 })
+
+test('two fingers move, scale, and rotate the selected preview item together', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === 'desktop', 'Multi-touch preview editing is covered on touch projects')
+
+  await page.goto('/')
+  await page.locator('header input[type=file]').nth(3).setInputFiles(appIcon)
+  await page.getByRole('button', { name: '왼쪽 미디어 패널 열기·닫기' }).click()
+  const asset = page.locator('.media-asset').filter({ hasText: 'app-icon.svg' })
+  await asset.click()
+  await asset.getByRole('button', { name: '레이어에 추가' }).click()
+  await page.getByRole('button', { name: '미디어 패널 닫기' }).click()
+
+  const controls = page.locator('.preview__overlay-controls')
+  await expect(controls).toBeVisible()
+  const before = await controls.boundingBox()
+  if (!before) throw new Error('선택 영역을 읽을 수 없습니다.')
+  const center = { x: before.x + before.width / 2, y: before.y + before.height / 2 }
+  const first = { x: center.x - Math.min(40, before.width / 4), y: center.y }
+  const second = { x: center.x + Math.min(40, before.width / 4), y: center.y }
+
+  await controls.dispatchEvent('pointerdown', { pointerType: 'touch', pointerId: 21, isPrimary: true, button: 0, clientX: first.x, clientY: first.y })
+  await controls.dispatchEvent('pointerdown', { pointerType: 'touch', pointerId: 22, isPrimary: false, button: 0, clientX: second.x, clientY: second.y })
+  await page.evaluate(({ first, second }) => {
+    window.dispatchEvent(new PointerEvent('pointermove', { pointerType: 'touch', pointerId: 21, isPrimary: true, button: 0, clientX: first.x - 28, clientY: first.y - 24 }))
+    window.dispatchEvent(new PointerEvent('pointermove', { pointerType: 'touch', pointerId: 22, isPrimary: false, button: 0, clientX: second.x + 28, clientY: second.y + 24 }))
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch', pointerId: 21, isPrimary: true, button: 0, clientX: first.x - 28, clientY: first.y - 24 }))
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch', pointerId: 22, isPrimary: false, button: 0, clientX: second.x + 28, clientY: second.y + 24 }))
+  }, { first, second })
+
+  await expect.poll(async () => (await controls.boundingBox())?.width ?? 0).toBeGreaterThan(before.width * 1.2)
+  await expect.poll(() => controls.evaluate((element) => element.getAttribute('style') ?? '')).not.toContain('rotate(0deg)')
+})

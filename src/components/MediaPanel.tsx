@@ -9,12 +9,14 @@ import { useLanguage } from '../i18n'
 interface Props {
   onClose: () => void
   onImport: () => void
+  onImportVisual: () => void
+  onImportAudio: () => void
 }
 
 type MediaFilter = 'all' | 'video' | 'image' | 'audio'
 type PanelTab = 'library' | 'timeline'
 
-export default function MediaPanel({ onClose, onImport }: Props) {
+export default function MediaPanel({ onClose, onImport, onImportVisual, onImportAudio }: Props) {
   const { t } = useLanguage()
   const library = useEditor((s) => s.mediaLibrary)
   const clips = useEditor((s) => s.clips)
@@ -80,7 +82,11 @@ export default function MediaPanel({ onClose, onImport }: Props) {
         <button className="iconbtn iconbtn--sm" onClick={onClose} aria-label={t('미디어 패널 닫기', 'Close media panel')}><Icon name="close" /></button>
       </div>
 
-      <button className="btn btn--primary media-panel__import" onClick={onImport}><Icon name="plus" />{t('미디어 가져오기', 'Import media')}</button>
+      <div className="media-panel__add">
+        <button className="btn btn--primary media-panel__import" onClick={onImport}><Icon name="plus" />{t('모든 미디어 가져오기', 'Import any media')}</button>
+        <button className="btn btn--sm" onClick={onImportVisual}><Icon name="image" />{t('사진·영상', 'Photos · video')}</button>
+        <button className="btn btn--sm" onClick={onImportAudio}><Icon name="music" />{t('녹음·오디오', 'Recordings · audio')}</button>
+      </div>
 
       <div className="media-panel__tabs" role="tablist" aria-label={t('미디어 보기', 'Media view')}>
         <button role="tab" aria-selected={tab === 'library'} className={tab === 'library' ? 'is-active' : ''} onClick={() => setTab('library')}>{t('보관함', 'Media bin')}</button>
